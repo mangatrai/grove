@@ -63,7 +63,7 @@ type AgentAnalysis = {
 
 type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
 type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
-type ResearchItem      = { title: string; summary: string; category: string };
+type ResearchItem      = { title: string; summary: string; category: string; grade: "verified" | "lead" };
 type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
 type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
 
@@ -173,12 +173,38 @@ async function getFamilyEventsForWeek(householdId: string, days = 14): Promise<F
   }));
 }
 
+// Mechanical dedup key (FIX #216) — a cheap backstop independent of whether the LLM honored the
+// "already flagged, do not re-flag" prompt instructions. Same alert type + affected date + first
+// 80 chars of the reason/title text is treated as the same finding.
+export function alertDedupKey(alertType: string, affectedDate: string | null, reason: string): string {
+  return `${alertType}|${affectedDate ?? ""}|${reason.slice(0, 80).trim().toLowerCase()}`;
+}
+
+// Already-surfaced "suggestion" alerts, rendered for the Domain 3 prompts (FIX #216) so query-gen
+// and synthesis both avoid resurfacing something the household has already seen.
+export function buildAlreadySuggestedText(openAlerts: AgentAlert[]): string {
+  const suggestions = openAlerts.filter(a => a.alertType === "suggestion");
+  if (suggestions.length === 0) return "Nothing suggested yet.";
+  return suggestions.map(a => `- ${a.reason.slice(0, 100)}`).join("\n");
+}
+
 async function writeAlerts(
   householdId: string,
   digestId: string,
-  conflicts: AgentAnalysis["conflicts"]
-): Promise<void> {
+  conflicts: AgentAnalysis["conflicts"],
+  existingOpenAlerts: AgentAlert[]
+): Promise<number> {
+  const seen = new Set(existingOpenAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
+  let inserted = 0;
   for (const c of conflicts) {
+    const key = alertDedupKey(c.alertType, c.affectedDate, c.reason);
+    if (seen.has(key)) {
+      log.debug("family-agent: skipping duplicate alert (mechanical dedup backstop)", {
+        alertType: c.alertType, affectedDate: c.affectedDate, reasonPrefix: c.reason.slice(0, 80),
+      });
+      continue;
+    }
+    seen.add(key);
     const hasCalPayload = c.calendarEventPayload != null;
     await qExec(
       `INSERT INTO family_agent_alerts
@@ -194,7 +220,9 @@ async function writeAlerts(
       hasCalPayload ? "create_gcal_event" : null,
       hasCalPayload ? c.calendarEventPayload : null
     );
+    inserted++;
   }
+  return inserted;
 }
 
 async function writeDigestLog(
@@ -301,6 +329,14 @@ async function fetchCalendarEvents(
 // calendar-role exclusion are always correct, regardless of model behavior.
 // ---------------------------------------------------------------------------
 
+// FIX #210: two Tavily start_date windows shared by Domains 3 & 4. "new" (news-like: this
+// weekend's events, newly announced things) keeps a narrow recent-publish window; "seasonal"
+// (registrations, enrollment windows, schedules — including deadline-sweep queries, which are
+// inherently this class) uses a much wider window since those pages are typically published
+// weeks-to-months before the run that needs them.
+const NEW_WINDOW_DAYS = 7;
+const SEASONAL_WINDOW_DAYS = 180;
+
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -317,6 +353,16 @@ function addDaysIso(iso: string, n: number): string {
 
 function weekdayIndexOf(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/**
+ * FIX #210: Tavily `start_date` for a query's freshness class — "new" (news-like: this weekend's
+ * events, newly announced things) gets a narrow recent-publish window; "seasonal" (registrations,
+ * enrollment windows, schedules — including deadline-sweep queries) gets a much wider rolling
+ * window since those pages are typically published weeks-to-months before the run that needs them.
+ */
+export function startDateForFreshness(freshness: "new" | "seasonal", todayIso: string): string {
+  return addDaysIso(todayIso, freshness === "seasonal" ? -SEASONAL_WINDOW_DAYS : -NEW_WINDOW_DAYS);
 }
 
 function formatDateLabel(iso: string): string {
@@ -638,9 +684,12 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
     .slice(0, 8)
     .join("\n");
 
+  // FIX #216: already-surfaced suggestions, so query-gen and synthesis both avoid resurfacing them.
+  const alreadySuggestedLines = buildAlreadySuggestedText(ctx.openAlerts);
+
   const { content: queryJson } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return only a JSON array of query strings." },
+      { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return valid JSON only." },
       { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
 
 Household members:
@@ -657,38 +706,51 @@ Think as a PA who has worked with this family for a year: What would you proacti
 Calendar activity locations (for local context):
 ${activityLocations || "None noted."}
 
-Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests.
+Already suggested in a prior run (FIX #216 — do NOT search for or resurface these; find something new instead):
+${alreadySuggestedLines}
 
-Return ONLY a JSON array: ["query 1", "query 2", ...]` },
+HARD RULE (FIX #210, not a suggestion — a query violating this is invalid, rewrite it before including):
+• Every query about a specific child's activity or age-typical opportunity MUST embed that child's age or grade band from the member profile above (e.g. "swim lessons for 6 year olds", "camps for 1st graders"). Never generate an age-agnostic query for a child-specific topic.
+• Every query MUST be anchored to ${ctx.location} (household city/metro) — never search nationwide or generically. Embed the target year/season too (e.g. "summer 2026 swim registration ${ctx.location}").
+
+Each query also needs a freshness class (FIX #210) — pick per query, not globally:
+• "new" — news-like: this weekend's events, weather, newly announced things. Searched with a narrow recent-publish window.
+• "seasonal" — registrations, enrollment windows, schedules. These pages (district enrollment, rec-center summer schedule) are typically published weeks-to-months in advance, so they're searched with a much wider window. Use "seasonal" whenever the query is about a registration/enrollment/schedule topic.
+
+Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests. For each, give a short "intent" phrase describing what it's trying to find (e.g. "fall soccer signup for 7-year-old") — this will ground the synthesis step later.
+
+Return ONLY valid JSON: { "queries": [ { "query": "...", "intent": "short phrase", "freshness": "new" | "seasonal" } ] }` },
     ],
-    { model: strongModel(), maxTokens: 250 }
+    { model: strongModel(), maxTokens: 500 }
   );
 
-  let queries: string[] = [];
+  type QueryPlan = { query: string; intent: string; freshness: "new" | "seasonal" };
+  let queries: QueryPlan[] = [];
   try {
-    queries = parseJsonResponse<string[]>(queryJson);
+    const parsedQueries = parseJsonResponse<{ queries: QueryPlan[] }>(queryJson);
+    queries = parsedQueries.queries;
     log.debug("family-agent: Domain 3 LLM query gen response", { raw: queryJson.slice(0, 500), queries });
   } catch {
     log.warn("family-agent: proactive research query parse failed");
     return { hasOutput: false, items: [] };
   }
 
-  const sevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const searchResults: Array<{ query: string; result: string }> = [];
+  const searchResults: Array<{ query: string; intent: string; result: string }> = [];
   let tavilyUnavailable = false;
-  for (const query of queries.slice(0, queryCount)) {
+  for (const q of queries.slice(0, queryCount)) {
+    const startDate = startDateForFreshness(q.freshness, ctx.todayIso);
     try {
-      log.debug("family-agent: Domain 3 Tavily query", { query, startDate: sevenDaysAgo });
-      const result = await tavilySearch(query, { startDate: sevenDaysAgo });
+      log.debug("family-agent: Domain 3 Tavily query", { query: q.query, intent: q.intent, freshness: q.freshness, startDate });
+      const result = await tavilySearch(q.query, { startDate });
       const resultStr = typeof result === "string" ? result : JSON.stringify(result);
       if (resultStr.includes("TAVILY_API_KEY")) {
         log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.location });
         tavilyUnavailable = true;
         break;
       }
-      searchResults.push({ query, result: resultStr });
+      searchResults.push({ query: q.query, intent: q.intent, result: resultStr });
     } catch (err) {
-      log.warn("family-agent: tavily search failed", { query, err: String(err) });
+      log.warn("family-agent: tavily search failed", { query: q.query, err: String(err) });
     }
   }
 
@@ -706,6 +768,10 @@ ${tavilyUnavailable ? "No live web search available. Use general knowledge only.
 Generate 2-3 genuinely useful suggestions for this household right now — seasonal activities for the kids, typical reminders for this time of year, or household tips relevant to their profile and location. Be specific to the season and location.
 For activities, name REAL well-known providers in ${ctx.location || "DFW area, Texas"} only if you are confident in the name and they genuinely serve the child's age and interest. Include their website if you know it. If you are unsure of a specific business, describe the type of provider and suggest how to find one (e.g., "Search for [X] in [city] on Google").
 Do NOT invent specific dates, prices, or event names you cannot verify.
+Any child-specific suggestion MUST match that child's actual age/grade from the member profile above — never suggest an activity for the wrong age band.
+
+Already suggested in a prior run (FIX #216 — do not repeat these):
+${alreadySuggestedLines}
 
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences", "category": "activity"|"suggestion" } ] }
 If nothing useful to say, return { "items": [] }.` },
@@ -713,17 +779,21 @@ If nothing useful to say, return { "items": [] }.` },
       { model: strongModel(), maxTokens: 400 }
     );
     try {
-      const fb = parseJsonResponse<{ items: ResearchItem[] }>(fallbackJson);
-      log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: fb.items.length });
-      return { hasOutput: fb.items.length > 0, items: fb.items };
+      const fb = parseJsonResponse<{ items: Array<Omit<ResearchItem, "grade">> }>(fallbackJson);
+      // FIX #210: no live search happened here, so nothing can be "verified" — always grade as "lead".
+      const items: ResearchItem[] = fb.items.map(i => ({ ...i, grade: "lead" as const }));
+      log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: items.length });
+      return { hasOutput: items.length > 0, items };
     } catch {
       log.warn("family-agent: Domain 3 LLM fallback parse failed");
       return { hasOutput: false, items: [] };
     }
   }
 
+  // FIX #210: ground each search's role in the prompt via its intent, so synthesis doesn't have
+  // to reverse-engineer why a query was run when justifying "why relevant to THIS family".
   const searchContext = searchResults
-    .map((r, i) => `Search ${i + 1}: "${r.query}"\n${r.result}`)
+    .map((r, i) => `Search ${i + 1} (intent: ${r.intent}): "${r.query}"\n${r.result}`)
     .join("\n\n---\n");
 
   const { content: synthJson } = await getChatAdapter().complete(
@@ -737,29 +807,46 @@ ${memberProfile}
 Search results:
 ${searchContext}
 
-TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. If a result mentions a registration window or deadline, include it only if it is still open or upcoming.
+TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. If a result mentions a registration window or deadline, include it only if it is still open or upcoming. If a result clearly refers to ${Number(ctx.todayIso.slice(0, 4)) - 1} or an earlier year (a stale prior-year page Tavily still returned), discard it — reason "date".
 
-Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary MUST include everything available from the search results:
+Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary should include everything available from the search results:
 • Full official business/program name (not a generic category like "swim school")
 • Website URL — link directly to registration page if possible
 • Approximate cost or price range
 • How to register — specific steps or the registration URL
-• Why relevant to THIS family (reference the specific child's age, name, or activity interest)
+• Why relevant to THIS family (reference the specific child's age, name, or activity interest — ground this in the search's "intent" tag above, don't reverse-engineer it)
 
 BAD: "Balance Dance Studios has summer camps for ages 3-5."
 GOOD: "Balance Dance Studios (balancedancestudios.com) — summer mini-camps for ages 3-5, ~$X/week; register at [URL] or call [number]. Matches Kid Two's dance interest."
 
-Skip any item where you cannot produce at least the official name plus one concrete actionable detail (URL, price, or phone number).
+GRADE (FIX #210) — every item gets one:
+• "verified" — has the official name plus at least one concrete actionable detail (URL, price, or phone number) drawn from the search results.
+• "lead" — a real, dated finding that's missing a concrete detail (e.g. "Example Rec Center's summer registration typically opens in early July — worth checking this week"). State plainly what's unknown; never invent the missing specifics. A "lead" is still useful — don't discard an item just for lacking full details, only discard for failing the gate below.
 
-Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
-If nothing specific enough found, return { "items": [] }.` },
+DISCARD GATE (FIX #210) — before an item becomes a suggestion, evaluate all of these. If ANY fails, discard the item — do not include it in "items", and do not soften the mismatch to make it fit:
+• Age/grade: if the item states an age or grade range that excludes every household child above, discard (reason: "age").
+• Geo: if the item's venue is outside ${ctx.location}'s metro area — a different city, hundreds of miles away — discard (reason: "geo"). Ask: would a parent reasonably drive here for a weekly activity or day camp?
+• Duplicate: if the item substantially matches one of the already-suggested items below, discard (reason: "duplicate").
+• Date: keep the date rules above (reason: "date" if either fails).
+Do not use the "why relevant to THIS family" field to talk yourself into keeping a borderline item — if it fails a gate, it goes in "discarded", not "items".
+
+Already suggested in a prior run (FIX #216 — do not re-suggest these):
+${alreadySuggestedLines}
+
+Respond with ONLY valid JSON:
+{ "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment", "grade": "verified"|"lead" } ],
+  "discarded": [ { "title": "≤60 chars", "reason": "age"|"geo"|"duplicate"|"date" } ] }
+If nothing specific enough found, return { "items": [], "discarded": [] }.` },
     ],
-    { model: strongModel(), maxTokens: 600 }
+    { model: strongModel(), maxTokens: 900 }
   );
 
   log.debug("family-agent: Domain 3 LLM synthesis response", { raw: synthJson.slice(0, 1000) });
   try {
-    const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
+    const parsed = parseJsonResponse<{ items: ResearchItem[]; discarded?: { title: string; reason: string }[] }>(synthJson);
+    if (parsed.discarded?.length) {
+      log.debug("family-agent: Domain 3 discarded items (relevance gate)", { discarded: parsed.discarded });
+    }
     return { hasOutput: parsed.items.length > 0, items: parsed.items };
   } catch {
     log.warn("family-agent: Domain 3 synthesis parse failed", { raw: synthJson.slice(0, 200) });
@@ -834,12 +921,15 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       log.warn("family-agent: Domain 4 query generation parse failed");
     }
 
-    const d4SevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // FIX #210: deadline/registration pages are the "seasonal" freshness class — typically
+    // published weeks-to-months ahead of the run that needs them — so use the wide window, not
+    // the narrow 7-day one (which was excluding exactly the pages this domain needs).
+    const d4SeasonalStartDate = startDateForFreshness("seasonal", ctx.todayIso);
     const results: string[] = [];
     for (const q of deadlineQueries.slice(0, 4)) {
       try {
-        log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SevenDaysAgo });
-        const r = await tavilySearch(q, { startDate: d4SevenDaysAgo });
+        log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SeasonalStartDate });
+        const r = await tavilySearch(q, { startDate: d4SeasonalStartDate });
         const rStr = typeof r === "string" ? r : JSON.stringify(r);
         if (rStr.includes("TAVILY_API_KEY")) break;
         results.push(`"${q}": ${rStr}`);
@@ -860,7 +950,7 @@ ${tavilyContext ? `Public deadlines from web:\n${tavilyContext}\n` : ""}
 ${openDeadlineAlerts ? `Already flagged (DO NOT re-flag):\n${openDeadlineAlerts}\n` : ""}
 Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤${cutoffDays} days). Surface only new items.
 
-TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
+TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed. The wider search window can surface stale prior-year pages (e.g. a ${Number(ctx.todayIso.slice(0, 4)) - 1} registration page Tavily still returns) — if a web result clearly refers to last year or earlier, ignore it entirely, do not reuse its dates.
 
 Each alert MUST include ALL THREE of these in the reason field:
 1. WHAT: the specific thing (school, program, business name, or document — not generic category)
@@ -914,7 +1004,8 @@ async function synthesizeDigest(
   // Research items stored as suggestion alerts so they appear in the UI, not just in email
   const researchSuggestions: AlertItem[] = domain.research.items.map(item => ({
     alertType: "suggestion" as const,
-    reason: `[${item.category.toUpperCase()}] ${item.title} — ${item.summary}`,
+    // FIX #210: "lead" items are clearly labeled, never presented as if verified.
+    reason: `${item.grade === "lead" ? "[LEAD] " : ""}[${item.category.toUpperCase()}] ${item.title} — ${item.summary}`,
     affectedDate: null,
     copyPasteText: item.summary,
     recipientHint: "Both",
@@ -1043,12 +1134,12 @@ export async function runFamilyAgent(
     // day grid and daily_delta's shorter cutoffs simply use a prefix of the same fetched set.
     const dbEvents = await getFamilyEventsForWeek(householdId, 30);
 
-    // For daily delta: fetch open alerts so the LLM can skip conflicts already surfaced.
-    // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
-    // delta: all open alerts (to avoid re-flagging); full runs: stale suggestions only (5+ days old)
-    const openAlerts = runType === "daily_delta"
-      ? await listAlerts(householdId, false)
-      : await listStaleSuggestions(householdId, 5);
+    // Always fetch all open alerts for dedup purposes (FIX #216) — a full run must see alerts
+    // an earlier daily_delta run created hours before, or it re-flags the same gaps/deadlines/
+    // suggestions as new rows. This list is only for dedup; the digest email body is built from
+    // domain.* outputs generated fresh this run (Domain 5), so weekly digests still restate the
+    // full week regardless of what's in openAlerts.
+    const openAlerts = await listAlerts(householdId, false);
 
     const [members, caregiverSlots, financeContext, location] = await Promise.all([
       listHouseholdMembers(householdId),
@@ -1096,9 +1187,11 @@ export async function runFamilyAgent(
       summaryText: analysis.summaryText,
     });
 
-    // Write alert records
+    // Write alert records — writeAlerts applies the mechanical dedup backstop (FIX #216) and
+    // returns the count actually inserted, which may be lower than analysis.conflicts.length.
+    let alertsInserted = 0;
     if (analysis.conflicts.length > 0) {
-      await writeAlerts(householdId, digestId, analysis.conflicts);
+      alertsInserted = await writeAlerts(householdId, digestId, analysis.conflicts, ctx.openAlerts);
     }
 
     // Send digest emails
@@ -1128,11 +1221,12 @@ export async function runFamilyAgent(
       }
     }
 
-    // Update emails_sent and recipients in the log
+    // Update emails_sent, recipients, and the post-dedup alerts_created count in the log
     await qExec(
-      `UPDATE family_digest_log SET emails_sent = ?, recipients_json = ? WHERE id = ?`,
+      `UPDATE family_digest_log SET emails_sent = ?, recipients_json = ?, alerts_created = ? WHERE id = ?`,
       emailsSent,
       recipientEmails.length > 0 ? JSON.stringify(recipientEmails) : null,
+      alertsInserted,
       digestId
     );
 
@@ -1140,12 +1234,12 @@ export async function runFamilyAgent(
     for (const p of parents) await updateLastSyncedAt(p.userId);
 
     log.info("family-agent: run complete", {
-      householdId, runType, alertsCreated: analysis.conflicts.length, emailsSent,
+      householdId, runType, alertsCreated: alertsInserted, emailsSent,
     });
 
     return {
       status: "sent",
-      alertsCreated: analysis.conflicts.length,
+      alertsCreated: alertsInserted,
       emailsSent,
     };
   } catch (err) {
@@ -1220,20 +1314,6 @@ export async function listAlerts(householdId: string, includeResolved = false): 
         `SELECT * FROM family_agent_alerts WHERE household_id = ? AND is_resolved = FALSE ORDER BY detected_at DESC`,
         householdId
       );
-  return rows.map(rowToAlert);
-}
-
-export async function listStaleSuggestions(householdId: string, olderThanDays: number): Promise<AgentAlert[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - olderThanDays);
-  const rows = await qAll<AlertRow>(
-    `SELECT * FROM family_agent_alerts
-     WHERE household_id = ? AND alert_type = 'suggestion' AND is_resolved = FALSE
-       AND detected_at < ?
-     ORDER BY detected_at ASC`,
-    householdId,
-    cutoff.toISOString()
-  );
   return rows.map(rowToAlert);
 }
 

@@ -14,8 +14,12 @@ export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): 
     const body: Record<string, unknown> = {
       api_key: env.TAVILY_API_KEY,
       query: query.trim(),
-      search_depth: "basic",
-      max_results: 3,
+      // FIX #210: advanced depth + more results + an LLM-synthesized answer line, so Domain 3/4
+      // synthesis has enough material to meet its own "name + URL + price + registration steps"
+      // bar instead of reporting "nothing specific enough found" most weeks.
+      search_depth: "advanced",
+      max_results: 5,
+      include_answer: true,
     };
     if (opts.startDate) body.start_date = opts.startDate;
     const res = await fetch("https://api.tavily.com/search", {
@@ -25,11 +29,11 @@ export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): 
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return `Tavily returned HTTP ${res.status}.`;
-    const data = (await res.json()) as { results?: TavilyResult[] };
+    const data = (await res.json()) as { results?: TavilyResult[]; answer?: string };
     const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.5);
-    return results.length === 0
-      ? "No results found."
-      : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 250)}`).join("\n\n");
+    if (results.length === 0) return "No results found.";
+    const answerLine = data.answer ? `Summary: ${data.answer}\n\n` : "";
+    return answerLine + results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 900)}`).join("\n\n");
   } catch (err) {
     return `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
   }

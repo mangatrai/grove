@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDayGrid, type CalendarEvent, type FamilyContext } from "../src/modules/family/family-agent.service.js";
+import {
+  alertDedupKey,
+  buildAlreadySuggestedText,
+  buildDayGrid,
+  startDateForFreshness,
+  type AgentAlert,
+  type CalendarEvent,
+  type FamilyContext,
+} from "../src/modules/family/family-agent.service.js";
 import { heuristicCalendarRole } from "../src/modules/gcal/gcal.service.js";
 import type { FamilyEvent, HelpAvailabilitySlot } from "../src/modules/family/family.types.js";
 
@@ -73,6 +81,17 @@ function caregiverSlot(overrides: Partial<HelpAvailabilitySlot> = {}): HelpAvail
     notes: null,
     isActive: true,
     createdAt: "2026-06-01T00:00:00Z",
+    ...overrides
+  };
+}
+
+function alert(overrides: Partial<AgentAlert> = {}): AgentAlert {
+  return {
+    id: "alert-1", householdId: "hh-1", detectedAt: "2026-06-01T00:00:00Z",
+    alertType: "suggestion", reason: "Example Camp — ages 6-8, register at example.com by July 15",
+    affectedDate: null, copyPasteText: null, recipientHint: null,
+    isResolved: false, resolvedAt: null, sourceDigestId: null,
+    actionType: null, actionPayload: null,
     ...overrides
   };
 }
@@ -180,5 +199,87 @@ describe("heuristicCalendarRole (FIX #212 calendar provenance)", () => {
   it("defaults to work for anything else", () => {
     expect(heuristicCalendarRole("Personal")).toBe("work");
     expect(heuristicCalendarRole("Family Shared")).toBe("work");
+  });
+});
+
+describe("alertDedupKey (FIX #216 mechanical dedup backstop)", () => {
+  it("produces the same key for identical alertType/affectedDate/reason-prefix", () => {
+    const a = alertDedupKey("coverage_gap", "2026-07-10", "No caregiver coverage on Friday afternoon while both parents are in meetings");
+    const b = alertDedupKey("coverage_gap", "2026-07-10", "No caregiver coverage on Friday afternoon while both parents are in meetings");
+    expect(a).toBe(b);
+  });
+
+  it("ignores differences beyond the first 80 chars of reason", () => {
+    const a = alertDedupKey("suggestion", null, "Example Summer Camp (examplecamp.com) — ages 6-8, $200/week, register at examplecamp.com/register by July 15");
+    const b = alertDedupKey("suggestion", null, "Example Summer Camp (examplecamp.com) — ages 6-8, $200/week, register at examplecamp.com/register by August 1 instead");
+    expect(a).toBe(b);
+  });
+
+  it("is case-insensitive and trims whitespace", () => {
+    const a = alertDedupKey("deadline", "2026-08-01", "  School Enrollment Deadline  ");
+    const b = alertDedupKey("deadline", "2026-08-01", "school enrollment deadline");
+    expect(a).toBe(b);
+  });
+
+  it("differs when alertType or affectedDate differs", () => {
+    const base = alertDedupKey("coverage_gap", "2026-07-10", "Same reason text");
+    expect(alertDedupKey("deadline", "2026-07-10", "Same reason text")).not.toBe(base);
+    expect(alertDedupKey("coverage_gap", "2026-07-11", "Same reason text")).not.toBe(base);
+    expect(alertDedupKey("coverage_gap", null, "Same reason text")).not.toBe(base);
+  });
+
+  it("differs when reason content differs within the first 80 chars", () => {
+    const a = alertDedupKey("suggestion", null, "Example Camp A — ages 6-8, register by July 15");
+    const b = alertDedupKey("suggestion", null, "Example Camp B — ages 9-12, register by July 15");
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("buildAlreadySuggestedText (FIX #216 Domain 3 dedup wiring)", () => {
+  it("returns a placeholder when there are no open suggestion alerts", () => {
+    expect(buildAlreadySuggestedText([])).toBe("Nothing suggested yet.");
+  });
+
+  it("excludes non-suggestion alert types (coverage_gap, deadline)", () => {
+    const alerts = [
+      alert({ alertType: "coverage_gap", reason: "Friday afternoon uncovered" }),
+      alert({ alertType: "deadline", reason: "School enrollment due" }),
+    ];
+    expect(buildAlreadySuggestedText(alerts)).toBe("Nothing suggested yet.");
+  });
+
+  it("includes the reason text of open suggestion alerts, one per line", () => {
+    const alerts = [
+      alert({ id: "a1", reason: "Example Camp A — ages 6-8, register at example.com by July 15" }),
+      alert({ id: "a2", reason: "Example Museum family day — free admission Saturdays" }),
+    ];
+    const text = buildAlreadySuggestedText(alerts);
+    expect(text).toContain("Example Camp A");
+    expect(text).toContain("Example Museum family day");
+    expect(text.split("\n")).toHaveLength(2);
+  });
+
+  it("does not filter on isResolved itself — that's listAlerts(householdId, false)'s job", () => {
+    const alerts = [alert({ isResolved: true, reason: "Already resolved suggestion" })];
+    expect(buildAlreadySuggestedText(alerts)).toContain("Already resolved suggestion");
+  });
+});
+
+describe("startDateForFreshness (FIX #210 per-class Tavily windows)", () => {
+  it("uses a narrow ~7-day window for the 'new' class", () => {
+    const startDate = startDateForFreshness("new", "2026-07-15");
+    expect(startDate).toBe("2026-07-08");
+  });
+
+  it("uses a wide ~180-day window for the 'seasonal' class", () => {
+    const startDate = startDateForFreshness("seasonal", "2026-07-15");
+    expect(startDate).toBe("2026-01-16");
+  });
+
+  it("produces two distinct windows for the same today", () => {
+    const newStart = startDateForFreshness("new", "2026-07-15");
+    const seasonalStart = startDateForFreshness("seasonal", "2026-07-15");
+    expect(newStart).not.toBe(seasonalStart);
+    expect(new Date(seasonalStart).getTime()).toBeLessThan(new Date(newStart).getTime());
   });
 });

@@ -1054,6 +1054,10 @@ Each parent connects their personal Google account once via the Grove app (Famil
 
 Each connected calendar can be tagged with a **role**: `work` | `school` | `activities` | `other`, saved via `PATCH /gcal/calendar-roles` (per-user, stored as JSON in `oauth_integrations.calendar_roles`, migration `0079_gcal_calendar_roles.sql`). The Family Planner agent (Domains 1/2) treats `school`-role events as informational only — e.g. a school closure never counts as a parent being unavailable, unlike a `work`-role event at the same time. Without an explicit role saved, the agent falls back to a name heuristic (`heuristicCalendarRole` in `gcal.service.ts`): a calendar named "…ISD"/"…School"/"…Class" defaults to `school`; "…Camp"/"…Sport"/"…Activit…" defaults to `activities`; everything else defaults to `work`. Set roles explicitly in Settings → Family → Google Calendar rather than relying on the heuristic for anything ambiguous.
 
+### 10.2b Tavily Search Quality — Credit Usage (FIX #210)
+
+Domain 3 (proactive research) and Domain 4 (deadline sweep) both call `tavilySearch()` (`backend/src/llm/tools/tavily.ts`) with `search_depth: "advanced"` (was `"basic"`) to get richer snippets and an LLM-synthesized answer line. **Advanced depth costs 2 Tavily API credits per query, vs. 1 for basic** — at ~7 queries per agent run, this roughly doubles Tavily credit usage. On the free tier (1,000 credits/month, see `TAVILY_API_KEY` in §5), this is still negligible at the household's run cadence (daily delta + weekly full digest). If `TAVILY_API_KEY` is unset, Domain 3 falls back to LLM-only suggestions (graded `"lead"`, never `"verified"`, since nothing was actually searched); Domain 4 degrades similarly.
+
 ### 10.3 Work Calendar Mirroring — iOS Shortcut Setup
 
 Both parents have corporate iPhones with the Exchange/O365 work calendar syncing natively. Work events are mirrored to a personal Google Calendar via an iOS Shortcut that runs twice daily.
