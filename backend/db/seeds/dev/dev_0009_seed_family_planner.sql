@@ -217,3 +217,145 @@ VALUES
     TRUE, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
   )
 ON CONFLICT (id) DO NOTHING;
+
+-- ─── Family agent alerts (PA1 dev-seed gap #3) ──────────────────────────────
+-- Without any prior alert rows, buildAlreadySuggestedText()/dedup and buildCalibrationBlock()
+-- (FIX #216 / FIX #208) are never exercised on a fresh dev seed — the "already suggested" and
+-- "deprioritize/avoid" prompt blocks are always empty. Seed:
+--   f1..01-02: open (unresolved) 'suggestion' alerts — one plain, one email-sourced (source_quote +
+--              create_gcal_event action_payload) — for buildAlreadySuggestedText + dedup.
+--   f1..03-05: resolved 'not_relevant' x3 tagged [KARATE] — crosses NOT_RELEVANT_AVOID_THRESHOLD
+--              (=3) so buildCalibrationBlock() emits a "Deprioritize/avoid" line.
+--   f1..06-07: resolved 'useful' x2 tagged [MUSIC] — exercises the "Keep prioritizing" branch.
+INSERT INTO family_agent_alerts
+  (id, household_id, alert_type, reason, affected_date, copy_paste_text, recipient_hint,
+   is_resolved, resolved_at, resolution_kind, source_quote, action_type, action_payload, detected_at)
+VALUES
+  (
+    'f1000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[SWIM] Register Kid One for the winter swim session before it fills.',
+    (CURRENT_DATE + INTERVAL '12 days')::text,
+    'Reminder: winter swim session registration opens soon — register Kid One before spots fill.',
+    'Self',
+    FALSE, NULL, NULL, NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '2 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[SCHOOL] Order Northfield Academy 1st grade school supply list before orientation week.',
+    (CURRENT_DATE + INTERVAL '9 days')::text,
+    'Order the Northfield Academy 1st grade supply list before orientation week.',
+    'Self',
+    FALSE, NULL, NULL,
+    'Please have all school supplies ordered from the linked list by orientation on the 14th.',
+    'create_gcal_event',
+    jsonb_build_object(
+      'title', 'Order Northfield Academy school supplies',
+      'date', (CURRENT_DATE + INTERVAL '9 days')::text,
+      'description', 'Order the 1st grade supply list before orientation week.'
+    ),
+    CURRENT_TIMESTAMP - INTERVAL '1 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000003',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[KARATE] Enroll Kid One in the spring karate session before early registration closes.',
+    (CURRENT_DATE - INTERVAL '40 days')::text,
+    'Enroll Kid One in the spring karate session before early registration closes.',
+    'Self',
+    TRUE, CURRENT_TIMESTAMP - INTERVAL '35 days', 'not_relevant', NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '42 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000004',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[KARATE] Renew Kid One karate belt-test registration before the cutoff.',
+    (CURRENT_DATE - INTERVAL '30 days')::text,
+    'Renew Kid One karate belt-test registration before the cutoff.',
+    'Self',
+    TRUE, CURRENT_TIMESTAMP - INTERVAL '25 days', 'not_relevant', NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '32 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000005',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[KARATE] Sign Kid One up for the karate summer camp before it fills.',
+    (CURRENT_DATE - INTERVAL '20 days')::text,
+    'Sign Kid One up for the karate summer camp before it fills.',
+    'Self',
+    TRUE, CURRENT_TIMESTAMP - INTERVAL '15 days', 'not_relevant', NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '22 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000006',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[MUSIC] Register Kid One for the spring piano recital before the sign-up deadline.',
+    (CURRENT_DATE - INTERVAL '18 days')::text,
+    'Register Kid One for the spring piano recital before the sign-up deadline.',
+    'Self',
+    TRUE, CURRENT_TIMESTAMP - INTERVAL '20 days', 'useful', NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '22 days'
+  ),
+  (
+    'f1000000-0000-0000-0000-000000000007',
+    '10000000-0000-0000-0000-000000000001',
+    'suggestion',
+    '[MUSIC] Confirm Kid One piano lesson schedule change before the new term starts.',
+    (CURRENT_DATE - INTERVAL '8 days')::text,
+    'Confirm Kid One piano lesson schedule change before the new term starts.',
+    'Self',
+    TRUE, CURRENT_TIMESTAMP - INTERVAL '10 days', 'useful', NULL, NULL, NULL,
+    CURRENT_TIMESTAMP - INTERVAL '12 days'
+  )
+ON CONFLICT (id) DO NOTHING;
+
+-- ─── Household inbox email ingestion log (PA1 dev-seed gap #4, FIX #215) ────
+-- Empty on a fresh dev seed, so the inbox → alert flow (email-ingest.service.ts) could only be
+-- observed by sending a real email through IMAP. Seed one 'processed' row (matches the
+-- email-sourced alert f1..02 above) and one 'ignored' row (promotional, no actionable item) so
+-- both branches of markLogStatus() are visible without a live mailbox.
+INSERT INTO email_ingest_log
+  (id, household_id, message_id, from_addr, subject, received_at, excerpt, items_json, status, created_at)
+VALUES
+  (
+    'f2000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'dev-seed-msg-001@example.com',
+    'Northfield Academy Front Office <frontoffice@example-school.org>',
+    '1st Grade Supply List — Order by Orientation',
+    CURRENT_TIMESTAMP - INTERVAL '1 days',
+    'Please have all school supplies ordered from the linked list by orientation on the 14th.',
+    jsonb_build_array(
+      jsonb_build_object(
+        'kind', 'deadline',
+        'title', 'Order Northfield Academy school supplies',
+        'date', (CURRENT_DATE + INTERVAL '9 days')::text,
+        'who', 'Kid One',
+        'actionRequired', 'Order the 1st grade supply list before orientation week.',
+        'sourceQuote', 'Please have all school supplies ordered from the linked list by orientation on the 14th.'
+      )
+    ),
+    'processed',
+    CURRENT_TIMESTAMP - INTERVAL '1 days'
+  ),
+  (
+    'f2000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000001',
+    'dev-seed-msg-002@example.com',
+    'Frisco Aquatics Center <newsletter@example-aquatics.org>',
+    '20% Off Swim Gear This Weekend Only!',
+    CURRENT_TIMESTAMP - INTERVAL '3 days',
+    'Stock up on goggles, caps, and swim bags — 20% off this weekend only, no code needed.',
+    '[]'::jsonb,
+    'ignored',
+    CURRENT_TIMESTAMP - INTERVAL '3 days'
+  )
+ON CONFLICT (household_id, message_id) DO NOTHING;

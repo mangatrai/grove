@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DB — Dev seeds: family_agent_alerts + email_ingest_log rows for PA-agent manual QA (2026-07-08)
+
+**What changed:** `dev_0009_seed_family_planner.sql` seeded zero rows in `family_agent_alerts` and `email_ingest_log`, so `buildAlreadySuggestedText()` (FIX #216 dedup), `buildCalibrationBlock()` (FIX #208 feedback loop), and the FIX #215 email-derived alert rendering (`sourceQuote` + `create_gcal_event` action) could only be observed on a fresh `db:reset:dev` by manually running the agent or sending a real email — added seed data so all three are visible immediately after reset.
+
+- **7 `family_agent_alerts` rows:** one open plain `suggestion` (`[SWIM]`) and one open email-sourced `suggestion` (`[SCHOOL]`, `source_quote` + `action_type = 'create_gcal_event'` + `action_payload` populated) for `buildAlreadySuggestedText()`/dedup; three resolved `not_relevant` rows tagged `[KARATE]` (crosses `NOT_RELEVANT_AVOID_THRESHOLD = 3`, exercises the calibration "Deprioritize/avoid" branch); two resolved `useful` rows tagged `[MUSIC]` (exercises the "Keep prioritizing" branch).
+- **2 `email_ingest_log` rows:** one `processed` (matches the `[SCHOOL]` alert above, `items_json` populated) and one `ignored` (promotional swim-gear email, `items_json = []`) — covers both branches of `markLogStatus()`.
+- Two gaps identified in the same review — parent-calendar OAuth rows and overlapping-conflict scenarios (Domain 1/2 coverage-gap detection) — were explicitly **not** seeded: Google OAuth tokens can't be faked with static seed data (real `refresh_token`/consent flow), and this codebase does not persist calendar invites, so there's no local row to seed a conflict from.
+
+**Why:** raised during Sequence A wrap-up review — reviewer had no way to visually confirm dedup/calibration/email-alert rendering without running the live agent or a real mailbox.
+
+**Tests:** `npm run db:reset:dev` applies cleanly; verified via direct query that all 7 alert rows and 2 log rows land with correct `resolution_kind`/`status` values. Full backend suite still 640/640 (one `gdrive-backup.test.ts` failure under full-suite load reproduced and confirmed to pass in isolation — pre-existing flake, unrelated to this change).
+
+**Files:** `backend/db/seeds/dev/dev_0009_seed_family_planner.sql`
+
+**GitHub:** refs [#208](https://github.com/mangatrai/grove/issues/208), [#215](https://github.com/mangatrai/grove/issues/215), [#216](https://github.com/mangatrai/grove/issues/216).
+
 ## FEAT — Family agent: household inbox email ingestion — school/activity emails become review-first suggestion alerts (2026-07-07)
 
 **What changed:** A daily background poll (6:12am `env.TZ`, `family-agent.scheduler.ts`) reads a dedicated household Gmail account over IMAP, extracts actionable items (deadlines/events/info) from school and activity emails via a tool-less LLM call, and writes `alert_type = 'suggestion'` rows — reusing the existing `/alerts/:alertId/approve` and `/alerts/:id/resolve` flow for review/approval, unmodified.
