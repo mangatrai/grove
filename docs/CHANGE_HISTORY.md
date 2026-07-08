@@ -14,6 +14,14 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DOC — BACKLOG.md closed out as of V5; active tracking moves to GitHub Issues/Milestones (2026-07-08)
+
+**What changed:** Added a notice to the top of `docs/BACKLOG.md` stating the file stops at V5 and is no longer updated per-change, with links to the V5/V6/V7 GitHub milestones and the open-issues list. No historical content removed.
+
+**Why:** BACKLOG.md's newest section was still "Active Items — V5" (last touched 2026-05-25) — it never gained V6 or V7 sections, so the entire Family Planner/PA Agent epic and the staff payroll epic were absent from it. GitHub milestones have been the actual live tracker since V5 shipped; this makes that explicit instead of leaving a doc that silently drifts further out of sync.
+
+**Files:** `docs/BACKLOG.md`.
+
 ## FIX — family-agent.service.ts: close remaining test-coverage gaps, closes Sequence A (2026-07-08)
 
 **What changed:** #214 originally described `family-agent.service.ts` as having zero test coverage. That premise was stale — `backend/tests/family-agent.test.ts` (788 lines) had already been built up incrementally across every Sequence A commit (FIX #209/#212, #210/#216, #211, #213, #217, #208), covering `buildDayGrid`, `heuristicCalendarRole`, `alertDedupKey`, `buildAlreadySuggestedText`, `startDateForFreshness`, `parseAlertItems`, `escapeHtml`, deterministic Parent A/B ordering, model tiering across all 5 domains, quick-capture context injection, and the alert feedback/calibration loop. Re-checked against #214's own acceptance checklist and found 4 real remaining gaps, closed here:

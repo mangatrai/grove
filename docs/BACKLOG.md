@@ -2,6 +2,14 @@
 
 Board-style reference for shipped, active, and deferred items. Status: Shipped | Active | Deferred | Dropped. Priority: P1 (critical/quick) | P2 (high value) | P3 (nice to have).
 
+> **Closed out as of V5 (2026-07-08).** This file stops here — it covers V3/V4/V5 history for reference only and is no longer updated per-change. All active work, sprints, and new backlog items are tracked in **GitHub Issues/Milestones**:
+> - [V5 milestone](https://github.com/mangatrai/grove/milestone/1) — 3 open / 11 closed
+> - [V6 milestone](https://github.com/mangatrai/grove/milestone/2) — Family Planner / PA Agent — 18 open / 13 closed
+> - [V7 milestone](https://github.com/mangatrai/grove/milestone/3) — Staff payroll, hyperscaler migration — 14 open / 7 closed
+> - [All open issues](https://github.com/mangatrai/grove/issues)
+>
+> For design rationale and specs behind active work, see `docs/PRD_AND_CRS.md`.
+
 ---
 
 ## Shipped — V4 (2026-05-15 to 2026-05-25)
