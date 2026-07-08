@@ -24,10 +24,13 @@ type RunToolLoopFn = (
   options: { model: string; maxTokens: number; maxIterations?: number }
 ) => Promise<{ finalResponse: string }>;
 
-const { mockComplete, mockTavilySearch, mockRunToolLoop } = vi.hoisted(() => ({
+const { mockComplete, mockTavilySearch, mockRunToolLoop, mockIsLlmConfigured } = vi.hoisted(() => ({
   mockComplete: vi.fn<CompleteFn>(),
   mockTavilySearch: vi.fn<TavilySearchFn>(),
   mockRunToolLoop: vi.fn<RunToolLoopFn>(),
+  // Defaults to true so every existing test (which never touches this gate) is unaffected;
+  // only the runFamilyAgent skip-path tests override it.
+  mockIsLlmConfigured: vi.fn<() => boolean>(() => true),
 }));
 
 vi.mock("../src/llm/index.js", async (importOriginal) => {
@@ -38,6 +41,7 @@ vi.mock("../src/llm/index.js", async (importOriginal) => {
     strongModel: () => "TEST_STRONG_MODEL",
     getChatAdapter: () => ({ complete: mockComplete }),
     getToolUseAdapter: () => ({ runToolLoop: mockRunToolLoop }),
+    isLlmConfigured: mockIsLlmConfigured,
   };
 });
 
@@ -56,8 +60,10 @@ import {
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
+  computeTodayIso,
   processCaptureNote,
   resolveAlert,
+  runFamilyAgent,
   runProactiveResearch,
   startDateForFreshness,
   sweepDeadlines,
@@ -483,6 +489,29 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
     expect(result.nannyCoord.items).toHaveLength(1);
   });
 
+  it("analyzeCoverageAndCoordination: prompt includes today and member name (D1 context wiring)", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({ gaps: [], coordinationNeeds: [] }),
+      usage: {},
+    });
+
+    const ctx = baseCtx({
+      today: "Monday, June 15, 2026",
+      todayIso: "2026-06-15",
+      members: [
+        { profileId: "m1", fullName: "Kid One", relationship: "child", age: 7, linkedUserId: null, interestsJson: [], notes: null },
+      ],
+    });
+
+    await analyzeCoverageAndCoordination(ctx, "manual");
+
+    const [messages] = mockComplete.mock.calls[0];
+    const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user");
+    // D1's prompt does not include ctx.location (unlike D3/D4/quick-capture) — only today + member profile.
+    expect(userMessage?.content).toContain("Today: Monday, June 15, 2026");
+    expect(userMessage?.content).toContain("Kid One");
+  });
+
   it("analyzeCoverageAndCoordination: skips the LLM call entirely with no children and no caregiver", async () => {
     const result = await analyzeCoverageAndCoordination(baseCtx(), "manual");
 
@@ -564,6 +593,151 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
     expect(mockComplete).toHaveBeenCalledTimes(1);
     expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
     expect(result.hasOutput).toBe(true);
+  });
+});
+
+// #214: parseJsonResponse() (L537) strips code fences before JSON.parse and is used at every LLM
+// call site. Driven indirectly through sweepDeadlines's triage call (single mockComplete call on
+// a daily_delta run) since parseJsonResponse itself is not exported.
+describe("parseJsonResponse robustness (via sweepDeadlines triage, #214)", () => {
+  beforeEach(() => {
+    mockComplete.mockReset();
+    mockTavilySearch.mockReset();
+  });
+
+  const childCtx = () => baseCtx({
+    members: [
+      { profileId: "m1", fullName: "Kid One", relationship: "child", age: 7, linkedUserId: null, interestsJson: [], notes: null },
+    ],
+  });
+
+  it("parses a plain (unfenced) JSON response", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({ alerts: [{ alertType: "deadline_approaching", reason: "r", affectedDate: "2026-06-16", copyPasteText: "cp", recipientHint: "Self" }] }),
+      usage: {},
+    });
+
+    const result = await sweepDeadlines(childCtx(), "daily_delta");
+
+    expect(result.hasOutput).toBe(true);
+    expect(result.alerts).toHaveLength(1);
+  });
+
+  it("parses a ```json fenced response", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: "```json\n" + JSON.stringify({ alerts: [] }) + "\n```",
+      usage: {},
+    });
+
+    const result = await sweepDeadlines(childCtx(), "daily_delta");
+
+    expect(result.hasOutput).toBe(false);
+    expect(result.alerts).toEqual([]);
+  });
+
+  it("degrades gracefully (no throw) on prose-wrapped, non-JSON content", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: "Here's the result:\n```json\n{ \"alerts\": [] }\n```\nLet me know if you need anything else.",
+      usage: {},
+    });
+
+    // The leading/trailing prose means JSON.parse still fails after fence-stripping — this must
+    // not throw out of sweepDeadlines, it must degrade to an empty result.
+    const result = await sweepDeadlines(childCtx(), "daily_delta");
+
+    expect(result.hasOutput).toBe(false);
+    expect(result.alerts).toEqual([]);
+  });
+
+  it("degrades gracefully (no throw) on malformed JSON", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: "{ this is not valid json",
+      usage: {},
+    });
+
+    const result = await sweepDeadlines(childCtx(), "daily_delta");
+
+    expect(result.hasOutput).toBe(false);
+    expect(result.alerts).toEqual([]);
+  });
+});
+
+// #214: todayIso was previously computed inline at two call sites via
+// now.toLocaleDateString("en-CA", { timeZone }) with no injected clock — the same bug class
+// (UTC date drift) a prior review already caught once. Extracted to computeTodayIso() so it can
+// be unit-tested directly against a fixed Date instant that straddles the UTC day boundary.
+describe("computeTodayIso timezone correctness (#214)", () => {
+  it("resolves to the household-local calendar day, not the UTC day, near midnight UTC", () => {
+    // 23:30 UTC on June 15 is 18:30 on June 15 in America/Chicago (UTC-5 in June/DST) — same day
+    // in both zones, but chosen close enough to the UTC boundary to catch a naive UTC-only bug.
+    const instant = new Date("2026-06-15T23:30:00Z");
+
+    expect(computeTodayIso(instant, "America/Chicago")).toBe("2026-06-15");
+  });
+
+  it("resolves the day BEFORE the UTC date in a zone behind UTC, just after UTC midnight", () => {
+    // 00:30 UTC on June 16 is still 19:30 on June 15 in America/Chicago. A naive
+    // `new Date().toISOString().slice(0,10)` (UTC-only) would wrongly report June 16.
+    const instant = new Date("2026-06-16T00:30:00Z");
+
+    expect(computeTodayIso(instant, "America/Chicago")).toBe("2026-06-15");
+    expect(computeTodayIso(instant, "UTC")).toBe("2026-06-16");
+  });
+
+  it("resolves the day AFTER the UTC date in a zone ahead of UTC", () => {
+    // 22:30 UTC is already 07:30 the next calendar day in Asia/Kolkata (UTC+5:30).
+    const instant = new Date("2026-06-15T22:30:00Z");
+
+    expect(computeTodayIso(instant, "Asia/Kolkata")).toBe("2026-06-16");
+  });
+});
+
+// #214: runFamilyAgent()'s two early-exit skip paths — pure DB/config branching, no Google
+// Calendar API surface, so no googleapis mock is needed. The full mocked-Calendar happy-path
+// orchestration test is intentionally NOT covered here — see plan/CHANGE_HISTORY for #214.
+describe("runFamilyAgent skip paths (#214)", () => {
+  const SKIP_LLM_HOUSEHOLD_ID = "99990000-test-0000-0000-skipllmhh001";
+  const SKIP_NOPARENT_HOUSEHOLD_ID = "99990000-test-0000-0000-skipnopar01";
+
+  beforeAll(async () => {
+    // writeDigestLog's household_id has a NOT NULL FK to household(id) ON DELETE CASCADE — both
+    // skip paths still write a log row before returning, so a real household row is required
+    // even though neither test exercises any calendar/LLM data for it.
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, SKIP_LLM_HOUSEHOLD_ID, "FIX-214 skip-llm test household");
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, SKIP_NOPARENT_HOUSEHOLD_ID, "FIX-214 skip-no-parent test household");
+  });
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM household WHERE id IN (?, ?)`, SKIP_LLM_HOUSEHOLD_ID, SKIP_NOPARENT_HOUSEHOLD_ID);
+  });
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    mockIsLlmConfigured.mockReturnValue(true);
+  });
+
+  it("skips with status 'skipped' when the LLM is not configured", async () => {
+    mockIsLlmConfigured.mockReturnValue(false);
+
+    const result = await runFamilyAgent(SKIP_LLM_HOUSEHOLD_ID, "manual");
+
+    expect(result.status).toBe("skipped");
+    expect(result.message).toBe("LLM not configured");
+    expect(result.alertsCreated).toBe(0);
+    expect(result.emailsSent).toBe(0);
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it("skips with status 'skipped' when the household has no connected parent calendars", async () => {
+    // getConnectedParents() reads oauth_integrations for this household id — a freshly-created
+    // household with no rows there naturally hits the "no connected parents" gate.
+    const result = await runFamilyAgent(SKIP_NOPARENT_HOUSEHOLD_ID, "manual");
+
+    expect(result.status).toBe("skipped");
+    expect(result.message).toBe("No connected calendars");
+    expect(result.alertsCreated).toBe(0);
+    expect(result.emailsSent).toBe(0);
+    expect(mockComplete).not.toHaveBeenCalled();
   });
 });
 

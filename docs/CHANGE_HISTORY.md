@@ -14,6 +14,23 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — family-agent.service.ts: close remaining test-coverage gaps, closes Sequence A (2026-07-08)
+
+**What changed:** #214 originally described `family-agent.service.ts` as having zero test coverage. That premise was stale — `backend/tests/family-agent.test.ts` (788 lines) had already been built up incrementally across every Sequence A commit (FIX #209/#212, #210/#216, #211, #213, #217, #208), covering `buildDayGrid`, `heuristicCalendarRole`, `alertDedupKey`, `buildAlreadySuggestedText`, `startDateForFreshness`, `parseAlertItems`, `escapeHtml`, deterministic Parent A/B ordering, model tiering across all 5 domains, quick-capture context injection, and the alert feedback/calibration loop. Re-checked against #214's own acceptance checklist and found 4 real remaining gaps, closed here:
+
+1. **`parseJsonResponse()` robustness** — never tested. Driven indirectly through `sweepDeadlines`'s triage call (single LLM call site): plain JSON, ` ```json ` fenced, prose-wrapped, and malformed content all now assert graceful degradation (`log.warn` + empty result) rather than an uncaught throw.
+2. **`todayIso` timezone correctness** — the exact bug class (UTC date drift near midnight) a prior Phase 1 review already caught once, but the computation itself was never unit-tested and was duplicated inline at two call sites (`runFamilyAgent`, `runFamilyAgentForAllHouseholds`) with no injected clock. Extracted to a new exported pure function `computeTodayIso(now: Date, tz: string): string` and replaced both inline computations with it; added 3 unit tests against fixed `Date` instants straddling the UTC day boundary in `America/Chicago` and `Asia/Kolkata`.
+3. **Domain 1 prompt content** — D3/D4/D5 already had prompt-content assertions (calibration block, query context), D1 (`analyzeCoverageAndCoordination`) did not. Added one test confirming `ctx.today` and the household member profile reach the prompt. Note: D1's prompt does not include `ctx.location` at all (unlike D3/D4) — the test asserts what's actually there, not what the original issue speculated might be there.
+4. **`runFamilyAgent()` orchestration** — previously zero coverage. Added the two cheap early-exit skip paths (`isLlmConfigured() === false`, `getConnectedParents().length === 0`), both pure DB/config branching with no external API surface. **Deliberately not added:** a full mocked-`googleapis` happy-path orchestration test — building a `google.calendar(...).events.list()` mock is new test infrastructure disproportionate to #214's scope; `fetchCalendarEvents()` itself was never part of #214's checklist. Flagging as separable future work, not silently dropped.
+
+**Why:** closes out the last open item from Sequence A (#209/#212, #210/#216, #211, #213/#217, #208, #215) — all six other issues in that batch shipped 2026-07-07.
+
+**Tests:** `npm run test -w backend` — 650/650 passed (8 new tests: 4 `parseJsonResponse` cases, 3 `computeTodayIso` TZ cases, 1 D1 prompt-content case, 2 `runFamilyAgent` skip-path cases). `npm run lint -w backend` clean.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts` (extracted + exported `computeTodayIso`), `backend/tests/family-agent.test.ts`.
+
+**GitHub:** closes [#214](https://github.com/mangatrai/grove/issues/214).
+
 ## DB — Dev seeds: family_agent_alerts + email_ingest_log rows for PA-agent manual QA (2026-07-08)
 
 **What changed:** `dev_0009_seed_family_planner.sql` seeded zero rows in `family_agent_alerts` and `email_ingest_log`, so `buildAlreadySuggestedText()` (FIX #216 dedup), `buildCalibrationBlock()` (FIX #208 feedback loop), and the FIX #215 email-derived alert rendering (`sourceQuote` + `create_gcal_event` action) could only be observed on a fresh `db:reset:dev` by manually running the agent or sending a real email — added seed data so all three are visible immediately after reset.

@@ -390,6 +390,14 @@ export function startDateForFreshness(freshness: "new" | "seasonal", todayIso: s
   return addDaysIso(todayIso, freshness === "seasonal" ? -SEASONAL_WINDOW_DAYS : -NEW_WINDOW_DAYS);
 }
 
+/**
+ * Household-local ISO date (FIX #209) — never server/UTC time. A run kicked off at 11pm UTC
+ * must still resolve "today" to the household's own calendar day, not the day after.
+ */
+export function computeTodayIso(now: Date, tz: string): string {
+  return now.toLocaleDateString("en-CA", { timeZone: tz }); // en-CA => YYYY-MM-DD
+}
+
 function formatDateLabel(iso: string): string {
   const [, m, dd] = iso.split("-").map(Number);
   return `${DAY_NAMES[weekdayIndexOf(iso)]} ${MONTH_NAMES[m - 1]} ${dd}`;
@@ -1169,7 +1177,7 @@ export async function runFamilyAgent(
     // Household-local date (FIX #209) — env.TZ, never server/UTC time. A run kicked off at
     // 11pm UTC must still resolve "today" to the household's own calendar day.
     const today = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: env.TZ });
-    const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
+    const todayIso = computeTodayIso(now, env.TZ);
     const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts, calibrationBlock };
 
     // Run domains 1+2 (merged, FIX #211), 3, 4 in parallel; domain 5 synthesizes their outputs
@@ -1537,7 +1545,7 @@ export async function buildCaptureContextHeader(householdId: string): Promise<st
 
   const now = new Date();
   const todayFull = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: env.TZ });
-  const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
+  const todayIso = computeTodayIso(now, env.TZ);
 
   const lines = [`Today: ${todayFull} (${todayIso}).`];
   if (location) lines.push(`Location: ${location}.`);
