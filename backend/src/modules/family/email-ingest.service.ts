@@ -18,6 +18,10 @@ import { listHouseholdMembers } from "./family-profiles.service.js";
 // force calendar-mirroring decisions and blur the "whose account is this" semantics the rest of
 // the family-agent module (FIX #217 provenance) depends on being clean.
 //
+// Auth reuses SMTP_USER/SMTP_PASS (the same dedicated mailbox's App Password already configured
+// for outbound mail) rather than a second, IMAP-only credential pair — only FAMILY_INBOX_IMAP_HOST
+// (plus port/secure/folder) is genuinely IMAP-specific.
+//
 // Security: the extraction call below uses getChatAdapter().complete() — a tool-less completion
 // API — never getToolUseAdapter(). Email bodies are untrusted third-party content; the prompt
 // treats them strictly as data, and output is zod-validated before anything reaches the DB. No
@@ -66,7 +70,8 @@ async function fetchNewMessages(): Promise<ParsedInboxMessage[]> {
     host: env.FAMILY_INBOX_IMAP_HOST!,
     port: env.FAMILY_INBOX_IMAP_PORT,
     secure: env.FAMILY_INBOX_IMAP_SECURE,
-    auth: { user: env.FAMILY_INBOX_IMAP_USER!, pass: env.FAMILY_INBOX_IMAP_PASSWORD! },
+    // Reuses the SMTP credentials — same dedicated household Gmail account's App Password.
+    auth: { user: env.SMTP_USER!, pass: env.SMTP_PASS! },
     logger: false
   });
 

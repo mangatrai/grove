@@ -99,12 +99,13 @@ const envSchema = z.object({
    * FIX #215: household inbox email ingestion — dedicated household Gmail account, IMAP + App
    * Password. Deliberately NOT routed through the per-parent Google OAuth integration
    * (`oauth_integrations`, used for Calendar/Drive) — see ADMIN_GUIDE for rationale.
+   * Reuses `SMTP_USER`/`SMTP_PASS` for auth — the dedicated household mailbox's Gmail App
+   * Password is the same credential already configured for SMTP send, so IMAP only needs the
+   * protocol-specific bits (host/port/secure/folder actually differ from SMTP's).
    */
   FAMILY_INBOX_IMAP_HOST: z.string().optional(),
   FAMILY_INBOX_IMAP_PORT: optionalIntEnv(993, 1, 65535),
   FAMILY_INBOX_IMAP_SECURE: optionalBoolEnv(true),
-  FAMILY_INBOX_IMAP_USER: z.string().optional(),
-  FAMILY_INBOX_IMAP_PASSWORD: z.string().optional(),
   /** Gmail label mapped as an IMAP folder (defense-in-depth: only this folder is ever queried). */
   FAMILY_INBOX_IMAP_FOLDER: z.string().default("INBOX"),
   /**
@@ -207,10 +208,14 @@ export function isEmailConfigured(): boolean {
   );
 }
 
-/** FIX #215: separate from isEmailConfigured() — this gates IMAP inbox polling, not SMTP send. */
+/**
+ * FIX #215: separate from isEmailConfigured() — this gates IMAP inbox polling, not SMTP send.
+ * Reuses SMTP_USER/SMTP_PASS as the IMAP credentials (same dedicated household Gmail account's
+ * App Password works for both protocols) — only the IMAP host needs to be set independently.
+ */
 export function isEmailIngestConfigured(): boolean {
   const host = env.FAMILY_INBOX_IMAP_HOST?.trim() ?? "";
-  const user = env.FAMILY_INBOX_IMAP_USER?.trim() ?? "";
-  const pass = env.FAMILY_INBOX_IMAP_PASSWORD?.trim() ?? "";
+  const user = env.SMTP_USER?.trim() ?? "";
+  const pass = env.SMTP_PASS?.trim() ?? "";
   return host.length > 0 && user.length > 0 && pass.length > 0;
 }

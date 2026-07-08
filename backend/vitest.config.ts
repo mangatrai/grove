@@ -12,11 +12,12 @@ export default defineConfig({
       GOOGLE_CLIENT_ID: "vitest-google-client-id",
       GOOGLE_CLIENT_SECRET: "vitest-google-client-secret",
       GOOGLE_REDIRECT_URI: "http://127.0.0.1:4000/gdrive/oauth/callback",
-      // FIX #215: sentinel IMAP creds so isEmailIngestConfigured() is true in tests; the actual
-      // IMAP client is mocked (tests/email-ingest.test.ts), no real connection is ever made.
+      // FIX #215: sentinel IMAP host + reused SMTP creds so isEmailIngestConfigured() is true in
+      // tests; the actual IMAP client is mocked (tests/email-ingest.test.ts), no real connection
+      // is ever made.
       FAMILY_INBOX_IMAP_HOST: "vitest-imap-host",
-      FAMILY_INBOX_IMAP_USER: "vitest-inbox@example.com",
-      FAMILY_INBOX_IMAP_PASSWORD: "vitest-imap-app-password"
+      SMTP_USER: "vitest-inbox@example.com",
+      SMTP_PASS: "vitest-imap-app-password"
     },
     include: ["tests/**/*.test.ts"],
     /** One worker avoids parallel tests sharing the same Postgres database. */
