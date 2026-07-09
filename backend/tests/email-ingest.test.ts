@@ -245,4 +245,170 @@ describe("FIX #215 — household inbox email ingestion", () => {
     );
     expect(logRow?.status).toBe("processed");
   });
+
+  // CR-224: extraction contract broadened beyond school/activity to order/delivery, financial
+  // notice, appointment/medical, invitation/social, and utility/service/government genres.
+  it("extracts an order/delivery item as calendar-actionable", async () => {
+    primeOneMessage({
+      messageId: "<msg-delivery@shop.example>",
+      from: { text: "orders@acmeshop.example" },
+      subject: "Your Acme Corp order has shipped",
+      text: "Your package is arriving Thursday, July 16. Returns accepted through July 30."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "delivery",
+          title: "Acme Corp package arriving",
+          date: "2026-07-16",
+          time: null,
+          who: null,
+          actionRequired: "Be available to receive the package or arrange pickup.",
+          sourceQuote: "Your package is arriving Thursday, July 16."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alert = await qGet<{ action_type: string | null; reason: string }>(
+      `SELECT action_type, reason FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alert?.reason).toContain("[EMAIL]");
+    expect(alert?.action_type).toBe("create_gcal_event");
+  });
+
+  it("extracts a financial-notice payment_due item as calendar-actionable", async () => {
+    primeOneMessage({
+      messageId: "<msg-payment@examplebank.example>",
+      from: { text: "statements@examplebank.example" },
+      subject: "Your card payment is due soon",
+      text: "Your Example Bank card payment of $150.00 is due July 12. Account ending 4321."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "payment_due",
+          title: "Example Bank card payment due",
+          date: "2026-07-12",
+          time: null,
+          who: null,
+          actionRequired: "Pay the card balance before the due date.",
+          sourceQuote: "Your Example Bank card payment of $150.00 is due July 12."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alert = await qGet<{ action_type: string | null }>(
+      `SELECT action_type FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alert?.action_type).toBe("create_gcal_event");
+  });
+
+  it("keeps a financial-notice fraud alert as info with no calendar action even when dated, and tags urgency", async () => {
+    primeOneMessage({
+      messageId: "<msg-fraud@examplebank.example>",
+      from: { text: "alerts@examplebank.example" },
+      subject: "Unusual activity on your card",
+      text: "We noticed unusual activity on your card ending 9876 on July 5. Review your recent transactions."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "info",
+          title: "Unusual card activity flagged",
+          date: "2026-07-05",
+          time: null,
+          who: null,
+          actionRequired: "Review recent card transactions for anything unrecognized.",
+          sourceQuote: "We noticed unusual activity on your card ending 9876 on July 5.",
+          urgency: "high"
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alert = await qGet<{ action_type: string | null; reason: string }>(
+      `SELECT action_type, reason FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alert?.action_type).toBeNull();
+    expect(alert?.reason).toContain("[EMAIL] [URGENT]");
+  });
+
+  it("extracts an appointment/medical item as calendar-actionable with a time", async () => {
+    primeOneMessage({
+      messageId: "<msg-appt@clinic.example>",
+      from: { text: "scheduling@exampleclinic.example" },
+      subject: "Appointment confirmation",
+      text: "Your appointment is confirmed for July 14 at 3:00 PM. Please arrive 15 minutes early."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "appointment",
+          title: "Clinic appointment",
+          date: "2026-07-14",
+          time: "15:00",
+          who: null,
+          actionRequired: "Arrive 15 minutes early for the appointment.",
+          sourceQuote: "Your appointment is confirmed for July 14 at 3:00 PM."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alert = await qGet<{ action_type: string | null; action_payload: { time?: string } | null }>(
+      `SELECT action_type, action_payload FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alert?.action_type).toBe("create_gcal_event");
+    expect(alert?.action_payload?.time).toBe("15:00");
+  });
+
+  it("extracts two items (event + rsvp) from an invitation/social email", async () => {
+    primeOneMessage({
+      messageId: "<msg-invite@example.com>",
+      from: { text: "friend@example.com" },
+      subject: "You're invited!",
+      text: "Join us for a birthday party on July 25. Please RSVP by July 18."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "event",
+          title: "Birthday party",
+          date: "2026-07-25",
+          time: null,
+          who: null,
+          actionRequired: "Attend the birthday party.",
+          sourceQuote: "Join us for a birthday party on July 25."
+        },
+        {
+          kind: "rsvp",
+          title: "RSVP for birthday party",
+          date: "2026-07-18",
+          time: null,
+          who: null,
+          actionRequired: "Reply to confirm attendance.",
+          sourceQuote: "Please RSVP by July 18."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alerts = await qAll<{ action_type: string | null }>(
+      `SELECT action_type FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alerts.length).toBe(2);
+    expect(alerts.every(a => a.action_type === "create_gcal_event")).toBe(true);
+  });
 });

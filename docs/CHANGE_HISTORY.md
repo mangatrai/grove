@@ -14,6 +14,23 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — household inbox email ingestion: broaden extraction beyond school/activity (2026-07-09)
+
+**What changed:** `email-ingest.service.ts`'s extraction prompt (FIX #215) was framed narrowly as school/activity extraction. Broadened it to a genre-first prompt: the model first identifies the email's genre, then extracts per genre-specific guidance — school/activity (unchanged), order/delivery, financial notice (payment due, card expiry, low-balance/fraud alerts — **never copy a full account number, last 4 digits only**), appointment/medical, invitation/social (event + RSVP as two separate items), and utility/service/government renewals. Promotional/newsletter with no actionable item still returns `{"items": []}`.
+
+- `kind` enum grew from `deadline | event | info` to also include `payment_due | delivery | appointment | rsvp`.
+- New optional `urgency: "high" | "normal"` field on extracted items (fraud alert or a deadline within 7 days → `"high"`). Threaded into the alert's `reason` as an `[URGENT]` tag (after the existing `[EMAIL]` tag, so the FIX #215 `LIKE '[EMAIL]%'` cleanup pattern still matches) — no new column, no digest-sorting logic added in this pass.
+- `writeSuggestionAlert`'s calendar-actionable rule simplified from `(kind === "deadline" || kind === "event") && date !== null` to `kind !== "info" && date !== null` — every non-`info` kind becomes calendar-actionable once dated; `info` (the fraud/low-balance case) never is, dated or not.
+- **No pipeline changes**: IMAP fetch, `email_ingest_log` dedup, tool-less `complete()` call, zod validation, and the alert-approval flow are all unchanged. `items_json` is already JSONB — no migration.
+
+**Why:** Phase 1 finding from the 2026-07-08 PA Phase 2 adversarial review (epic #159) — the household inbox receives far more than school newsletters, and useful items (order deliveries, bill due dates, appointments, RSVPs) were being silently dropped by the school/activity framing.
+
+**Tests:** `npm run test -w backend` — added 5 fixtures to `backend/tests/email-ingest.test.ts` (order/delivery, financial-notice payment_due, financial-notice fraud-as-info-with-urgency, appointment/medical, invitation event+RSVP pair); 9/9 passed in that file, 655/655 backend-wide.
+
+**Files:** `backend/src/modules/family/email-ingest.service.ts`, `backend/tests/email-ingest.test.ts`, `docs/API_REFERENCE.md`, `docs/ADMIN_GUIDE.md`, `docs/USER_GUIDE.md`.
+
+**GitHub:** closes [#224](https://github.com/mangatrai/grove/issues/224).
+
 ## DOC — BACKLOG.md closed out as of V5; active tracking moves to GitHub Issues/Milestones (2026-07-08)
 
 **What changed:** Added a notice to the top of `docs/BACKLOG.md` stating the file stops at V5 and is no longer updated per-change, with links to the V5/V6/V7 GitHub milestones and the open-issues list. No historical content removed.

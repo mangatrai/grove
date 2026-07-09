@@ -1132,9 +1132,18 @@ The 6am run ensures work events are in Google Calendar before the agent's mornin
 - The Shortcut clears all future events in `Work — Mirrored` and recreates them on every run. This is intentional — clean dedup without needing API-level upsert logic.
 - The agent reads `Work — Mirrored` as a regular Google Calendar — no special handling needed.
 
-### 10.4 Household Inbox Email Ingestion (FIX #215)
+### 10.4 Household Inbox Email Ingestion (FIX #215, broadened CR-224)
 
-The agent polls a **dedicated household Gmail account** daily (6:12am, `env.TZ`) over IMAP and turns actionable school/activity emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+The agent polls a **dedicated household Gmail account** daily (6:12am, `env.TZ`) over IMAP and turns actionable emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`, or `[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+
+**What kinds of emails are understood** — the model first identifies the email's genre, then extracts per that genre's rules:
+- **school/activity** — permission slips, fundraisers, activity reminders, field trips.
+- **order/delivery** — delivery dates, return-window deadlines, action needed on a failed delivery.
+- **financial notice** — payment due dates, card expiry; low-balance/fraud alerts are flagged as info-only (never a full account number — last 4 digits only).
+- **appointment/medical** — confirmations, reschedule links, prep instructions that carry a date.
+- **invitation/social** — event date and RSVP deadline, extracted as two separate items when both are present.
+- **utility/service/government** — renewal deadlines, service-interruption dates, registration/inspection windows.
+- **promotional/newsletter** with no actionable item — no items extracted.
 
 **Why IMAP + a dedicated account, not the existing Google OAuth integration:**
 
