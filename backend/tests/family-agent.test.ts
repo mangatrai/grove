@@ -57,6 +57,7 @@ import {
   buildCalibrationBlock,
   buildCaptureContextHeader,
   buildDayGrid,
+  detectOccasions,
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
@@ -76,6 +77,7 @@ import {
   type PipelineOutputs,
 } from "../src/modules/family/family-agent.service.js";
 import { heuristicCalendarRole } from "../src/modules/gcal/gcal.service.js";
+import { encryptDob } from "../src/modules/household/dob-crypto.js";
 import type { FamilyEvent, HelpAvailabilitySlot } from "../src/modules/family/family.types.js";
 
 function baseCtx(overrides: Partial<FamilyContext> = {}): FamilyContext {
@@ -104,6 +106,7 @@ function calEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     calendarId: "primary",
     calendarName: "Primary",
     role: "work",
+    isHolidayCalendar: false,
     ...overrides
   };
 }
@@ -583,6 +586,7 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
       nannyCoord: { hasOutput: false, items: [] },
       research: { hasOutput: false, items: [] },
       deadlines: { hasOutput: false, alerts: [] },
+      occasions: { hasOutput: false, alerts: [] },
     };
     const parents: ConnectedParent[] = [
       { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
@@ -947,6 +951,7 @@ describe("FIX #208 — alert feedback loop (disposition capture + calibration)",
       nannyCoord: { hasOutput: false, items: [] },
       research: { hasOutput: false, items: [] },
       deadlines: { hasOutput: false, alerts: [] },
+      occasions: { hasOutput: false, alerts: [] },
     };
     const parents: ConnectedParent[] = [
       { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
@@ -958,5 +963,214 @@ describe("FIX #208 — alert feedback loop (disposition capture + calibration)",
     const [messages] = mockComplete.mock.calls[0];
     const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user")!;
     expect(userMessage.content).toContain("Deprioritize/avoid: restaurant (3x not relevant).");
+  });
+});
+
+describe("detectOccasions (#223 occasion nudge tiers)", () => {
+  const OCCASION_HOUSEHOLD_ID = "99990000-test-0000-0000-occasionhh01";
+  const TIER21_PROFILE_ID = "99990000-test-0000-0000-occtier21001";
+  const TIER5_PROFILE_ID = "99990000-test-0000-0000-occtier05001";
+  const FAR_PROFILE_ID = "99990000-test-0000-0000-occfaraway01";
+  const YEAR_BOUNDARY_PROFILE_ID = "99990000-test-0000-0000-occyearbnd1";
+  const TIER21_MEMBERSHIP_ID = "99990000-test-0000-0000-occm21001001";
+  const TIER5_MEMBERSHIP_ID = "99990000-test-0000-0000-occm05001001";
+  const FAR_MEMBERSHIP_ID = "99990000-test-0000-0000-occmfar001001";
+  const YEAR_BOUNDARY_MEMBERSHIP_ID = "99990000-test-0000-0000-occmyrb001001";
+
+  const TODAY_ISO = "2026-06-15";
+
+  beforeAll(async () => {
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, OCCASION_HOUSEHOLD_ID, "FIX-223 Occasion Test Household");
+
+    // Tier21Kid: birthday is exactly 21 days from TODAY_ISO (2026-06-15 + 21d = 2026-07-06)
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name, date_of_birth_encrypted) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      TIER21_PROFILE_ID, OCCASION_HOUSEHOLD_ID, "Tier21Kid", encryptDob("1990-07-06")
+    );
+    // Tier5Kid: birthday is exactly 5 days from TODAY_ISO (2026-06-15 + 5d = 2026-06-20) — both
+    // the 21-day and 5-day tiers should fire simultaneously (cumulative, not exclusive).
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name, date_of_birth_encrypted) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      TIER5_PROFILE_ID, OCCASION_HOUSEHOLD_ID, "Tier5Kid", encryptDob("1985-06-20")
+    );
+    // FarKid: birthday is months away — must never appear.
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name, date_of_birth_encrypted) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      FAR_PROFILE_ID, OCCASION_HOUSEHOLD_ID, "FarKid", encryptDob("2000-12-25")
+    );
+    // YearBoundaryKid: Jan 10 birthday, evaluated from a late-December "today" — must roll into
+    // next year rather than appear as just-passed or trigger off the wrong year.
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name, date_of_birth_encrypted) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      YEAR_BOUNDARY_PROFILE_ID, OCCASION_HOUSEHOLD_ID, "YearBoundaryKid", encryptDob("1990-01-10")
+    );
+
+    for (const [membershipId, profileId] of [
+      [TIER21_MEMBERSHIP_ID, TIER21_PROFILE_ID],
+      [TIER5_MEMBERSHIP_ID, TIER5_PROFILE_ID],
+      [FAR_MEMBERSHIP_ID, FAR_PROFILE_ID],
+      [YEAR_BOUNDARY_MEMBERSHIP_ID, YEAR_BOUNDARY_PROFILE_ID],
+    ]) {
+      await qExec(
+        `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship) VALUES (?, ?, ?, 'member', 'child') ON CONFLICT (id) DO NOTHING`,
+        membershipId, OCCASION_HOUSEHOLD_ID, profileId
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await qExec(
+      `DELETE FROM household_membership WHERE id IN (?, ?, ?, ?)`,
+      TIER21_MEMBERSHIP_ID, TIER5_MEMBERSHIP_ID, FAR_MEMBERSHIP_ID, YEAR_BOUNDARY_MEMBERSHIP_ID
+    );
+    await qExec(
+      `DELETE FROM person_profile WHERE id IN (?, ?, ?, ?)`,
+      TIER21_PROFILE_ID, TIER5_PROFILE_ID, FAR_PROFILE_ID, YEAR_BOUNDARY_PROFILE_ID
+    );
+    await qExec(`DELETE FROM family_occasion_settings WHERE household_id = ?`, OCCASION_HOUSEHOLD_ID);
+    await qExec(`DELETE FROM household WHERE id = ?`, OCCASION_HOUSEHOLD_ID);
+  });
+
+  function dbCtx(overrides: Partial<FamilyContext> = {}): FamilyContext {
+    return baseCtx({ householdId: OCCASION_HOUSEHOLD_ID, todayIso: TODAY_ISO, ...overrides });
+  }
+
+  it("source 1 (member DOB): fires the 21-day tier only, not the 5-day tier, for a birthday 21 days out", async () => {
+    const result = await detectOccasions(dbCtx(), "manual");
+    const tier21 = result.alerts.filter(a => a.reason.includes("Tier21Kid"));
+    expect(tier21.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(true);
+    expect(tier21.some(a => a.reason.startsWith("[LAST-CALL]"))).toBe(false);
+  });
+
+  it("source 1 (member DOB): fires both the 21-day and 5-day tiers for a birthday 5 days out", async () => {
+    const result = await detectOccasions(dbCtx(), "manual");
+    const tier5 = result.alerts.filter(a => a.reason.includes("Tier5Kid"));
+    expect(tier5.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(true);
+    expect(tier5.some(a => a.reason.startsWith("[LAST-CALL]"))).toBe(true);
+  });
+
+  it("source 1 (member DOB): never surfaces a birthday months away", async () => {
+    const result = await detectOccasions(dbCtx(), "manual");
+    expect(result.alerts.some(a => a.reason.includes("FarKid"))).toBe(false);
+  });
+
+  it("source 1 (member DOB): a Jan 10 birthday evaluated from Dec 28 rolls into next year and fires within lead time", async () => {
+    const result = await detectOccasions(dbCtx({ todayIso: "2026-12-28" }), "manual");
+    const boundary = result.alerts.filter(a => a.reason.includes("YearBoundaryKid"));
+    expect(boundary.some(a => a.reason.includes("2027-01-10"))).toBe(true);
+    expect(boundary.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(true);
+  });
+
+  it("anti-spam pre-filter: suppresses a candidate already present in ctx.openAlerts", async () => {
+    const alreadyOpenReason = "[GIFT-IDEAS] Tier21Kid's birthday is on 2026-07-06.";
+    const openAlerts: AgentAlert[] = [
+      {
+        id: "existing-1",
+        householdId: OCCASION_HOUSEHOLD_ID,
+        detectedAt: "2026-06-15T00:00:00.000Z",
+        alertType: "suggestion",
+        reason: alreadyOpenReason,
+        affectedDate: "2026-07-06",
+        copyPasteText: alreadyOpenReason,
+        recipientHint: "Both",
+        isResolved: false,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        resolutionKind: null,
+        sourceDigestId: null,
+        actionType: null,
+        actionPayload: null,
+      } as AgentAlert,
+    ];
+
+    const result = await detectOccasions(dbCtx({ openAlerts }), "manual");
+    expect(result.alerts.some(a => a.reason === alreadyOpenReason)).toBe(false);
+    // Tier5Kid's alerts are unrelated and must still come through.
+    expect(result.alerts.some(a => a.reason.includes("Tier5Kid"))).toBe(true);
+  });
+
+  it("settings toggle: disabling occasion nudges suppresses all output even with qualifying birthdays", async () => {
+    await qExec(
+      `INSERT INTO family_occasion_settings (household_id, enabled) VALUES (?, FALSE)
+       ON CONFLICT (household_id) DO UPDATE SET enabled = FALSE`,
+      OCCASION_HOUSEHOLD_ID
+    );
+    try {
+      const result = await detectOccasions(dbCtx(), "manual");
+      expect(result.hasOutput).toBe(false);
+      expect(result.alerts).toEqual([]);
+    } finally {
+      await qExec(`DELETE FROM family_occasion_settings WHERE household_id = ?`, OCCASION_HOUSEHOLD_ID);
+    }
+  });
+
+  it("source 2 (calendar-derived): regex-classifies birthday/anniversary event titles and tiers them at 3 days", async () => {
+    const ctx = baseCtx({
+      todayIso: TODAY_ISO,
+      parentEvents: [
+        {
+          email: "parentA@example.com",
+          events: [
+            calEvent({ summary: "Alex's Birthday", start: "2026-06-17", allDay: true }),
+            calEvent({ summary: "Wedding Anniversary - Sam & Jo", start: "2026-06-18", allDay: true }),
+            calEvent({ summary: "Team meeting", start: "2026-06-16" }),
+          ],
+        },
+      ],
+    });
+
+    const result = await detectOccasions(ctx, "manual");
+    expect(result.alerts.some(a => a.reason.includes("Alex's Birthday") && a.reason.startsWith("[SEND-WISHES]"))).toBe(true);
+    expect(result.alerts.some(a => a.reason.includes("Wedding Anniversary") && a.reason.startsWith("[SEND-WISHES]"))).toBe(true);
+    expect(result.alerts.some(a => a.reason.includes("Team meeting"))).toBe(false);
+  });
+
+  it("source 2 (calendar-derived): dedups an identical title+date appearing on both parents' calendars", async () => {
+    const ctx = baseCtx({
+      todayIso: TODAY_ISO,
+      parentEvents: [
+        { email: "parentA@example.com", events: [calEvent({ summary: "Alex's Birthday", start: "2026-06-17", allDay: true })] },
+        { email: "parentB@example.com", events: [calEvent({ summary: "Alex's Birthday", start: "2026-06-17", allDay: true })] },
+      ],
+    });
+
+    const result = await detectOccasions(ctx, "manual");
+    const matches = result.alerts.filter(a => a.reason.includes("Alex's Birthday"));
+    expect(matches).toHaveLength(1);
+  });
+
+  it("source 3 (holiday calendars): tags isHolidayCalendar events with gift tiers and skips non-holiday calendars", async () => {
+    const ctx = baseCtx({
+      todayIso: TODAY_ISO,
+      parentEvents: [
+        {
+          email: "parentA@example.com",
+          events: [
+            calEvent({ summary: "Diwali", start: "2026-06-25", allDay: true, isHolidayCalendar: true }),
+            calEvent({ summary: "Diwali", start: "2026-06-25", allDay: true, isHolidayCalendar: false }),
+          ],
+        },
+      ],
+    });
+
+    const result = await detectOccasions(ctx, "manual");
+    const diwali = result.alerts.filter(a => a.reason.includes("Diwali"));
+    expect(diwali.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(true);
+    expect(diwali.some(a => a.reason.startsWith("[LAST-CALL]"))).toBe(false);
+    // Only the isHolidayCalendar: true copy produces an alert — one tier match, one alert.
+    expect(diwali).toHaveLength(1);
+  });
+
+  it("source 3 (holiday calendars): dedups an identical holiday across both parents' subscriptions", async () => {
+    const ctx = baseCtx({
+      todayIso: TODAY_ISO,
+      parentEvents: [
+        { email: "parentA@example.com", events: [calEvent({ summary: "Diwali", start: "2026-06-25", allDay: true, isHolidayCalendar: true })] },
+        { email: "parentB@example.com", events: [calEvent({ summary: "Diwali", start: "2026-06-25", allDay: true, isHolidayCalendar: true })] },
+      ],
+    });
+
+    const result = await detectOccasions(ctx, "manual");
+    expect(result.alerts.filter(a => a.reason.includes("Diwali"))).toHaveLength(1);
   });
 });

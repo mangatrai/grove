@@ -19,6 +19,7 @@ import {
   runFamilyAgent,
 } from "./family-agent.service.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
+import { getOccasionSettings, setOccasionSettings } from "./family-occasion-settings.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { log } from "../../logger.js";
@@ -320,5 +321,28 @@ familyEventsRouter.post(
       return;
     }
     res.json({ ok: true });
+  }
+);
+
+/** GET /family/occasion-settings — birthday/holiday lead-time nudge toggle (#223) */
+familyEventsRouter.get(
+  "/occasion-settings",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const settings = await getOccasionSettings(req.authUser!.householdId);
+    res.json({ ok: true, settings });
+  }
+);
+
+/** PATCH /family/occasion-settings — enable/disable occasion nudges (#223) */
+familyEventsRouter.patch(
+  "/occasion-settings",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+
+    const settings = await setOccasionSettings(req.authUser!.householdId, parsed.data.enabled);
+    res.json({ ok: true, settings });
   }
 );

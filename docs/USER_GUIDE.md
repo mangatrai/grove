@@ -775,6 +775,10 @@ Connect or disconnect your Google Calendar account. Once connected:
 - **Select calendars** — check which of your Google Calendars the family planner agent should read. Leave none checked to include all accessible calendars.
 - **Calendar role** — tag each calendar as *Work / personal*, *School (informational only)*, *Kid activities*, or *Other*. The agent treats *School* events as informational — e.g. a school closure is never treated as a parent being unavailable, unlike a *Work / personal* event at the same time. Role defaults to a name-based guess (a calendar named "…ISD" or "…School" defaults to School) until you set it explicitly. Click **Save selection** to persist both the calendar selection and the roles.
 
+**Occasion Nudges**
+
+A toggle (default on) controlling whether the agent surfaces birthday/holiday lead-time nudge alerts — see [Occasion nudges (birthdays & holidays)](#occasion-nudges-birthdays--holidays) below. Turning it off stops new nudges from being generated; any nudges already showing on the Alerts panel stay until you resolve them.
+
 ### Data Tab
 
 **AI Insights history:** View historical analyses generated on the Dashboard. Useful for trend checks and comparing old advice vs. new recommendations.
@@ -822,6 +826,21 @@ If the household admin has configured a dedicated household Gmail account for in
 - Alerts with a date resolve to an **Add to Calendar** button, same as other agent suggestions — nothing is added to your calendar until you click it. Low-balance/fraud notices are surfaced info-only, with no calendar action, and never include a full account number.
 - Use the same Resolve dropdown (Useful / Not relevant / Already knew / Dismiss) to give feedback — email-derived alerts feed into the same calibration described above.
 - The agent never acts on anything an email asks it to do — it only extracts facts (dates, titles, who's involved) for you to review.
+
+### Occasion nudges (birthdays & holidays)
+
+The agent watches for upcoming birthdays and holidays and nudges you with enough lead time to actually plan something, instead of finding out the day of. Three sources feed this, all shown as regular alert cards on the Family Alerts panel:
+
+- **Household member birthdays** — pulled from each person's Date of Birth (set on their Profile tab).
+- **Birthdays/anniversaries on your calendar** — any event on a connected Google Calendar with "birthday" or "anniversary" in the title.
+- **Holidays** — read directly from any Google holiday calendar you've subscribed to (e.g. "Holidays in United States", "Holidays in India" — add these from Google Calendar's "Other calendars" browser). Whatever holidays *you* subscribe to are what you'll get nudged about — the agent doesn't guess or maintain its own holiday list.
+
+Nudges arrive in tiers, tagged in the alert text:
+- **`[GIFT-IDEAS]`** — 21 days before a birthday or holiday.
+- **`[LAST-CALL]`** — 5 days before a birthday or holiday (both tiers can be open at once as the date gets closer).
+- **`[SEND-WISHES]`** — 3 days before a calendar-derived birthday/anniversary.
+
+Each nudge only fires once per tier — you won't get a repeat reminder every day of the lead-time window. Resolve them with the same Resolve dropdown as any other alert. Turn the whole feature off in Settings → Family → **Occasion Nudges**.
 
 ## Year-in-Review
 

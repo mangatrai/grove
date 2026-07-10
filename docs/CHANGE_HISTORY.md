@@ -14,6 +14,27 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FEAT — Family agent: occasion awareness — birthday/holiday lead-time nudges, Phase 1 (2026-07-09)
+
+**What changed:** New agent domain `detectOccasions` (`family-agent.service.ts`) runs alongside coverage/coordination, proactive research, and deadline sweeping on every agent run, and feeds the existing `allAlerts` → `writeAlerts` → digest pipeline. Fully deterministic — no LLM, no Tavily.
+
+- **Source 1 — member birthdays:** `person_profile.date_of_birth_encrypted` decrypted via `decryptDob`; next occurrence computed via pure ISO-string comparison (`nextOccurrenceIso`), correctly handling year-boundary rollover (e.g. a January birthday evaluated in late December).
+- **Source 2 — calendar-derived birthdays/anniversaries:** event titles on `ctx.parentEvents` regex-classified (`/\b(birthday|bday)\b/i`, `/\banniversary\b/i`), deduped by title+date across both parents' calendars.
+- **Source 3 — seasonal/cultural holidays:** `fetchCalendarEvents` extended with a second fetch pass over any Google Calendar whose ID ends `#holiday@group.v.calendar.google.com` (Google's own subscribable "Holidays in \<country\>" calendars), using a 25-day window independent of `selectedCalendarIds`, tagged `isHolidayCalendar: true` on `CalendarEvent`. Rejected an LLM+Tavily seasonal-occasion design (can be stale/wrong, or miss a household's actual observed holidays) in favor of reading calendars the household already subscribes to — no hardcoded holiday list.
+- **Tiering:** gift-able occasions (member birthdays, holidays) fire `[GIFT-IDEAS]` at 21 days out and `[LAST-CALL]` at 5 days out — both can be simultaneously open (cumulative tiers, not closest-only). Calendar-derived birthdays/anniversaries fire a single `[SEND-WISHES]` tier at 3 days out. Reason strings are stable (no day-count), so mechanical alert dedup naturally suppresses re-firing after the first day a tier opens.
+- **Anti-spam pre-filter:** `detectOccasions` filters candidates against `ctx.openAlerts` (via the shared `alertDedupKey`) *before* returning, enforced in code rather than relying on an LLM instruction not to resurface — otherwise a 3-week gift-tier window would retrigger the digest email every day it stayed open.
+- **Settings toggle:** new `family_occasion_settings` table (migration `0082`, registered in `EXPORT_REGISTRY`), `GET`/`PATCH /api/family/occasion-settings` (owner/admin only), Mantine `Switch` in `FamilySection.tsx`. Missing row defaults `enabled: true`.
+
+**Why:** Second item in the ratified PA Phase 2 build order (epic #159, review 2026-07-08) — the agent reasons about logistics but had no concept of birthdays/holidays. Ships the Phase 1 detection + nudge slice only; the Phase 2 auto-enqueue gift-research bridge is deferred, gated on #164.
+
+**Tests:** `npm run test -w backend` — added 10 tests to `backend/tests/family-agent.test.ts` (tier math incl. year-boundary rollover, anti-spam pre-filter, calendar regex classification + cross-parent dedup, holiday-calendar tagging + cross-parent dedup, settings-toggle gating); 665/665 backend-wide.
+
+**Files:** `backend/db/migrations/0082_family_occasion_settings.sql`, `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/family/family-occasion-settings.service.ts`, `backend/src/modules/family/family-events.routes.ts`, `backend/src/modules/export/export-registry.ts`, `backend/tests/family-agent.test.ts`, `frontend/src/pages/settings/FamilySection.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`, `docs/ADMIN_GUIDE.md`, `docs/USER_GUIDE.md`.
+
+**GitHub:** closes [#223](https://github.com/mangatrai/grove/issues/223).
+
+---
+
 ## CR — household inbox email ingestion: broaden extraction beyond school/activity (2026-07-09)
 
 **What changed:** `email-ingest.service.ts`'s extraction prompt (FIX #215) was framed narrowly as school/activity extraction. Broadened it to a genre-first prompt: the model first identifies the email's genre, then extracts per genre-specific guidance — school/activity (unchanged), order/delivery, financial notice (payment due, card expiry, low-balance/fraud alerts — **never copy a full account number, last 4 digits only**), appointment/medical, invitation/social (event + RSVP as two separate items), and utility/service/government renewals. Promotional/newsletter with no actionable item still returns `{"items": []}`.

@@ -4096,3 +4096,41 @@ No new endpoints. A daily background poll (not an HTTP route) reads the dedicate
 Each extracted item has a `kind` of `deadline | event | info | payment_due | delivery | appointment | rsvp`. Items of any kind other than `info` populate `actionType: 'create_gcal_event'` and `actionPayload` once a date resolves, so they go through the same approve flow as other calendar-writing suggestions. `info` items (e.g. a fraud/low-balance alert, which never carries a full account number — last 4 digits only) always have `actionType: null` — the user can only resolve/dismiss them, no calendar action is offered. An optional `urgency: "high" | "normal"` extracted per item surfaces as an `[URGENT]` tag alongside the existing `[EMAIL]` tag in the alert's `reason` text.
 
 See `docs/ADMIN_GUIDE.md` for `FAMILY_INBOX_IMAP_*` env vars and IMAP App Password setup, and `docs/USER_GUIDE.md` for household-side Gmail label/filter setup.
+
+---
+
+### Occasion awareness — birthday/holiday lead-time nudges (#223)
+
+A new agent domain, `detectOccasions`, runs alongside coverage/coordination, proactive research, and deadline sweeping on every agent run. It produces `alert_type = 'suggestion'` rows in `family_agent_alerts` (same table, same approve/resolve endpoints documented above) from three fully deterministic sources — no LLM, no Tavily:
+
+1. **Household member birthdays** — `person_profile.date_of_birth_encrypted` (decrypted in-memory, never returned over the API in plaintext).
+2. **Calendar-derived birthdays/anniversaries** — event titles on the household's connected Google Calendars matched against `/\b(birthday|bday)\b/i` and `/\banniversary\b/i`.
+3. **Seasonal/cultural holidays** — read directly from any Google Calendar the household has subscribed to whose calendar ID ends `#holiday@group.v.calendar.google.com` (e.g. "Holidays in United States", "Holidays in India"). No hardcoded holiday list.
+
+Each occasion is tiered by days-until: gift-able occasions (member birthdays, holidays) fire a `[GIFT-IDEAS]` alert at 21 days out and a `[LAST-CALL]` alert at 5 days out — both can be open simultaneously. Calendar-derived birthdays/anniversaries fire a single `[SEND-WISHES]` alert at 3 days out. Reason strings are stable (no day-count) so the existing mechanical alert dedup naturally suppresses re-firing after the first day a tier opens; `detectOccasions` also pre-filters candidates against already-open alerts before returning, so a multi-week gift-tier window doesn't retrigger the digest email every day it stays open.
+
+#### `GET /api/family/occasion-settings`
+
+Returns the caller's household occasion-nudge toggle. Requires `owner | admin`.
+
+**Response `200`:**
+```json
+{ "ok": true, "settings": { "householdId": "uuid", "enabled": true } }
+```
+No row present defaults to `enabled: true`.
+
+#### `PATCH /api/family/occasion-settings`
+
+Enables or disables occasion nudges for the caller's household. Requires `owner | admin`.
+
+**Request body:**
+```json
+{ "enabled": false }
+```
+
+**Response `200`:** `{ "ok": true, "settings": { "householdId": "uuid", "enabled": false } }`
+**Response `400`:** `{ "errors": [...] }` — invalid body.
+
+When disabled, `detectOccasions` returns no alerts on subsequent runs. Existing open occasion alerts are left as-is — they're only cleared by the normal approve/resolve flow.
+
+> **Scope note:** this ships the detection + nudge slice only. The Phase 2 auto-enqueue gift-research bridge (opening a Tavily research task from a `[GIFT-IDEAS]` alert) is deferred, gated on issue #164.

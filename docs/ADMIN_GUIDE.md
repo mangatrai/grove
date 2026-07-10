@@ -1182,6 +1182,23 @@ The feature is **optional** — if `FAMILY_INBOX_IMAP_HOST` is unset, or `SMTP_U
 
 **Data model:** `email_ingest_log` (migration `0081_email_ingest_log.sql`) records one row per `(household_id, message_id)` — the `UNIQUE` constraint is the dedup mechanism (`ON CONFLICT DO NOTHING`), so a message still present in the mailbox on the next poll is skipped per household rather than re-processed. `status` is one of `pending`/`processed`/`ignored`/`error`. Extracted items that would duplicate an existing active `family_events` row (fuzzy title match + exact date) are silently skipped rather than creating a redundant alert. Registered in `EXPORT_REGISTRY` (`restoreOrder: 29`) for backup/restore.
 
+### 10.5 Occasion Awareness — Birthday/Holiday Lead-Time Nudges (#223)
+
+A new agent domain, `detectOccasions`, runs on every agent run alongside coverage/coordination, proactive research, and deadline sweeping, and produces `alert_type = 'suggestion'` rows in `family_agent_alerts` (same table and approve/resolve flow as everything else in Family Planner → Alerts). **Fully deterministic — no LLM call, no Tavily search, no hardcoded holiday list.**
+
+**Three detection sources:**
+1. **Household member birthdays** — `person_profile.date_of_birth_encrypted`, decrypted at read time.
+2. **Calendar-derived birthdays/anniversaries** — event titles on connected Google Calendars matched against a birthday/anniversary regex.
+3. **Seasonal/cultural holidays** — read directly from any Google Calendar the household has subscribed to whose calendar ID ends `#holiday@group.v.calendar.google.com` (Google's own public "Holidays in United States", "Holidays in India", etc. calendars). `fetchCalendarEvents` fetches these with a wider 25-day lookahead window, independent of the household's `selectedCalendarIds`, so narrowing day-to-day sync to specific calendars doesn't lose occasion awareness. **Design note:** an LLM+Tavily-based seasonal-occasion guess was considered and rejected — Tavily results can be stale or wrong, and a fixed Western-holiday list wouldn't know which holidays a specific household actually observes. Reading calendars the household already subscribes to sidesteps both problems with zero extra API cost.
+
+**Tiering:** gift-able occasions (member birthdays, holidays) get a `[GIFT-IDEAS]` nudge at 21 days out and a `[LAST-CALL]` nudge at 5 days out — both can be open at once. Calendar-derived birthdays/anniversaries get a single `[SEND-WISHES]` nudge at 3 days out. Reason text is stable across days so the existing alert dedup (`alertDedupKey`) naturally prevents re-firing once a tier has opened; `detectOccasions` also pre-filters against currently-open alerts before returning, so a 3-week gift-tier window can't retrigger the digest email every day it stays open.
+
+**Settings toggle:** `family_occasion_settings` (migration `0082_family_occasion_settings.sql`, one row per household, `enabled BOOLEAN DEFAULT TRUE`) — Settings → Family → Occasion Nudges. `GET`/`PATCH /api/family/occasion-settings` (owner/admin only). Missing row defaults to enabled. Registered in `EXPORT_REGISTRY` (`restoreOrder: 30`) for backup/restore.
+
+**No new env vars, no new cost** — this reuses the existing Google Calendar OAuth connection from §10.1–10.2; no additional API scopes are required (holiday calendars are read the same way as any other calendar the account has access to).
+
+**Explicitly deferred:** the Phase 2 auto-enqueue gift-research bridge (turning a `[GIFT-IDEAS]` alert into an automatic Tavily research task) is out of scope for this ship, gated on issue #164.
+
 ---
 
 ## Related Documentation

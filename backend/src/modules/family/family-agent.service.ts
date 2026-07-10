@@ -16,6 +16,8 @@ import {
 } from "../gcal/gcal.service.js";
 import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
 import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
+import { getOccasionSettings } from "./family-occasion-settings.service.js";
+import { decryptDob } from "../household/dob-crypto.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +41,7 @@ export type CalendarEvent = {
   calendarId: string;
   calendarName: string;
   role: CalendarRole;
+  isHolidayCalendar: boolean;
 };
 
 // FIX #217: validated against parsed LLM output before it reaches family_agent_alerts (writeAlerts)
@@ -87,12 +90,14 @@ export type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
 type ResearchItem      = { title: string; summary: string; category: string; grade: "verified" | "lead" };
 export type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
 export type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
+export type OccasionResult    = { hasOutput: boolean; alerts: AlertItem[] };
 
 export type PipelineOutputs = {
   coverageGaps: CoverageGapResult;
   nannyCoord: NannyCoordResult;
   research: ResearchResult;
   deadlines: DeadlineResult;
+  occasions: OccasionResult;
 };
 
 export type FamilyContext = {
@@ -285,6 +290,12 @@ async function writeDigestLog(
 // GCal fetch
 // ---------------------------------------------------------------------------
 
+// Google's built-in subscribable public holiday calendars ("Holidays in India", "Holidays in
+// United States", etc.) always use this ID suffix. #223 reads these directly instead of guessing
+// seasonal/cultural occasions via a hardcoded list or an LLM/Tavily lookup — Google's calendars
+// are already correctly localized to whatever the household actually subscribes to.
+const HOLIDAY_CALENDAR_ID_SUFFIX = "#holiday@group.v.calendar.google.com";
+
 async function fetchCalendarEvents(
   parent: ConnectedParent,
   _opts: { fullFetch: boolean }
@@ -306,9 +317,18 @@ async function fetchCalendarEvents(
   const allCalendars = listRes.data.items ?? [];
   const nameById = new Map(allCalendars.map(c => [c.id ?? "", c.summary ?? c.id ?? "Calendar"]));
 
-  const calendarIds = parent.selectedCalendarIds?.length
-    ? parent.selectedCalendarIds
-    : allCalendars.map(c => c.id).filter((id): id is string => !!id);
+  const holidayCalendarIds = allCalendars
+    .map(c => c.id)
+    .filter((id): id is string => !!id && id.endsWith(HOLIDAY_CALENDAR_ID_SUFFIX));
+  const holidayCalendarIdSet = new Set(holidayCalendarIds);
+
+  // Holiday calendars are handled by the dedicated wider-window pass below, always — regardless
+  // of selectedCalendarIds — so exclude them here to avoid fetching the same calendar twice.
+  const calendarIds = (
+    parent.selectedCalendarIds?.length
+      ? parent.selectedCalendarIds
+      : allCalendars.map(c => c.id).filter((id): id is string => !!id)
+  ).filter(id => !holidayCalendarIdSet.has(id));
 
   const savedRoles = await getCalendarRoles(parent.userId);
 
@@ -337,10 +357,44 @@ async function fetchCalendarEvents(
           calendarId: calId,
           calendarName,
           role,
+          isHolidayCalendar: false,
         });
       }
     } catch (err) {
       log.warn("family-agent: skipping calendar due to fetch error", { calId, err: String(err) });
+    }
+  }
+
+  // Holiday calendars: wider window (#223 nudge tiers need 21-day lead time), independent of
+  // selectedCalendarIds so narrowing day-to-day sync never disables occasion awareness.
+  const holidayTimeMax = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString();
+  for (const calId of holidayCalendarIds) {
+    const calendarName = nameById.get(calId) ?? calId;
+    try {
+      const res = await calendar.events.list({
+        calendarId: calId,
+        timeMin,
+        timeMax: holidayTimeMax,
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: 100,
+      });
+      for (const ev of res.data.items ?? []) {
+        if (ev.status === "cancelled") continue;
+        events.push({
+          summary: ev.summary ?? "(no title)",
+          start: ev.start?.dateTime ?? ev.start?.date ?? null,
+          end: ev.end?.dateTime ?? ev.end?.date ?? null,
+          allDay: !ev.start?.dateTime,
+          location: ev.location ?? null,
+          calendarId: calId,
+          calendarName,
+          role: "other",
+          isHolidayCalendar: true,
+        });
+      }
+    } catch (err) {
+      log.warn("family-agent: skipping holiday calendar due to fetch error", { calId, err: String(err) });
     }
   }
 
@@ -1007,6 +1061,165 @@ If nothing new, return { "alerts": [] }.` },
 }
 
 // ---------------------------------------------------------------------------
+// Domain — Occasion awareness (#223): birthday/holiday lead-time nudges.
+// Fully deterministic (no LLM, no Tavily) — dates are computed in code so
+// year-boundary math (Dec occasion, January run) is always correct, and
+// seasonal/cultural occasions come from Google's own subscribable holiday
+// calendars (tagged isHolidayCalendar in fetchCalendarEvents) rather than a
+// hardcoded list or a web-search guess that can be stale or wrong.
+// ---------------------------------------------------------------------------
+
+const OCCASION_GIFT_TIERS = [21, 5];
+const OCCASION_WISH_TIERS = [3];
+
+const OCCASION_TIER_TAGS: Record<number, string> = {
+  21: "GIFT-IDEAS",
+  5: "LAST-CALL",
+  3: "SEND-WISHES",
+};
+
+const OCCASION_BIRTHDAY_RE = /\b(birthday|bday)\b/i;
+const OCCASION_ANNIVERSARY_RE = /\banniversary\b/i;
+
+/** UTC-day diff between two YYYY-MM-DD strings — avoids the server-local `new Date()` TZ
+ *  ambiguity that deadline-reminder.service.ts's daysUntil helper has. */
+function daysUntilIso(targetIso: string, todayIso: string): number {
+  const target = Date.parse(`${targetIso}T00:00:00.000Z`);
+  const today = Date.parse(`${todayIso}T00:00:00.000Z`);
+  return Math.round((target - today) / 86_400_000);
+}
+
+function monthDayFromIso(iso: string): string {
+  return iso.slice(5, 10);
+}
+
+/** Next occurrence (this year, or next if already passed) of a recurring MM-DD date. Plain
+ *  ISO-string comparison handles the year boundary correctly (e.g. a Dec 25 birthday evaluated
+ *  on Jan 5 rolls forward to next Dec, not this one). */
+function nextOccurrenceIso(monthDay: string, todayIso: string): string {
+  const year = Number(todayIso.slice(0, 4));
+  const candidate = `${year}-${monthDay}`;
+  return candidate < todayIso ? `${year + 1}-${monthDay}` : candidate;
+}
+
+/**
+ * Builds one suggestion AlertItem per lead-time tier the occasion currently falls within. Reason
+ * text is stable (tag + name + date, no day-count) so writeAlerts' mechanical dedup (alertDedupKey)
+ * suppresses re-insertion after a tier first fires — each tier surfaces once, not once per day.
+ */
+function occasionTierAlerts(
+  name: string,
+  occasionIso: string,
+  tiers: number[],
+  kind: "birthday" | "anniversary" | "holiday",
+  todayIso: string
+): AlertItem[] {
+  const daysUntil = daysUntilIso(occasionIso, todayIso);
+  if (daysUntil < 0) return [];
+  const alerts: AlertItem[] = [];
+  for (const tier of tiers) {
+    if (daysUntil > tier) continue;
+    const tag = OCCASION_TIER_TAGS[tier] ?? "REMINDER";
+    const reason = kind === "holiday"
+      ? `[${tag}] ${name} is coming up on ${occasionIso}.`
+      : `[${tag}] ${name}'s ${kind} is on ${occasionIso}.`;
+    alerts.push({
+      alertType: "suggestion",
+      reason,
+      affectedDate: occasionIso,
+      copyPasteText: reason,
+      recipientHint: "Both",
+    });
+  }
+  return alerts;
+}
+
+type MemberDobRow = { full_name: string; date_of_birth_encrypted: string | null };
+
+// Source 1 — household member birthdays (person_profile.date_of_birth_encrypted). Own dedicated
+// query rather than reusing listHouseholdMembers, which doesn't select the DOB column.
+async function detectMemberBirthdays(ctx: FamilyContext): Promise<AlertItem[]> {
+  const rows = await qAll<MemberDobRow>(
+    `SELECT pp.full_name, pp.date_of_birth_encrypted
+     FROM person_profile pp
+     JOIN household_membership hm ON hm.person_profile_id = pp.id
+     WHERE hm.household_id = ? AND pp.date_of_birth_encrypted IS NOT NULL`,
+    ctx.householdId
+  );
+  const alerts: AlertItem[] = [];
+  for (const row of rows) {
+    const dob = row.date_of_birth_encrypted ? decryptDob(row.date_of_birth_encrypted) : null;
+    if (!dob) continue;
+    const occasionIso = nextOccurrenceIso(monthDayFromIso(dob), ctx.todayIso);
+    alerts.push(...occasionTierAlerts(row.full_name, occasionIso, OCCASION_GIFT_TIERS, "birthday", ctx.todayIso));
+  }
+  return alerts;
+}
+
+// Source 2 — calendar-derived birthdays/anniversaries. Classified live, in-memory, against the
+// already-fetched ctx.parentEvents — GCal events aren't bulk-synced into family_events (only
+// user-approved items are), so a persisted occasion_kind column would miss the common case (a
+// friend's birthday sitting on the shared calendar, never explicitly approved into the DB).
+function detectCalendarOccasions(ctx: FamilyContext): AlertItem[] {
+  const seen = new Set<string>();
+  const alerts: AlertItem[] = [];
+  for (const parent of ctx.parentEvents) {
+    for (const ev of parent.events) {
+      if (ev.isHolidayCalendar || !ev.start) continue;
+      const kind: "birthday" | "anniversary" | null = OCCASION_BIRTHDAY_RE.test(ev.summary)
+        ? "birthday"
+        : OCCASION_ANNIVERSARY_RE.test(ev.summary)
+        ? "anniversary"
+        : null;
+      if (!kind) continue;
+      const occasionIso = ev.start.slice(0, 10);
+      const dedupKey = `${ev.summary.trim().toLowerCase()}|${occasionIso}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, OCCASION_WISH_TIERS, kind, ctx.todayIso));
+    }
+  }
+  return alerts;
+}
+
+// Source 3 — seasonal/cultural occasions from Google's own subscribable holiday calendars
+// (fetchCalendarEvents tags these isHolidayCalendar: true, wider 25-day window). No per-holiday
+// classification needed — Google's calendar titles are already clean ("Diwali", "Labor Day").
+function detectHolidayOccasions(ctx: FamilyContext): AlertItem[] {
+  const seen = new Set<string>();
+  const alerts: AlertItem[] = [];
+  for (const parent of ctx.parentEvents) {
+    for (const ev of parent.events) {
+      if (!ev.isHolidayCalendar || !ev.start) continue;
+      const occasionIso = ev.start.slice(0, 10);
+      const dedupKey = `${ev.summary.trim().toLowerCase()}|${occasionIso}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, OCCASION_GIFT_TIERS, "holiday", ctx.todayIso));
+    }
+  }
+  return alerts;
+}
+
+export async function detectOccasions(ctx: FamilyContext, _runType: AgentRunType): Promise<OccasionResult> {
+  const settings = await getOccasionSettings(ctx.householdId);
+  if (!settings.enabled) return { hasOutput: false, alerts: [] };
+
+  const candidates: AlertItem[] = [
+    ...(await detectMemberBirthdays(ctx)),
+    ...detectCalendarOccasions(ctx),
+    ...detectHolidayOccasions(ctx),
+  ];
+
+  // Anti-spam pre-filter: drop any candidate already open, so a still-open tier alert doesn't
+  // repopulate allAlerts (and trip daily_delta's hasOutput gate) every day of its window.
+  const openKeys = new Set(ctx.openAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
+  const alerts = candidates.filter(c => !openKeys.has(alertDedupKey(c.alertType, c.affectedDate, c.reason)));
+
+  return { hasOutput: alerts.length > 0, alerts };
+}
+
+// ---------------------------------------------------------------------------
 // Domain 5 — Synthesis (per-parent digest)
 // ---------------------------------------------------------------------------
 
@@ -1027,6 +1240,7 @@ export async function synthesizeDigest(
     recipientHint: "Both",
   }));
   const allAlerts: AlertItem[] = [
+    ...domain.occasions.alerts,
     ...domain.coverageGaps.gaps,
     ...domain.nannyCoord.items,
     ...domain.deadlines.alerts,
@@ -1180,16 +1394,17 @@ export async function runFamilyAgent(
     const todayIso = computeTodayIso(now, env.TZ);
     const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts, calibrationBlock };
 
-    // Run domains 1+2 (merged, FIX #211), 3, 4 in parallel; domain 5 synthesizes their outputs
-    const [{ coverageGaps, nannyCoord }, research, deadlines] = await Promise.all([
+    // Run domains 1+2 (merged, FIX #211), 3, 4, occasions (#223) in parallel; domain 5 synthesizes
+    const [{ coverageGaps, nannyCoord }, research, deadlines, occasions] = await Promise.all([
       analyzeCoverageAndCoordination(ctx, runType),
       runProactiveResearch(ctx, runType),
       sweepDeadlines(ctx, runType),
+      detectOccasions(ctx, runType),
     ]);
 
     const analysis = await synthesizeDigest(
       ctx,
-      { coverageGaps, nannyCoord, research, deadlines },
+      { coverageGaps, nannyCoord, research, deadlines, occasions },
       runType,
       parents,
       financeContext

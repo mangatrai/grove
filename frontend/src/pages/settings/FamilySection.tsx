@@ -13,6 +13,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   TagsInput,
   Text,
@@ -189,6 +190,11 @@ export function FamilySection({ active }: FamilySectionProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [occasionNudgesEnabled, setOccasionNudgesEnabled] = useState(true);
+  const [occasionSettingsLoading, setOccasionSettingsLoading] = useState(false);
+  const [occasionSettingsSaving, setOccasionSettingsSaving] = useState(false);
+  const [occasionSettingsError, setOccasionSettingsError] = useState<string | null>(null);
+
   function initDrafts(ms: HouseholdMember[]) {
     const map: Record<string, MemberDraft> = {};
     for (const m of ms) {
@@ -235,6 +241,43 @@ export function FamilySection({ active }: FamilySectionProps) {
     if (!active) return;
     void load();
   }, [active, load]);
+
+  const loadOccasionSettings = useCallback(async () => {
+    setOccasionSettingsLoading(true);
+    setOccasionSettingsError(null);
+    try {
+      const res = await apiJson<{ settings: { enabled: boolean } }>("/api/family/occasion-settings");
+      setOccasionNudgesEnabled(res.settings.enabled);
+    } catch (e) {
+      setOccasionSettingsError(e instanceof Error ? e.message : "Failed to load occasion nudge settings");
+    } finally {
+      setOccasionSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadOccasionSettings();
+  }, [active, loadOccasionSettings]);
+
+  const toggleOccasionNudges = useCallback(async (enabled: boolean) => {
+    const prev = occasionNudgesEnabled;
+    setOccasionNudgesEnabled(enabled);
+    setOccasionSettingsSaving(true);
+    setOccasionSettingsError(null);
+    try {
+      const res = await apiFetch("/api/family/occasion-settings", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(`Failed to save (${res.status})`);
+    } catch (e) {
+      setOccasionNudgesEnabled(prev);
+      setOccasionSettingsError(e instanceof Error ? e.message : "Failed to save occasion nudge settings");
+    } finally {
+      setOccasionSettingsSaving(false);
+    }
+  }, [occasionNudgesEnabled]);
 
   function setDraftField<K extends keyof MemberDraft>(profileId: string, key: K, value: MemberDraft[K]) {
     setDrafts((prev) => ({
@@ -590,6 +633,25 @@ export function FamilySection({ active }: FamilySectionProps) {
 
       {/* ── Google Calendar ────────────────────────────────────────────────── */}
       <GCalSection active={active} />
+
+      <Divider my="lg" />
+
+      {/* ── Occasion nudges ───────────────────────────────────────────────── */}
+      <Paper p="md" withBorder radius="md">
+        <Stack gap="sm">
+          <Title order={3} size="h5">Occasion nudges</Title>
+          <Text c="dimmed" size="sm">
+            Birthday and holiday reminders in your weekly digest, with lead time to plan a gift.
+          </Text>
+          <Switch
+            label="Enable occasion nudges"
+            checked={occasionNudgesEnabled}
+            disabled={occasionSettingsLoading || occasionSettingsSaving}
+            onChange={(e) => void toggleOccasionNudges(e.currentTarget.checked)}
+          />
+          {occasionSettingsError ? <Alert color="red" p="xs">{occasionSettingsError}</Alert> : null}
+        </Stack>
+      </Paper>
 
       {/* ── Edit slot modal ───────────────────────────────────────────────── */}
       <Modal
