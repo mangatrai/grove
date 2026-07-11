@@ -1202,21 +1202,30 @@ function detectHolidayOccasions(ctx: FamilyContext): AlertItem[] {
 }
 
 export async function detectOccasions(ctx: FamilyContext, _runType: AgentRunType): Promise<OccasionResult> {
-  const settings = await getOccasionSettings(ctx.householdId);
-  if (!settings.enabled) return { hasOutput: false, alerts: [] };
+  try {
+    const settings = await getOccasionSettings(ctx.householdId);
+    if (!settings.enabled) return { hasOutput: false, alerts: [] };
 
-  const candidates: AlertItem[] = [
-    ...(await detectMemberBirthdays(ctx)),
-    ...detectCalendarOccasions(ctx),
-    ...detectHolidayOccasions(ctx),
-  ];
+    const candidates: AlertItem[] = [
+      ...(await detectMemberBirthdays(ctx)),
+      ...detectCalendarOccasions(ctx),
+      ...detectHolidayOccasions(ctx),
+    ];
 
-  // Anti-spam pre-filter: drop any candidate already open, so a still-open tier alert doesn't
-  // repopulate allAlerts (and trip daily_delta's hasOutput gate) every day of its window.
-  const openKeys = new Set(ctx.openAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
-  const alerts = candidates.filter(c => !openKeys.has(alertDedupKey(c.alertType, c.affectedDate, c.reason)));
+    // Anti-spam pre-filter: drop any candidate already open, so a still-open tier alert doesn't
+    // repopulate allAlerts (and trip daily_delta's hasOutput gate) every day of its window.
+    const openKeys = new Set(ctx.openAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
+    const alerts = candidates.filter(c => !openKeys.has(alertDedupKey(c.alertType, c.affectedDate, c.reason)));
 
-  return { hasOutput: alerts.length > 0, alerts };
+    return { hasOutput: alerts.length > 0, alerts };
+  } catch (err) {
+    // No LLM call here (unlike D1-D5) so failure means a DB problem (decryptDob already fails
+    // closed internally), but it must still fail closed itself. Otherwise a DB blip on this
+    // domain would throw uncaught through Promise.all in runFamilyAgent and take down
+    // coverage/research/deadlines with it too — same bug class FIX-195 fixed for D1/2/4/5.
+    log.warn("family-agent: detectOccasions failed", { householdId: ctx.householdId, err: String(err) });
+    return { hasOutput: false, alerts: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { qExec, qGet } from "../src/db/query.js";
+import * as dbQuery from "../src/db/query.js";
 
 // FIX #211: mock the LLM adapter layer so Domain 1-5 functions can be unit-tested for
 // (a) correctness of the merged D1+2 split and (b) which model tier each call actually uses,
@@ -1172,5 +1173,15 @@ describe("detectOccasions (#223 occasion nudge tiers)", () => {
 
     const result = await detectOccasions(ctx, "manual");
     expect(result.alerts.filter(a => a.reason.includes("Diwali"))).toHaveLength(1);
+  });
+
+  it("fails closed (no throw) when the settings lookup hits a DB error, so it can't take the whole agent run down", async () => {
+    const spy = vi.spyOn(dbQuery, "qGet").mockRejectedValueOnce(new Error("connection reset"));
+    try {
+      const result = await detectOccasions(dbCtx(), "manual");
+      expect(result).toEqual({ hasOutput: false, alerts: [] });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

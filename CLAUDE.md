@@ -94,6 +94,16 @@ Apply this whenever the investigation would require reading more than 2–3 file
 
 ---
 
+## IMPORTANT: Fail-Closed Error Handling in Fan-Out/Pipeline Code
+
+Any function that is one branch of a `Promise.all` (agent domains, batch jobs), a background poll/scheduler tick, or a cron-style job **must catch its own errors** and return a safe empty/no-op result — never let it throw uncaught. One failing branch must not take down its siblings.
+
+- Wrap the branch body in `try/catch`; on catch, `log.warn` (or `log.error` for genuinely unexpected failures) with enough context to debug — at minimum the entity ID (`householdId`, job ID, etc.) and `String(err)` — then return the type's safe empty value (`{ hasOutput: false, alerts: [] }`, `[]`, `null`, etc.), matching whatever the success path's "nothing to report" shape already is.
+- This applies even to fully deterministic code with no LLM/external call — a DB blip or unexpected null is enough to throw. Don't assume "it's just a DB read" means it can't fail.
+- Precedent: `backend/src/modules/family/family-agent.service.ts` — every Domain function (`analyzeCoverageAndCoordination`, `runProactiveResearch`, `sweepDeadlines`, `synthesizeDigest`, `detectOccasions`) wraps its own body and fails closed, so `runFamilyAgent`'s `Promise.all` never fails wholesale because one domain choked. Check this pattern is still intact whenever you add a new domain/branch to that file.
+
+---
+
 ## IMPORTANT: Documentation Structure (6 canonical docs — do not create new files)
 
 All documentation lives in exactly these 6 files. When adding or updating docs, route content to the right file:

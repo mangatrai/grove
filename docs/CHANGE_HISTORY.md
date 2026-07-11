@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — detectOccasions missing try/catch — DB failure would fail entire agent run (2026-07-11)
+
+**What changed:** `detectOccasions` (shipped in #223) had no try/catch, unlike every other `runFamilyAgent` domain (D1/D2/D4/D5, hardened in FIX-195/#163). Wrapped its body in try/catch; on error, `log.warn` with `householdId` + error, returns `{ hasOutput: false, alerts: [] }` instead of throwing.
+
+**Why:** Caught during a self-review pass triaging the open audit backlog — an uncaught throw here (e.g. a DB connection blip on `getOccasionSettings` or the member-birthday query) would propagate through `Promise.all` in `runFamilyAgent` and fail the *entire* agent run, taking coverage gaps/research/deadlines down with it, not just occasion nudges. `decryptDob` was checked and already fails closed internally, so the DB layer was the real remaining gap.
+
+**Also:** added a standing CLAUDE.md section ("Fail-Closed Error Handling in Fan-Out/Pipeline Code") codifying this pattern for any future `Promise.all` branch, background poll, or cron job, so it isn't reintroduced by the next new domain.
+
+**Tests:** `npm run test -w backend` — added 1 test (`vi.spyOn` on `qGet` forcing a rejection, asserts safe-empty return); 666/666 backend-wide.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/tests/family-agent.test.ts`, `CLAUDE.md`.
+
+**GitHub:** closes [#225](https://github.com/mangatrai/grove/issues/225).
+
+---
+
 ## FEAT — Family agent: occasion awareness — birthday/holiday lead-time nudges, Phase 1 (2026-07-09)
 
 **What changed:** New agent domain `detectOccasions` (`family-agent.service.ts`) runs alongside coverage/coordination, proactive research, and deadline sweeping on every agent run, and feeds the existing `allAlerts` → `writeAlerts` → digest pipeline. Fully deterministic — no LLM, no Tavily.
