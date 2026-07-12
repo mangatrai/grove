@@ -147,6 +147,12 @@ const envSchema = z.object({
   /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
   TAVILY_API_KEY: z.string().optional(),
   /**
+   * PA agent task loop (#164): max non-failed pa_task_run rows per household per calendar month.
+   * Run-count ceiling chosen over a dollar ceiling — no price-table maintenance, predictable for the user.
+   * At cap, runPATask() writes a refused_budget row and returns PA_BUDGET_EXCEEDED.
+   */
+  PA_TASK_MAX_RUNS_PER_MONTH: optionalIntEnv(60, 1, 10000),
+  /**
    * OpenAI embedding model for pgvector RAG (protest document store).
    * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
    * Defaults to text-embedding-3-small (1536 dims).

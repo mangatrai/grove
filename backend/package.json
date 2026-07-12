@@ -12,7 +12,8 @@
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
     "test": "bash -c 'export MODE=TEST; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed --dev-seeds && vitest run'",
-    "extract-payslip-llm": "tsx scripts/extract-payslip-llm.ts"
+    "extract-payslip-llm": "tsx scripts/extract-payslip-llm.ts",
+    "pa-task-eval": "tsx scripts/pa-task-eval.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

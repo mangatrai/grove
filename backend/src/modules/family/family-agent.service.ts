@@ -296,9 +296,11 @@ async function writeDigestLog(
 // are already correctly localized to whatever the household actually subscribes to.
 const HOLIDAY_CALENDAR_ID_SUFFIX = "#holiday@group.v.calendar.google.com";
 
-async function fetchCalendarEvents(
+/** #164 C4: optional explicit window override, used by search_calendar for arbitrary date ranges. Defaults preserve existing 14-day/25-day behavior for the weekly-digest caller. */
+export async function fetchCalendarEvents(
   parent: ConnectedParent,
-  _opts: { fullFetch: boolean }
+  _opts: { fullFetch: boolean },
+  window?: { timeMin: string; timeMax: string }
 ): Promise<CalendarEvent[]> {
   const refreshToken = await getDecryptedRefreshToken(parent.userId);
   if (!refreshToken) {
@@ -308,8 +310,8 @@ async function fetchCalendarEvents(
   const auth = buildOAuth2Client(refreshToken);
   const calendar = google.calendar({ version: "v3", auth });
 
-  const timeMin = new Date().toISOString();
-  const timeMax = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  const timeMin = window?.timeMin ?? new Date().toISOString();
+  const timeMax = window?.timeMax ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
   // Fetch calendar list unconditionally — needed for names (role heuristic + prompt provenance),
   // not just to discover IDs when none were explicitly selected (FIX #212).

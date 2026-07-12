@@ -292,5 +292,7 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   // Notification rows are transient UI state — not restored from backups
   "notification",
   "notification_preference",
-  "protest_document_chunks"
+  "protest_document_chunks",
+  // PA task loop run history — job-run log, same bucket as import_job/export_job/insight_job
+  "pa_task_run"
 ];

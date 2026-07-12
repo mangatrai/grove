@@ -643,6 +643,12 @@ Reuses the existing `SMTP_USER`/`SMTP_PASS` credentials (§8) as the IMAP login 
 
 **If `FAMILY_INBOX_IMAP_HOST` is unset, or `SMTP_USER`/`SMTP_PASS` are not set, the daily inbox poll no-ops silently.** See §10.4 for full setup steps and the rationale for using a dedicated IMAP mailbox instead of the per-parent Google OAuth integration.
 
+### 4.13 PA Agent Task Loop (Optional)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household monthly ceiling on `runPATask` runs. See §10.6. |
+
 ---
 
 ## 5. Database Architecture
@@ -1209,6 +1215,26 @@ A new agent domain, `detectOccasions`, runs on every agent run alongside coverag
 **No new env vars, no new cost** — this reuses the existing Google Calendar OAuth connection from §10.1–10.2; no additional API scopes are required (holiday calendars are read the same way as any other calendar the account has access to).
 
 **Explicitly deferred:** the Phase 2 auto-enqueue gift-research bridge (turning a `[GIFT-IDEAS]` alert into an automatic Tavily research task) is out of scope for this ship, gated on issue #164.
+
+### 10.6 PA Agent Task Loop — Open-Ended Research (Phase 2a/2c, #164/#166)
+
+`runPATask(goal, householdId)` (`backend/src/modules/family/pa-task-runner.ts`) runs a bounded, BabyAGI-style loop for open-ended goals the fixed 5-domain pipeline above can't handle — e.g. "find cheaper flights DFW→Delhi in December", "find a gift for [member] under $40". **Not yet HTTP-reachable** — no route is wired up (that's issue #167); it's a standalone function today, callable from tests or a future scheduled bridge.
+
+Each run: up to 6 iterations of decide-next-step → run one of `search_web` / `fetch_page` / `search_calendar` / `search_finance_context` → compress the result → repeat, then a final synthesis call. Every run — including refused ones — is persisted to `pa_task_run` (migration `0083_pa_task_run.sql`): status, iteration count, the uncompressed findings ledger, compressed history, and accumulated LLM/Tavily usage.
+
+**Environment variables:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household ceiling on non-failed `pa_task_run` rows in the current calendar month. At cap, `runPATask` writes a `refused_budget` row and returns `PA_BUDGET_EXCEEDED` without making any LLM or Tavily calls. A run-count ceiling was chosen over a dollar ceiling — no per-model price table to keep current, and it's predictable for the user ("60 research tasks a month"). |
+
+**Cost:** each run makes roughly 8–13 LLM calls (up to 6 loop-decision + 6 compression calls on `chatModel()`, 1 synthesis call on `strongModel()`) plus one Tavily call per `search_web`/`fetch_page` tool use. `pa_task_run.estimated_cost_usd` is left `null` — deliberately not computed from a static per-model price table that would go stale.
+
+**Data handling:** `pa_task_run` is registered in `EXPORT_EPHEMERAL_TABLES` (`export-registry.ts`) — operational run history, same bucket as `import_job`/`export_job`/`insight_job`, not restored from backups.
+
+**Honesty guardrails:** Tavily search snippets can't return live JS-rendered prices (Google Flights, retailer carts). Synthesis is instructed to cite every price/availability claim to its findings-ledger source + observation date ("observed \<date\> — verify at \<link\>"), never assert a live quote, and say "could not verify" rather than fill in a gap — so a flight-research goal returns constraint-satisfying routes/options + typical price ranges + booking links, not fabricated fares.
+
+**Testing:** `backend/tests/pa-task-runner.test.ts` covers loop mechanics only (mocked LLM + Tavily). Live-provider quality is checked manually via `npm run pa-task-eval -w backend -- "<goal>" [householdId]` (`backend/scripts/pa-task-eval.ts`) before shipping any change to the loop — not part of `npm test`.
 
 ---
 

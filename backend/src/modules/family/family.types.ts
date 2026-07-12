@@ -115,6 +115,31 @@ export type CaptureResult = {
   actions: CaptureAction[];
 };
 
+// ── PA task loop (#164) ───────────────────────────────────────────────────────
+
+/**
+ * Verbatim fact extracted by the compression step (#164 A1). A second, uncompressed
+ * accumulator alongside the compressed loop history so prices/contacts/URLs survive
+ * to final synthesis, which a 150-token summary would otherwise drop.
+ */
+export type PAFinding = {
+  fact: string;
+  entity: string | null;
+  sourceUrl: string | null;
+  /** ISO date the tool call that produced this fact ran. */
+  dateObserved: string;
+  kind: "price" | "contact" | "option" | "constraint" | "other";
+};
+
+export type PATaskResult = {
+  goal: string;
+  /** 2-5 sentence synthesis for the user. */
+  summary: string;
+  actions: CaptureAction[];
+  iterationsUsed: number;
+  hitIterationCap: boolean;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UpdateAvailabilityInput = {
