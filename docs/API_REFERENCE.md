@@ -2812,13 +2812,57 @@ Returns the backup file as binary attachment when job finished successfully.
 
 ---
 
-### `POST /exports/household/import`
+### `POST /exports/household/import/prepare` (SEC #186)
 
 **Auth:** Bearer JWT. **Role:** owner only.
 
-Queues a **restore** job: wipes household-scoped data (FK-safe order), reloads from `.hfb` bundle (remaps bundle `householdId` to current household). `import_file` rows not restored; `import_file_id` cleared on balance snapshots/payslips.
+Step 1 of the two-phase restore flow. Validates the uploaded `.hfb` (reads and returns its
+manifest, same shape as `POST /exports/preview`) and stashes the file server-side under a
+short-lived confirmation token — it does **not** modify the database. A direct call to a
+single "restore now" endpoint no longer exists; every restore must go through `prepare` then
+`execute`.
 
 **Content-Type:** `multipart/form-data` with field **`file`** — `.hfb` backup.
+
+**Response 200:**
+```json
+{
+  "token": "uuid",
+  "exportVersion": 4,
+  "exportedAt": "2026-04-30T00:00:00.000Z",
+  "encrypted": false,
+  "scope": "household | member",
+  "personProfileId": "uuid-or-null",
+  "format": "zip-split-v4",
+  "tables": { "transaction_canonical": { "rows": 1234 } },
+  "totalRows": 1234
+}
+```
+
+The `token` is single-use and expires after **15 minutes** if `execute` is never called; expired
+or already-consumed prepared files are swept (and deleted from disk) lazily on the next call to
+either `prepare` or `execute`.
+
+**Errors:**
+- **400** — No file, not `.hfb`, or the file could not be read as a valid backup.
+- **413** — Upload over **500 MB**.
+- **422** — Encrypted but `BACKUP_ENCRYPTION_KEY` not configured.
+
+---
+
+### `POST /exports/household/import/execute` (SEC #186)
+
+**Auth:** Bearer JWT. **Role:** owner only.
+
+Step 2 of the two-phase restore flow. Consumes the token returned by `prepare` and queues the
+actual **restore** job: wipes household-scoped data (FK-safe order), reloads from the prepared
+`.hfb` bundle (remaps bundle `householdId` to current household). `import_file` rows not
+restored; `import_file_id` cleared on balance snapshots/payslips.
+
+**Content-Type:** `application/json`
+```json
+{ "token": "uuid" }
+```
 
 **Response 202:**
 ```json
@@ -2831,12 +2875,17 @@ Queues a **restore** job: wipes household-scoped data (FK-safe order), reloads f
 After success, JWTs for household users are invalidated; client should sign out.
 
 **Errors:**
-- **400** — No file, or not `.hfb`.
-- **413** — Upload over **500 MB**.
+- **400** — Missing/invalid `token` field (`{ errors: z.issues }`).
+- **410** — `PREPARE_TOKEN_EXPIRED` — token missing, expired, already used, or issued to a
+  different household/user.
 
 ---
 
 ### `POST /exports/preview`
+
+Unaffected by SEC #186 — still a standalone read-only preview (always deletes its upload) kept
+for callers that only want a manifest without ever restoring. The device restore UI now calls
+`prepare` instead, since `prepare`'s response already includes the manifest.
 
 **Auth:** Bearer JWT. **Role:** owner only.
 

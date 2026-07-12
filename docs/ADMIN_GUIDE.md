@@ -769,11 +769,22 @@ Both tables are registered in the export registry (restoreOrder 21–22) and inc
 3. On confirm: **destructive** — entire household wiped and replaced with bundle contents
 4. All JWTs invalidated (`token_version` bumped for all users); users automatically signed out
 
-**API:** `POST /exports/household/import` (multipart `file`) → `{ jobId }` → poll `GET /exports/import/:jobId`.
+**API (SEC #186, two-phase):**
+1. `POST /exports/household/import/prepare` (multipart `file`) → validates the backup and returns
+   `{ token, ...manifest }`. Nothing is modified yet.
+2. `POST /exports/household/import/execute` (JSON `{ token }`) → `{ jobId }` → poll
+   `GET /exports/import/:jobId`. The token is single-use and expires after 15 minutes.
+
+A direct single-call "restore now" endpoint no longer exists — a script or client can no longer
+skip the preview step and trigger a destructive restore in one shot.
 
 **Backward compatibility:** Supports v1–v4 bundle formats (single `household-bundle.json` → split JSON).
 
 **After restore:** Canonical transactions may reference deleted custom categories. Always use `LEFT JOIN category`, never `INNER JOIN` (see §5.1 and CLAUDE.md).
+
+**Undoing a bad restore:** there is no automatic pre-restore safety snapshot. If a restore turns
+out to be wrong, recover by restoring again from the most recent daily `pg_dump` backup (below) —
+daily backups are the intended recovery path for this scenario, not an in-app undo.
 
 #### Manual pg_dump Backup (OCI / Self-Hosted)
 

@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — SEC #186: two-phase confirmation for household restore (2026-07-11)
+
+**What changed:** `POST /exports/household/import` (single-shot upload → immediate wipe-and-restore) is replaced with a two-phase flow:
+1. `POST /exports/household/import/prepare` — validates the uploaded `.hfb`, returns its manifest, and stashes the file server-side under a short-lived (15 min), single-use confirmation token (in-memory `Map`, new `restore-prepare-token.store.ts` — no schema change).
+2. `POST /exports/household/import/execute` — consumes the token and queues the actual restore job, unchanged from today's `queueHouseholdImport`/`scheduleImportJobProcessing` pipeline.
+
+The frontend (`BackupRestoreSection.tsx`) now uploads the file once, at `prepare` time, instead of twice (preview + restore) — `prepare`'s response already includes the manifest, so the separate `POST /exports/preview` call the device-restore UI used to make is no longer needed for that flow. `/exports/preview` itself is unchanged and still available (always deletes its upload, doesn't touch the database, has its own RBAC test coverage).
+
+**Why:** Filed as a P3 audit finding: the frontend's "preview, then confirm" UX was purely client-side — nothing stopped a direct/scripted call straight to `/household/import` from skipping the preview and immediately wiping household data. Owner reduced scope on 2026-07-04 to match the issue's own sketch (token-gated two-step split, no schema change, no automatic pre-restore safety export — daily backups already make a bad restore recoverable). Google Drive restore (`POST /gdrive/restore`, `gdrive-backup.service.ts`) is a separate code path not cited in the filed issue's evidence and is left untouched, same deferral already applied to that module in SEC #188.
+
+**Tests:** 6 new (`restore-prepare-token.test.ts` — token create/consume, single-use, wrong household/user, expiry, sweep) + 5 new/rewritten in `app.test.ts` (garbage/encrypted-no-key now rejected synchronously at `prepare`, not async job failure; bad/missing-token `execute` rejected 410/400; token is single-use) + 2 updated in `rbac.test.ts` (admin blocked on both `prepare` and `execute`). `npm run test -w backend` — 696/696 (one unrelated flaky `ECONNRESET` on an unrelated cash-summary test, confirmed by isolated re-run).
+
+**Files:** `backend/src/modules/export/restore-prepare-token.store.ts` (new), `backend/src/modules/export/exports.routes.ts`, `backend/tests/restore-prepare-token.test.ts` (new), `backend/tests/app.test.ts`, `backend/tests/rbac.test.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`, `docs/ADMIN_GUIDE.md`.
+
+**GitHub:** closes [#186](https://github.com/mangatrai/grove/issues/186).
+
+---
+
 ## FIX — SEC #189: cross-household access regression test (2026-07-11)
 
 **What changed:** Added `backend/tests/cross-household-access.test.ts` — logs in as two separately-seeded households (A and B) and, using household B's token, attempts to GET/PATCH/DELETE household A's transaction, payslip, financial account, and protest property by direct ID. Asserts 404 on every attempt, and that `GET /imports/accounts` under household B never lists household A's account. Includes 4 "sanity" tests (household A on its own resources) so the suite can't pass vacuously if a route started 404ing for everyone.

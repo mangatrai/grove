@@ -241,11 +241,19 @@ describe("admin permissions", () => {
 // ─── Admin owner-only restrictions ───────────────────────────────────────────
 
 describe("admin cannot access owner-only endpoints", () => {
-  it("admin cannot restore from backup (POST /exports/household/import)", async () => {
-    // /exports/household/import is requireRole(["owner"]) — admin is blocked
+  it("admin cannot prepare a restore from backup (POST /exports/household/import/prepare)", async () => {
+    // SEC #186: restore is now prepare+execute; both are requireRole(["owner"]) — admin is blocked
     const res = await request(app)
-      .post("/exports/household/import")
+      .post("/exports/household/import/prepare")
       .set("authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("admin cannot execute a restore from backup (POST /exports/household/import/execute)", async () => {
+    const res = await request(app)
+      .post("/exports/household/import/execute")
+      .set("authorization", `Bearer ${adminToken}`)
+      .send({ token: "irrelevant-blocked-before-token-check" });
     expect(res.status).toBe(403);
   });
 

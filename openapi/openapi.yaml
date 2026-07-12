@@ -2234,9 +2234,10 @@ paths:
       tags: [gdrive]
       summary: Restore household from a Drive backup file
       description: |
-        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline as
-        `POST /exports/household/import`. Poll `GET /exports/import/{jobId}` until terminal status; JWTs may be
-        invalidated after success (same as local restore).
+        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline used
+        by the device-upload restore (`POST /exports/household/import/execute`), skipping that flow's separate
+        prepare/token step since the file is already server-fetched. Poll `GET /exports/import/{jobId}` until
+        terminal status; JWTs may be invalidated after success (same as local restore).
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -3989,16 +3990,16 @@ paths:
               schema: { $ref: '#/components/schemas/LineItemMutationResult' }
         "404":
           description: Line item not found or not owned by this household
-  /exports/household/import:
+  /exports/household/import/prepare:
     post:
       tags: [exports]
-      summary: Restore household from exported .hfb backup (async, destructive)
+      summary: "SEC #186 step 1: validate an .hfb backup and issue a restore confirmation token"
       description: |
-        `multipart/form-data` with field **`file`** (`.hfb` only). Queues **wipe-then-restore** for the
-        authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
-        Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
-        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 4** (manifest + one JSON
-        per table); v1/v2 monolithic bundles are still accepted. See `docs/API_EXPORTS.md`.
+        `multipart/form-data` with field **`file`** (`.hfb` only). Reads and returns the manifest (same
+        shape as `POST /exports/preview`) and stashes the file server-side under a short-lived, single-use
+        **`token`**. Does not modify the database. A direct single-shot "restore now" endpoint no longer
+        exists — every restore must call this, then `POST /exports/household/import/execute` with the
+        returned token. The token expires after 15 minutes if never executed.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -4013,6 +4014,45 @@ paths:
                   format: binary
                   description: .hfb backup produced by export job download
       responses:
+        "200":
+          description: Manifest summary plus a confirmation token for /execute
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BackupPreviewResponse'
+                  - type: object
+                    required: [token]
+                    properties:
+                      token:
+                        type: string
+        "400":
+          description: Missing `file` field, not a `.hfb`, or the file could not be read as a valid backup
+        "413":
+          description: File exceeds upload limit (500 MB)
+        "422":
+          description: Backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured
+  /exports/household/import/execute:
+    post:
+      tags: [exports]
+      summary: "SEC #186 step 2: consume a prepare token and queue the restore"
+      description: |
+        Consumes the single-use **`token`** returned by `POST /exports/household/import/prepare` and queues
+        **wipe-then-restore** for the authenticated household. Poll **`GET /exports/import/{jobId}`** until
+        `status` is terminal. Successful restore increments **`app_user.token_version`** (all JWTs for that
+        household's users become invalid).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
         "202":
           description: Restore job accepted; poll import job status
           content:
@@ -4026,9 +4066,9 @@ paths:
                   message:
                     type: string
         "400":
-          description: Missing `file` field or not a `.hfb`
-        "413":
-          description: File exceeds upload limit (500 MB)
+          description: Missing/invalid `token` field
+        "410":
+          description: "PREPARE_TOKEN_EXPIRED — token missing, expired, already used, or issued to a different household/user"
   /exports/preview:
     post:
       tags: [exports]

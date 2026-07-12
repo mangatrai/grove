@@ -21,6 +21,26 @@ const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 const SEED_CHASE_CC = "40000000-0000-0000-0000-000000000005";
 const SEED_MARCUS_SAVINGS = "40000000-0000-0000-0000-000000000006";
 
+/** SEC #186: restore is now a two-phase prepare (upload -> token) + execute (token -> job) flow. */
+async function startRestore(
+  token: string,
+  buffer: Buffer,
+  filename: string
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const prepare = await request(app)
+    .post("/exports/household/import/prepare")
+    .set("authorization", `Bearer ${token}`)
+    .attach("file", buffer, filename);
+  if (prepare.status !== 200) {
+    return { status: prepare.status, body: prepare.body as Record<string, unknown> };
+  }
+  const execute = await request(app)
+    .post("/exports/household/import/execute")
+    .set("authorization", `Bearer ${token}`)
+    .send({ token: prepare.body.token as string });
+  return { status: execute.status, body: execute.body as Record<string, unknown> };
+}
+
 describe("app health", () => {
   it("returns ok from health endpoint", async () => {
     const response = await request(app).get("/health");
@@ -165,10 +185,7 @@ describe("exports/imports roundtrip (CR-125)", () => {
     expect(manifest.tables["resolution_item"]).toBeDefined();
     expect(manifest.tables["household_ai_insight"]).toBeDefined();
 
-    const restoreStart = await request(app)
-      .post("/exports/household/import")
-      .set("authorization", `Bearer ${token}`)
-      .attach("file", zipBuffer, "cr125-bundle.hfb");
+    const restoreStart = await startRestore(token, zipBuffer, "cr125-bundle.hfb");
     expect(restoreStart.status).toBe(202);
     const importJobId = restoreStart.body.jobId as string;
 
@@ -339,10 +356,7 @@ describe("backup encryption (CR-126)", () => {
       const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
       expect(manifest.encrypted).toBe(false);
 
-      const restoreStart = await request(app)
-        .post("/exports/household/import")
-        .set("authorization", `Bearer ${owner.token}`)
-        .attach("file", fileBuffer, "cr126-unencrypted.hfb");
+      const restoreStart = await startRestore(owner.token, fileBuffer, "cr126-unencrypted.hfb");
       expect(restoreStart.status).toBe(202);
 
       const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
@@ -379,10 +393,7 @@ describe("backup encryption (CR-126)", () => {
       const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
       expect(manifest.encrypted).toBe(true);
 
-      const restoreStart = await request(app)
-        .post("/exports/household/import")
-        .set("authorization", `Bearer ${owner.token}`)
-        .attach("file", fileBuffer, "cr126-encrypted.hfb");
+      const restoreStart = await startRestore(owner.token, fileBuffer, "cr126-encrypted.hfb");
       expect(restoreStart.status).toBe(202);
 
       const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
@@ -413,40 +424,125 @@ describe("backup encryption (CR-126)", () => {
 
       env.BACKUP_ENCRYPTION_KEY = undefined;
 
-      const restoreStart = await request(app)
-        .post("/exports/household/import")
+      // SEC #186: readHfbManifestFromFile now runs synchronously at /prepare, so an
+      // encrypted-no-key backup is rejected immediately — it never becomes a queued job.
+      const prepareStart = await request(app)
+        .post("/exports/household/import/prepare")
         .set("authorization", `Bearer ${owner.token}`)
         .attach("file", encryptedBuffer, "cr126-encrypted-no-key.hfb");
-      expect(restoreStart.status).toBe(202);
-
-      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
-        email: owner.ownerEmail,
-        password: owner.ownerPassword
-      });
-      expect(result.status).toBe("failed");
-      expect(result.error ?? "").toContain("encrypted");
-      expect(result.error ?? "").toContain("BACKUP_ENCRYPTION_KEY");
+      expect(prepareStart.status).toBe(422);
+      expect(prepareStart.body.message ?? "").toContain("encrypted");
+      expect(prepareStart.body.message ?? "").toContain("BACKUP_ENCRYPTION_KEY");
     } finally {
       env.BACKUP_ENCRYPTION_KEY = originalKey;
     }
   }, 120_000);
 
-  it("restore of a corrupt (non-zip) .hfb file fails with the generic safe message, not raw internals (SEC #188)", async () => {
+  it("restore prepare of a corrupt (non-zip) .hfb file is rejected immediately, before any job is queued", async () => {
     const owner = await createOwnerContext("corrupt-zip");
     const garbage = Buffer.from("this is not a zip file at all, just garbage bytes 12345");
 
-    const restoreStart = await request(app)
-      .post("/exports/household/import")
+    // SEC #186: manifest validation happens at /prepare, so a corrupt file fails fast (400)
+    // rather than being queued as a job doomed to fail (the SEC #188 job-error-sanitization
+    // guarantee for genuinely mid-restore failures is covered separately by
+    // export-job-error-sanitization.test.ts).
+    const prepareStart = await request(app)
+      .post("/exports/household/import/prepare")
       .set("authorization", `Bearer ${owner.token}`)
       .attach("file", garbage, "cr126-corrupt.hfb");
-    expect(restoreStart.status).toBe(202);
+    expect(prepareStart.status).toBe(400);
+    expect(prepareStart.body.message ?? "").not.toContain(resolveDataPath("data"));
+  }, 120_000);
+});
 
-    const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
-      email: owner.ownerEmail,
-      password: owner.ownerPassword
-    });
-    expect(result.status).toBe("failed");
-    expect(result.error).toBe("Job failed due to a system error. Check server logs for details.");
+describe("SEC #186: two-phase restore confirmation", () => {
+  async function createOwnerContext(seed: string): Promise<{ token: string }> {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerProfileId = crypto.randomUUID();
+    const ownerEmail = `sec186-owner-${seed}-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'SEC-186 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'SEC-186 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const login = await request(app).post("/auth/login").send({ email: ownerEmail, password: ownerPassword });
+    expect(login.status).toBe(200);
+    return { token: login.body.token as string };
+  }
+
+  it("execute with a missing/garbage token is rejected (the direct-execute bypass is closed)", async () => {
+    const owner = await createOwnerContext("bad-token");
+    const res = await request(app)
+      .post("/exports/household/import/execute")
+      .set("authorization", `Bearer ${owner.token}`)
+      .send({ token: "not-a-real-token" });
+    expect(res.status).toBe(410);
+    expect(res.body.code).toBe("PREPARE_TOKEN_EXPIRED");
+  });
+
+  it("execute with no token in the body is rejected with a 400 (zod validation)", async () => {
+    const owner = await createOwnerContext("no-token");
+    const res = await request(app)
+      .post("/exports/household/import/execute")
+      .set("authorization", `Bearer ${owner.token}`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it("a prepare token is single-use: executing it twice fails the second time", async () => {
+    const owner = await createOwnerContext("single-use");
+    const originalBackupKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const startExport = await request(app)
+        .post("/exports/household")
+        .set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+      for (let i = 0; i < 40; i += 1) {
+        const poll = await request(app).get(`/exports/${exportJobId}`).set("authorization", `Bearer ${owner.token}`);
+        if ((poll.body.status as string) === "complete") break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      const download = await request(app)
+        .get(`/exports/${exportJobId}/download`)
+        .set("authorization", `Bearer ${owner.token}`);
+      expect(download.status).toBe(200);
+
+      const prepare = await request(app)
+        .post("/exports/household/import/prepare")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", download.body as Buffer, "sec186-single-use.hfb");
+      expect(prepare.status).toBe(200);
+      const token = prepare.body.token as string;
+
+      const firstExecute = await request(app)
+        .post("/exports/household/import/execute")
+        .set("authorization", `Bearer ${owner.token}`)
+        .send({ token });
+      expect(firstExecute.status).toBe(202);
+
+      const secondExecute = await request(app)
+        .post("/exports/household/import/execute")
+        .set("authorization", `Bearer ${owner.token}`)
+        .send({ token });
+      expect(secondExecute.status).toBe(410);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalBackupKey;
+    }
   }, 120_000);
 });
 
@@ -707,7 +803,7 @@ describe("auth and rbac baseline", () => {
 
     // Members CANNOT restore from backup (blocked, owner only)
     const restoreRes = await request(app)
-      .post("/exports/household/import")
+      .post("/exports/household/import/prepare")
       .set("authorization", `Bearer ${token}`);
     expect(restoreRes.status).toBe(403);
   });
