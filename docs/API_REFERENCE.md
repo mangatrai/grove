@@ -2789,6 +2789,8 @@ Poll export job status.
 }
 ```
 
+- **`error`** — when `status = failed`, a fixed safe message ("Job failed due to a system error. Check server logs for details."); never the raw exception text. Full error detail is server-side only (`log.error`).
+
 **Errors:**
 - **403** — `FORBIDDEN` — member attempted to view another user's export job.
 - **404** — `EXPORT_JOB_NOT_FOUND`.
@@ -2879,6 +2881,7 @@ Poll import (restore) job status.
 ```
 
 - **`stats`** — per-table row count when complete.
+- **`error`** — when `status = failed`, a fixed safe message ("Job failed due to a system error. Check server logs for details."); never the raw exception text. Full error detail is server-side only (`log.error`).
 
 **Errors:**
 - **404** — `IMPORT_JOB_NOT_FOUND`.

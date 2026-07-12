@@ -11,7 +11,8 @@ import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
 import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
-import { assertRestoreInsertColumnNames } from "./restore-insert-validation.js";
+import { ExportUserFacingError } from "./export-errors.js";
+import { assertRestoreInsertColumnNames, assertRestoreTableName } from "./restore-insert-validation.js";
 import { createNotification } from "../notifications/notification.service.js";
 
 export type HfbManifestPreview = {
@@ -184,7 +185,7 @@ async function readZipEntries(data: Buffer): Promise<ZipContents> {
   };
 
   const manifestText = await readEntry("manifest.json");
-  if (!manifestText) throw new Error("ZIP is missing manifest.json");
+  if (!manifestText) throw new ExportUserFacingError("ZIP is missing manifest.json");
   const manifest = JSON.parse(manifestText) as Record<string, unknown>;
   const version = manifest.exportVersion as number;
   const tables = new Map<string, ExportRow[]>();
@@ -192,16 +193,18 @@ async function readZipEntries(data: Buffer): Promise<ZipContents> {
   if (version === 4 || version === 3) {
     // Split-file format: each table has its own JSON file listed in manifest.tables.
     const tableIndex = manifest.tables as Record<string, { file: string }> | undefined;
-    if (!tableIndex) throw new Error("manifest.json is missing 'tables' index (expected exportVersion 3/4 format)");
+    if (!tableIndex)
+      throw new ExportUserFacingError("manifest.json is missing 'tables' index (expected exportVersion 3/4 format)");
     for (const [key, meta] of Object.entries(tableIndex)) {
       const text = await readEntry(meta.file);
-      if (text == null) throw new Error(`ZIP is missing table file: ${meta.file} (table: ${key})`);
+      if (text == null) throw new ExportUserFacingError(`ZIP is missing table file: ${meta.file} (table: ${key})`);
       tables.set(normalizeTableKey(key), JSON.parse(text) as ExportRow[]);
     }
   } else if (version === 1 || version === 2) {
     // Legacy single-bundle format: map bundle keys → table keys.
     const bundleText = await readEntry("household-bundle.json");
-    if (!bundleText) throw new Error("ZIP is missing household-bundle.json (expected for exportVersion 1/2)");
+    if (!bundleText)
+      throw new ExportUserFacingError("ZIP is missing household-bundle.json (expected for exportVersion 1/2)");
     const bundle = JSON.parse(bundleText) as Record<string, unknown>;
     const legacyMap: Record<string, string> = {
       household: "household",
@@ -225,7 +228,7 @@ async function readZipEntries(data: Buffer): Promise<ZipContents> {
       }
     }
   } else {
-    throw new Error(`Unsupported export version: ${String(version)}. Expected 1, 2, 3, or 4.`);
+    throw new ExportUserFacingError(`Unsupported export version: ${String(version)}. Expected 1, 2, 3, or 4.`);
   }
 
   return { manifest, tables };
@@ -248,7 +251,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
     let zipBuffer: Buffer;
     if (isEncryptedBackup(rawBuffer)) {
       if (!env.BACKUP_ENCRYPTION_KEY) {
-        throw new Error(
+        throw new ExportUserFacingError(
           "This backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured on this server. " +
           "Set BACKUP_ENCRYPTION_KEY to the key used when this backup was created."
         );
@@ -260,7 +263,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
     const { manifest, tables } = await readZipEntries(zipBuffer);
 
     const bundleHouseholdId = manifest.householdId as string;
-    if (!bundleHouseholdId) throw new Error("manifest.json is missing householdId");
+    if (!bundleHouseholdId) throw new ExportUserFacingError("manifest.json is missing householdId");
 
     function remap<T extends Record<string, unknown>>(r: T): T {
       const out: Record<string, unknown> = {};
@@ -272,6 +275,12 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
 
     const stats: ImportStats = {};
     const ordered = [...EXPORT_REGISTRY].sort((a, b) => a.restoreOrder - b.restoreOrder);
+    // Defense-in-depth (SEC #187): tableName always comes from EXPORT_REGISTRY, never the
+    // uploaded file, but assert it against an allowlist before any interpolation regardless.
+    const knownTableNames = new Set(EXPORT_REGISTRY.map((e) => e.tableName));
+    for (const entry of ordered) {
+      assertRestoreTableName(entry.tableName, knownTableNames);
+    }
     let deferredHouseholdFks:
       | { owner_user_id: string | null; salary_deposit_financial_account_id: string | null }
       | null = null;
@@ -379,6 +388,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
             const next = { ...first };
             delete next[entry.householdIdColumn];
             if (Object.keys(next).length > 0) {
+              assertRestoreInsertColumnNames(entry.tableName, next);
               const updateColumns = Object.keys(next);
               const updateSet = updateColumns.map((column) => `${column} = ?`).join(", ");
               const updateValues = updateColumns.map((column) => next[column]);
@@ -395,6 +405,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
 
         for (const row of rows) {
           if (entry.tableName === "app_user") {
+            assertRestoreInsertColumnNames("app_user", row);
             const updateRow = { ...row };
             delete updateRow.id;
             const insertColumns = Object.keys(row);
@@ -450,8 +461,18 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
       actionUrl: "/dashboard"
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await qExec(`UPDATE import_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);
+    // Only ExportUserFacingError messages (deliberately worded, no internals) are safe to persist
+    // and return to the client; anything else is replaced with a generic message (SEC #188).
+    // Full detail always reaches the server-side log below regardless.
+    const safeMsg =
+      err instanceof ExportUserFacingError
+        ? err.message
+        : "Job failed due to a system error. Check server logs for details.";
+    await qExec(
+      `UPDATE import_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
+      safeMsg,
+      jobId
+    );
     log.error("Import job failed", { jobId, householdId, err });
   } finally {
     try {

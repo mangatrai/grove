@@ -147,6 +147,7 @@ exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
     status: job.status,
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    // errorText is already sanitized at write time (ExportUserFacingError-gated); see SEC #188.
     error: job.errorText,
     stats: job.statsJson ? (JSON.parse(job.statsJson) as Record<string, number>) : null
   });
@@ -243,6 +244,7 @@ exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
     scope: job.personProfileId ? "member" : "household",
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    // errorText is already sanitized at write time (ExportUserFacingError-gated); see SEC #188.
     error: job.errorText
   });
 });

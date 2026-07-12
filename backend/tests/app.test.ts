@@ -430,6 +430,24 @@ describe("backup encryption (CR-126)", () => {
       env.BACKUP_ENCRYPTION_KEY = originalKey;
     }
   }, 120_000);
+
+  it("restore of a corrupt (non-zip) .hfb file fails with the generic safe message, not raw internals (SEC #188)", async () => {
+    const owner = await createOwnerContext("corrupt-zip");
+    const garbage = Buffer.from("this is not a zip file at all, just garbage bytes 12345");
+
+    const restoreStart = await request(app)
+      .post("/exports/household/import")
+      .set("authorization", `Bearer ${owner.token}`)
+      .attach("file", garbage, "cr126-corrupt.hfb");
+    expect(restoreStart.status).toBe(202);
+
+    const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+      email: owner.ownerEmail,
+      password: owner.ownerPassword
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("Job failed due to a system error. Check server logs for details.");
+  }, 120_000);
 });
 
 describe("backup preview (CR-127)", () => {

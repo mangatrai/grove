@@ -4091,6 +4091,7 @@ paths:
                   error:
                     type: string
                     nullable: true
+                    description: Fixed safe message when status=failed; never raw exception text (full detail is server-log only).
                   stats:
                     type: object
                     additionalProperties:

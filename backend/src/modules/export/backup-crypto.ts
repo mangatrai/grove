@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { ExportUserFacingError } from "./export-errors.js";
+
 const BACKUP_MAGIC = Buffer.from("HFB1", "ascii");
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
@@ -24,7 +26,7 @@ export function encryptBackup(data: Buffer, keyHex: string): Buffer {
 
 export function decryptBackup(data: Buffer, keyHex: string): Buffer {
   if (!isEncryptedBackup(data) || data.length < HEADER_LENGTH) {
-    throw new Error("Backup decryption failed — verify that BACKUP_ENCRYPTION_KEY matches the key used when this backup was created.");
+    throw new ExportUserFacingError("Backup decryption failed — verify that BACKUP_ENCRYPTION_KEY matches the key used when this backup was created.");
   }
   const key = parseKey(keyHex);
   const iv = data.subarray(BACKUP_MAGIC.length, BACKUP_MAGIC.length + IV_LENGTH);
@@ -35,6 +37,6 @@ export function decryptBackup(data: Buffer, keyHex: string): Buffer {
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch {
-    throw new Error("Backup decryption failed — verify that BACKUP_ENCRYPTION_KEY matches the key used when this backup was created.");
+    throw new ExportUserFacingError("Backup decryption failed — verify that BACKUP_ENCRYPTION_KEY matches the key used when this backup was created.");
   }
 }

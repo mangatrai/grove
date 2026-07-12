@@ -10,6 +10,7 @@ import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
 import { encryptBackup } from "./backup-crypto.js";
+import { ExportUserFacingError } from "./export-errors.js";
 import { queryAllExportTables } from "./export-household-bundle.service.js";
 import { renderExportReadyTemplate } from "../mailer/templates/export-ready.js";
 import { sendMail } from "../mailer/mailer.service.js";
@@ -187,8 +188,18 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
     })();
     log.info(`Export job ${jobId} complete for household ${householdId}: ${tables} files, ${totalRows} total rows`);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await qExec(`UPDATE export_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);
+    // Only ExportUserFacingError messages are safe to persist and return to the client; anything
+    // else is replaced with a generic message (SEC #188). Full detail always reaches the
+    // server-side log below regardless.
+    const safeMsg =
+      err instanceof ExportUserFacingError
+        ? err.message
+        : "Job failed due to a system error. Check server logs for details.";
+    await qExec(
+      `UPDATE export_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
+      safeMsg,
+      jobId
+    );
     log.error("Export job failed", { jobId, householdId, err });
   }
 }

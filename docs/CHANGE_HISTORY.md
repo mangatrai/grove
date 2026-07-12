@@ -14,6 +14,38 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — SEC #187: harden SQL identifier interpolation in restore path (2026-07-11)
+
+**What changed:** Two fixes in the household-restore pipeline (`import-household-bundle.service.ts`):
+1. **Real gap closed:** the `skipInsert` UPDATE path (household row) and the `app_user` INSERT…ON CONFLICT path built SQL by interpolating column names taken directly from the *uploaded backup file's JSON content*, with no validation — unlike the main `txInsertObject` path, which already called `assertRestoreInsertColumnNames`. Added that same call to both paths.
+2. **Defense-in-depth:** added `assertRestoreTableName()` (new, in `restore-insert-validation.ts`), validating every `EXPORT_REGISTRY` table name against an identifier-shape regex + allowlist before any SQL runs. `tableName` always comes from the hardcoded `EXPORT_REGISTRY` today (never the uploaded file), so this can't currently be attacker-influenced — but guards against a future registry change reopening the hole.
+
+**Why:** Filed as a P3 audit finding (registry-derived `tableName` interpolation flagged as "currently safe but fragile"). While tracing it, found the actual live gap: the two paths above use `Object.keys()` on rows sourced straight from the attacker-suppliable `.hfb` upload (owner-only, but still untrusted file content), not from the registry — an injection-shaped key there would have reached raw SQL string interpolation unvalidated.
+
+**Tests:** 6 new (`restore-insert-validation.test.ts`) — `assertRestoreTableName` accepts allowlisted names, rejects injection-shaped and unknown names. `npm run test -w backend` — 672/672.
+
+**Files:** `backend/src/modules/export/restore-insert-validation.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/tests/restore-insert-validation.test.ts`.
+
+**GitHub:** closes [#187](https://github.com/mangatrai/grove/issues/187).
+
+---
+
+## FIX — SEC #188: sanitize error field on export/import job status endpoints (2026-07-11)
+
+**What changed:** `GET /exports/:jobId` and `GET /exports/import/:jobId` previously returned the raw `error_text` DB column verbatim — an uncontrolled `err.message` from whatever failed inside the job. Redesigned so sanitization happens at write time, not read time: new `ExportUserFacingError` class (`export-errors.ts`) marks the pipeline's deliberately-worded, safe-to-show validation/config messages (bad zip, unsupported export version, missing `BACKUP_ENCRYPTION_KEY`, decrypt failure). The job-processing catch blocks in `export-job.service.ts` and `import-household-bundle.service.ts` now persist `err.message` only when `err instanceof ExportUserFacingError`; anything else (unexpected internal failures — DB, filesystem, driver errors) is persisted as a fixed generic message. Full raw error always still reaches `log.error` server-side, unchanged. Routes now return `job.errorText` directly (no separate route-layer mapping needed — the column is safe by construction).
+
+**Why:** Raw error text could leak stack traces, file paths, or library/driver details to the client. A blanket "always replace with generic text" approach was tried first but broke an existing, intentional UX case (`backup encryption (CR-126) > restore fails with clear error when encrypted backup but no key configured` — a hand-authored, safe, actionable message the client is meant to see). Moving the safe/unsafe distinction to an explicit opt-in error class at the throw site fixes the leak without losing that UX, and is secure-by-default for every future throw site (unclassified = generic).
+
+**Tests:** 2 new (`export-job-error-sanitization.test.ts` — `ExportUserFacingError` is a distinct catchable subclass) + 1 new integration test (`app.test.ts`, CR-126 block — uploading a corrupt non-zip `.hfb` asserts the generic safe message, not raw unzipper internals) + existing CR-126 "clear error" test now passes again unmodified. `npm run test -w backend` — 672/672.
+
+**Not in scope:** `gdrive-backup.service.ts`'s own `backup_job.error_text` (returned by `/gdrive/backup/:jobId`, `/gdrive/backups/history`) has the same raw-error pattern but wasn't cited in #188's evidence and is owner/admin-only (lower exposure). Flagged, not fixed here — worth a follow-up issue if it should be covered too.
+
+**Files:** `backend/src/modules/export/export-errors.ts` (new), `backend/src/modules/export/backup-crypto.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/tests/export-job-error-sanitization.test.ts`, `backend/tests/app.test.ts`.
+
+**GitHub:** closes [#188](https://github.com/mangatrai/grove/issues/188).
+
+---
+
 ## FIX — detectOccasions missing try/catch — DB failure would fail entire agent run (2026-07-11)
 
 **What changed:** `detectOccasions` (shipped in #223) had no try/catch, unlike every other `runFamilyAgent` domain (D1/D2/D4/D5, hardened in FIX-195/#163). Wrapped its body in try/catch; on error, `log.warn` with `householdId` + error, returns `{ hasOutput: false, alerts: [] }` instead of throwing.
