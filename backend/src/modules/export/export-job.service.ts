@@ -258,7 +258,7 @@ export async function readExportFileIfReady(householdId: string, jobId: string):
  * Delete exported backup files and mark export_job rows as 'expired' for all complete exports
  * older than EXPORT_TTL_HOURS. Safe to call repeatedly.
  */
-export async function purgeExpiredExports(): Promise<void> {
+async function purgeExpiredExports(): Promise<void> {
   await purgeStalePasswordResetTokens();
 
   const expired = (await qAll(

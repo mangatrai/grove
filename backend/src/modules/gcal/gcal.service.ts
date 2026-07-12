@@ -59,7 +59,7 @@ function signStatePayload(dataB64url: string): string {
   return createHmac("sha256", env.JWT_SECRET).update(dataB64url).digest("base64url");
 }
 
-export function encodeGCalOAuthState(payload: { householdId: string; userId: string }): string {
+function encodeGCalOAuthState(payload: { householdId: string; userId: string }): string {
   const body: GCalOAuthStatePayload = { ...payload, exp: Date.now() + OAUTH_STATE_TTL_MS };
   const data = Buffer.from(JSON.stringify(body), "utf8").toString("base64url");
   const sig = signStatePayload(data);
@@ -160,7 +160,7 @@ export async function exchangeAndSaveCalendar(
   return { ok: true };
 }
 
-export async function connectGCal(
+async function connectGCal(
   householdId: string,
   userId: string,
   refreshToken: string,

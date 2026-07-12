@@ -14,7 +14,7 @@ export type IncomeInferenceContext = {
   employers?: ReadonlyArray<{ id: string; parserProfileId?: string }>;
 };
 
-export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
+const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
 
 function extensionOf(fileName: string): string {
   const i = fileName.lastIndexOf(".");
@@ -24,7 +24,7 @@ function extensionOf(fileName: string): string {
   return fileName.slice(i).toLowerCase();
 }
 
-export function filenameLooksLikeBankStatementPdf(fileName: string | null | undefined): boolean {
+function filenameLooksLikeBankStatementPdf(fileName: string | null | undefined): boolean {
   if (!fileName?.trim()) {
     return false;
   }
@@ -37,7 +37,7 @@ export function filenameLooksLikeBankStatementPdf(fileName: string | null | unde
   return /\bestmt\b/.test(stem) || /\bstatement\b/.test(stem) || /\btransactions?\b/.test(stem);
 }
 
-export function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefined): boolean {
+function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefined): boolean {
   if (!fileName?.trim()) {
     return false;
   }

@@ -12,11 +12,6 @@ export type CashPreset =
   | "prev_calendar_year"
   | "custom";
 
-/** Inclusive span guard for `dateFrom`/`dateTo` custom ranges — from env (see `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS`). */
-export function getCashSummaryMaxCustomRangeDays(): number {
-  return env.CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS;
-}
-
 export interface CashSummaryInput {
   /** Required unless both `dateFrom` and `dateTo` are set (custom range). */
   preset?: CashPreset;
@@ -354,7 +349,7 @@ function buildRangeLabel(preset: CashPreset, start: string, end: string, month?:
   }
 }
 
-export function resolveCashRange(input: CashSummaryInput): {
+function resolveCashRange(input: CashSummaryInput): {
   range: CashSummaryRange;
   asOf: string;
 } {
@@ -821,7 +816,7 @@ async function buildMonthlyOutflowsByCategory(
   return points;
 }
 
-export async function assertAccountInHousehold(accountId: string, householdId: string): Promise<boolean> {
+async function assertAccountInHousehold(accountId: string, householdId: string): Promise<boolean> {
   const row = await qGet<{ ok: number }>(
     `SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`,
     accountId,

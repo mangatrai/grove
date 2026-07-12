@@ -269,7 +269,7 @@ export function sha256Hex(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-export async function findPayslipByHouseholdChecksum(
+async function findPayslipByHouseholdChecksum(
   householdId: string,
   fileChecksum: string
 ): Promise<PayslipSnapshotRow | null> {
@@ -282,7 +282,7 @@ export async function findPayslipByHouseholdChecksum(
 }
 
 /** Synthetic checksum so manual rows never collide with PDF file hashes. */
-export function syntheticManualPayslipChecksum(): string {
+function syntheticManualPayslipChecksum(): string {
   const token = crypto.randomUUID();
   return sha256Hex(Buffer.from(`manual:${token}`, "utf8"));
 }

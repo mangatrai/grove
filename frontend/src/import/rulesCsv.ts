@@ -1,5 +1,5 @@
 /** CSV columns for classification rules export/import (stable order). */
-export const RULES_CSV_HEADERS = [
+const RULES_CSV_HEADERS = [
   "origin",
   "id",
   "rule_key",
@@ -29,7 +29,7 @@ export function categoryPathForCsv(cat: CategoryRowLike, all: CategoryRowLike[])
   return p ? `${p.name} > ${cat.name}` : cat.name;
 }
 
-export function escapeCsvField(value: string): string {
+function escapeCsvField(value: string): string {
   if (/[",\r\n]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
   }

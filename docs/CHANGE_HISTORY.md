@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — DEBT #193: delete dead ContribBucket.tsx + triage 54 knip unused exports (2026-07-12)
+
+**What changed:** Deleted `frontend/src/payslip/ContribBucket.tsx` (dead component, zero imports anywhere). Ran a triage pass over knip's 54 flagged "unused exports": for each, counted usages within its own defining file — genuinely dead (only the declaration) got deleted outright, still-used-internally got de-exported (kept the function/const/type, just dropped the `export` keyword so it's no longer part of the public module surface). Result: 10 fully deleted (plus 5 further orphaned helpers/types discovered by cascade: `resolveGroup`, `getContributionType`, `CONTRIB_GROUP_MAP`, `matchContribGroupByName`, `ContribGroupKey` in `contributions.ts`; `sleep` in `dcad-enrichment.service.ts`), 42 de-exported. One de-export (`fetchDcadCanonicalBatch`) was initially misclassified as "still used" because its own name also appeared inside a `log.warn(...)` string literal — caught by `npm run lint -w backend` immediately after (`no-unused-vars`), corrected to a full delete along with its now-orphaned `sleep()` helper.
+
+**Why:** Filed as a P3 DEBT finding — dead code and unused exports increase maintenance burden, obscure the real API surface, and risk resurrecting abandoned feature fragments (partial GCal auth flow, category-rule refactor pieces) with stale logic. `protest.routes.ts` (issue #196, a separate DEBT finding) was explicitly left untouched this pass at the user's request — only `dcad-enrichment.service.ts` and `document-store.service.ts` (different files in the same `protest/` module) were touched here.
+
+**Verification:** `npx knip` — "Unused files" and "Unused exports" both now 0 (down from 1 and 54); the pre-existing "Unused exported types (73)" list was explicitly out of scope for this issue and left untouched. `npx tsc --noEmit` clean (both workspaces). `npm run lint -w backend` clean. `npm run test -w backend` — 696/696.
+
+**Files:** `frontend/src/payslip/ContribBucket.tsx` (deleted); 24 backend files and 10 frontend files edited (deletions/de-exports only — no behavior change). Full list in commit diff.
+
+**GitHub:** closes [#193](https://github.com/mangatrai/grove/issues/193).
+
+---
+
 ## FIX — SEC #186: two-phase confirmation for household restore (2026-07-11)
 
 **What changed:** `POST /exports/household/import` (single-shot upload → immediate wipe-and-restore) is replaced with a two-phase flow:

@@ -7,7 +7,7 @@ export const IDLE_LOGOUT_MS = 15 * 60 * 1000;
 export const POLL_PAUSE_MS = 5 * 60 * 1000;
 
 /** Wall-clock timestamp of the last user activity, mirrored to localStorage for cross-tab correctness. */
-export function markActivity(now = Date.now()): void {
+function markActivity(now = Date.now()): void {
   localStorage.setItem(ACTIVITY_KEY, String(now));
 }
 

@@ -37,7 +37,7 @@ function extensionOf(fileName: string): string {
  * Checked before institution PDF rules so a payslip on a checking account still suggests the payslip profile.
  */
 /** Avoid treating typical bank eStatement names as payslips when using salary-deposit + employer hints. */
-export function filenameLooksLikeBankStatementPdf(fileName: string | null | undefined): boolean {
+function filenameLooksLikeBankStatementPdf(fileName: string | null | undefined): boolean {
   if (!fileName?.trim()) {
     return false;
   }

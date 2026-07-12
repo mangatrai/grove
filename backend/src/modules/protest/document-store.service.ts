@@ -77,14 +77,6 @@ export async function deleteDocumentChunks(
   );
 }
 
-export async function deleteAllChunksForProperty(propertyId: string, taxYear: number): Promise<void> {
-  await qExec(
-    `DELETE FROM protest_document_chunks WHERE property_id = ? AND tax_year = ?`,
-    propertyId,
-    taxYear
-  );
-}
-
 export async function querySimilarChunks(args: {
   propertyId: string;
   taxYear: number;

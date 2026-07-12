@@ -11,7 +11,7 @@ export const employerInputSchema = z.object({
 });
 
 /** Stored employer row always has an id. */
-export const employerStubSchema = z.object({
+const employerStubSchema = z.object({
   id: z.string().uuid(),
   displayName: z.string().min(1).max(200),
   parserProfileId: z.string().max(120).optional(),

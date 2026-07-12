@@ -71,7 +71,7 @@ export function parseCurrentYtdPair(line: string): { current: number | null; ytd
   return { current, ytd };
 }
 
-export function normalizeUsDateToIso(mmddyyyy: string): string | null {
+function normalizeUsDateToIso(mmddyyyy: string): string | null {
   const m = mmddyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) {
     return null;
@@ -82,7 +82,7 @@ export function normalizeUsDateToIso(mmddyyyy: string): string | null {
   return `${y}-${mo}-${d}`;
 }
 
-export function parsePayPeriod(text: string): { start: string | null; end: string | null } {
+function parsePayPeriod(text: string): { start: string | null; end: string | null } {
   /** IBM SuccessFactors PDFs: pay range often appears alone on its own line, e.g. `02/16/2026-02/28/2026`. */
   const standaloneRange = text.match(
     /(\d{1,2}\/\d{1,2}\/\d{4})\s*[-–]\s*(\d{1,2}\/\d{1,2}\/\d{4})/
@@ -127,7 +127,7 @@ export function parsePayPeriod(text: string): { start: string | null; end: strin
   return { start: null, end: null };
 }
 
-export function parsePayDate(text: string): string | null {
+function parsePayDate(text: string): string | null {
   const patterns = [
     /(?:Payment|Pay)\s+Date:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
     /Check\s+Date:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
@@ -241,7 +241,7 @@ function currentYtdBeforeNetPayLabel(lines: string[]): { current: number | null;
   return { current: null, ytd: null };
 }
 
-export function payslipSummaryHasMinimumFields(parsed: ParsedPayslipSummary): boolean {
+function payslipSummaryHasMinimumFields(parsed: ParsedPayslipSummary): boolean {
   return (
     (parsed.payPeriodStart !== null && parsed.payPeriodEnd !== null) ||
     parsed.grossPayCurrent !== null ||

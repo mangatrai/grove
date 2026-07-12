@@ -23,7 +23,7 @@ function loadPayslipJsonSchema(): Record<string, unknown> {
  * Uses `$defs.LineItem` + `$ref`; if the API rejects refs, duplicate the LineItem object under each
  * array `items` in a copy of this file (see plan). Loaded from disk so `tsc` emits JS next to the JSON.
  */
-export const PAYSLIP_JSON_SCHEMA_FOR_OPENAI: Record<string, unknown> = loadPayslipJsonSchema();
+const PAYSLIP_JSON_SCHEMA_FOR_OPENAI: Record<string, unknown> = loadPayslipJsonSchema();
 
 export type ExtractPayslipLlmOptions = {
   /** On-disk PDF (avoids a temp copy when the file is already stored). */

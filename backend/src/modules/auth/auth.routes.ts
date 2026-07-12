@@ -68,7 +68,7 @@ const loginSchema = z.object({
  * Min 12 characters.
  */
 const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,}$/;
-export const strongPassword = z
+const strongPassword = z
   .string()
   .min(12, "Password must be at least 12 characters")
   .regex(

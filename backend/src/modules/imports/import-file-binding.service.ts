@@ -441,7 +441,7 @@ export async function updateHouseholdFinancialAccount(input: {
  * Returns null for liability types (credit_card, loan) and payslip.
  * The user can always override via the explicit liquidity field.
  */
-export function defaultLiquidity(
+function defaultLiquidity(
   type: string,
   subType: string | null
 ): "liquid" | "semi_liquid" | "restricted" | null {

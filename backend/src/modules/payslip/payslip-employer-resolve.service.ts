@@ -92,13 +92,3 @@ export async function resolvePayslipUploadContext(
 
   return { ok: true, parserProfileId: employerParserProfileId(employer), employerId: employer.id };
 }
-
-/** Import parse when `import_file.employer_id` is null: require explicit employer if multiple configured. */
-export async function requireEmployerForPayslipImport(
-  householdId: string,
-  userId: string,
-  employerId: string | null | undefined
-): Promise<boolean> {
-  const employers = await listHouseholdEmployers(householdId, userId);
-  return employers.length <= 1 || Boolean(employerId?.trim());
-}

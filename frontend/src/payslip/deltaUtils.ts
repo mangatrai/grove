@@ -6,7 +6,7 @@ export type DeltaResult = {
   up: boolean;
 };
 
-export function computeDelta(
+function computeDelta(
   current: number,
   prior: number | null | undefined,
   inverseSign = false

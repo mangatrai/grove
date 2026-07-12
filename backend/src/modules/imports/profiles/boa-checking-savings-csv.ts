@@ -212,7 +212,7 @@ function normalizeBoaDescriptionField(raw: string): string {
  * BoA checking export: `Date,Description,Amount,Running Bal.` — amounts are often quoted; description may contain
  * commas, nested quotes (Zelle), or backslashes (IBM). Parse from the tail so we do not rely on RFC CSV.
  */
-export function parseBoaLineFromTail(
+function parseBoaLineFromTail(
   line: string
 ): { date: string; description: string; amount: number | null; sourceRow: Record<string, string> } | null {
   const trimmed = line.trim();

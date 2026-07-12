@@ -3,19 +3,19 @@ import { z } from "zod";
 const nullableStr = z.union([z.string(), z.null()]);
 const nullableNum = z.union([z.number(), z.null()]);
 
-export const payslipLineItemDatesSchema = z.object({
+const payslipLineItemDatesSchema = z.object({
   start_date: nullableStr,
   end_date: nullableStr,
   raw: nullableStr
 });
 
-export const payslipLineItemHoursSchema = z.object({
+const payslipLineItemHoursSchema = z.object({
   current: nullableNum,
   ytd: nullableNum
 });
 
 /** Canonical line item used in every `line_items` section array. */
-export const payslipLineItemSchema = z.object({
+const payslipLineItemSchema = z.object({
   name: nullableStr,
   authority: nullableStr,
   description: nullableStr,
