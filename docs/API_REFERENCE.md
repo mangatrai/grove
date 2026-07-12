@@ -1916,12 +1916,10 @@ Supported adapters:
 - CSV (`.csv`)
 - Excel (`.xlsx`, `.xls`)
 - PDF (`.pdf`) — profile-specific behavior:
-  - `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf` — local parse.
-  - `deloitte_payslip_pdf` — async OpenAI LLM extraction (queued on `import_file`).
+  - `boa_estatement_pdf`, `marcus_online_savings_pdf` — local parse.
+  - `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf` — async LLM extraction (queued on `import_file`; provider per `LLM_PROVIDER`).
 
-**Employer payslip (`ibm_pay_contributions_pdf`):** extraction creates a `payslip_snapshot` row; **no** `transaction_raw` rows created. Response still returns `parsedFiles` ≥ 1 and typically `parsedRows: 0`.
-
-**Employer payslip (`deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**.
+**Employer payslip (`ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**. On completion, creates a `payslip_snapshot` row; **no** `transaction_raw` rows.
 
 **Profile `generic_tabular`:** user supplies column mapping.
 
@@ -1957,7 +1955,7 @@ Required mapping keys: `date`, `description`, `amount`.
 
 ### `POST /imports/sessions/:sessionId/reconcile-payslip-async`
 
-Runs background OpenAI payslip extraction for Deloitte files and inserts `payslip_snapshot` rows.
+Runs background LLM payslip extraction for IBM and Deloitte files (provider per `LLM_PROVIDER`) and inserts `payslip_snapshot` rows.
 
 **Query (optional):**
 - `force=true|1` — bypass per-file throttle window.

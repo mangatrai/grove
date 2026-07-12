@@ -1,6 +1,7 @@
 import type { ParsedPayslipSummary, PayslipHybridColumns, LineItemForInsert, PayslipLineItemSection } from "../payslip.types.js";
 import { PAYSLIP_LINE_ITEM_SECTIONS } from "../payslip.types.js";
 import type { PayslipLlmExtract, PayslipLineItem } from "./payslip-llm.schema.js";
+import { LLM_PAYSLIP_PROVIDER } from "./payslip-async.constants.js";
 
 export type CanonicalMapResult = {
   summary: ParsedPayslipSummary;
@@ -247,7 +248,7 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     otherInformationCurrent: s.other_information_current,
     otherInformationYtd: s.other_information_ytd,
     rawExtractJson: {
-      parser: "openai_llm_payslip",
+      parser: LLM_PAYSLIP_PROVIDER,
       documentType: extract.document_type,
       usageTokens: usageTokens ?? undefined,
       totalEarningsCurrent: s.total_earnings_current,

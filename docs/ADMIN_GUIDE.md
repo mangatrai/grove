@@ -535,7 +535,7 @@ Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **docum
 |----------|---------|---------|
 | `OPENAI_API_KEY` | OpenAI API key | _(required)_ |
 | `OPENAI_MODEL` | Fast/cheap model — insights, summarization, PA agent brainstorm/formatting calls (search-query generation, digest prose) | `gpt-4.1` |
-| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage) | `gpt-4o` |
+| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage), year-end summary narrative | `gpt-4o` |
 
 > Recommended `OPENAI_MODEL=gpt-4.1` for payslip extraction. `gpt-4.1-mini`/`gpt-4o-mini` have known issues with column-type disambiguation on Deloitte stubs.
 
@@ -545,7 +545,7 @@ Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **docum
 |----------|---------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key | _(required)_ |
 | `ANTHROPIC_MODEL` | Fast/cheap model — insights, summarization, PA agent brainstorm/formatting calls (search-query generation, digest prose) | `claude-haiku-4-5-20251001` |
-| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage) | `claude-sonnet-4-6` |
+| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage), year-end summary narrative | `claude-sonnet-5` |
 
 ### 4.5 Tax Protest AI (Optional)
 

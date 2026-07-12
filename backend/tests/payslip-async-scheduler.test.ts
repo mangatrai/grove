@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as dbQuery from "../src/db/query.js";
 import * as reconcileModule from "../src/modules/imports/payslip-async-import-reconcile.service.js";
 import { armPayslipAsyncScheduler, runPollCycle } from "../src/modules/imports/payslip-async-scheduler.service.js";
-import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../src/modules/payslip/llm-extract/payslip-async.constants.js";
+import { LLM_PAYSLIP_PROVIDER } from "../src/modules/payslip/llm-extract/payslip-async.constants.js";
 import { sqlStmt } from "./pg-stmt.js";
 
 const HOUSEHOLD_ID = crypto.randomUUID();
@@ -59,7 +59,7 @@ describe("payslip async scheduler — hasPendingWork flag lifecycle (FIX #220)",
     await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, status, confidence_summary, payslip_async_provider)
        VALUES (?, ?, 'payslip.pdf', ?, 'processing', '{}', ?)`
-    ).run(FILE_ID, SESSION_ID, crypto.randomUUID(), OPENAI_LLM_PAYSLIP_PROVIDER);
+    ).run(FILE_ID, SESSION_ID, crypto.randomUUID(), LLM_PAYSLIP_PROVIDER);
 
     armPayslipAsyncScheduler();
     await runPollCycle();

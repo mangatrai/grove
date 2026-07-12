@@ -215,7 +215,7 @@ importsRouter.post("/upload", uploadSingle.single("file"), async (req: Authentic
       res.status(422).json({ code: result.code, message: result.message });
       return;
     }
-    if (result.code === "UNSUPPORTED_PARSER" || result.code === "OPENAI_API_NOT_CONFIGURED" || result.code === "LLM_CANONICAL_VALIDATION_FAILED" || result.code === "LLM_EXTRACTION_FAILED" || result.code === "EMPLOYER_REQUIRED" || result.code === "INVALID_EMPLOYER") {
+    if (result.code === "UNSUPPORTED_PARSER" || result.code === "LLM_API_NOT_CONFIGURED" || result.code === "LLM_CANONICAL_VALIDATION_FAILED" || result.code === "LLM_EXTRACTION_FAILED" || result.code === "EMPLOYER_REQUIRED" || result.code === "INVALID_EMPLOYER") {
       res.status(422).json({ code: result.code, message: result.message });
       return;
     }

@@ -1,5 +1,5 @@
 import type { ParserProfileId } from "../imports/profiles/profile-ids.js";
-import { env } from "../../config/env.js";
+import { isLlmConfigured } from "../../llm/index.js";
 import { log } from "../../logger.js";
 import { extractPayslipFromPdf } from "./llm-extract/extract-payslip-llm.js";
 import { mapCanonicalExtractToPersist, validateCanonicalForImport } from "./llm-extract/payslip-canonical-map.js";
@@ -17,7 +17,7 @@ export type PayslipPdfParseSuccess = {
 export type PayslipPdfParseResult =
   | PayslipPdfParseSuccess
   | { ok: false; reason: "unsupported_parser"; parserProfileId: string }
-  | { ok: false; reason: "openai_api_not_configured" }
+  | { ok: false; reason: "llm_api_not_configured" }
   | { ok: false; reason: "llm_canonical_validation_failed"; detail: string[] }
   | { ok: false; reason: "llm_extraction_failed"; message: string };
 
@@ -27,8 +27,8 @@ export async function parsePayslipPdfByProfile(
   options?: { pdfPath?: string | null }
 ): Promise<PayslipPdfParseResult> {
   if (parserProfileId === IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID) {
-    if (!env.OPENAI_API_KEY?.trim()) {
-      return { ok: false, reason: "openai_api_not_configured" };
+    if (!isLlmConfigured()) {
+      return { ok: false, reason: "llm_api_not_configured" };
     }
     const storedPath = options?.pdfPath?.trim();
     try {

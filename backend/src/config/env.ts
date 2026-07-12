@@ -85,7 +85,7 @@ const envSchema = z.object({
   /** Fast/cheap Anthropic model for one-shot completions. */
   ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5-20251001"),
   /** Capable Anthropic model for vision, agentic loops, and complex generation. */
-  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-4-6"),
+  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-5"),
   /** Embedding provider — independent of LLM_PROVIDER (Voyage AI, Cohere, etc. may differ). */
   EMBEDDING_PROVIDER: z.string().default("openai"),
   SMTP_HOST: z.string().optional(),

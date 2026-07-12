@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 
-import { env } from "../../config/env.js";
+import { isLlmConfigured } from "../../llm/index.js";
 import { log } from "../../logger.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
 
@@ -36,7 +36,7 @@ import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-sheet.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
-import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
+import { LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
 import { armPayslipAsyncScheduler } from "./payslip-async-scheduler.service.js";
 
 export interface ParseColumnMapping {
@@ -338,7 +338,7 @@ export async function parseSessionImportFiles(
         await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
 
         if ((LLM_PAYSLIP_PROFILE_IDS as readonly string[]).includes(profileId)) {
-          if (!env.OPENAI_API_KEY?.trim()) {
+          if (!isLlmConfigured()) {
             await qExec(
               `UPDATE import_file
      SET status = ?, confidence_summary = ?
@@ -346,19 +346,19 @@ export async function parseSessionImportFiles(
               "failed",
               JSON.stringify({
                 stage: "failed",
-                reason: "openai_api_not_configured",
+                reason: "llm_api_not_configured",
                 profile: profileId
               }),
               file.id
             );
-            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_openai_api_not_configured" });
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_llm_api_not_configured" });
             continue;
           }
           log.info("[Import parse] queueing payslip PDF for async LLM extract", {
             importFileId: file.id,
             fileName: file.file_name,
             pdfBytes: buffer.byteLength,
-            provider: OPENAI_LLM_PAYSLIP_PROVIDER
+            provider: LLM_PAYSLIP_PROVIDER
           });
           outcome.asyncPayslipPending = (outcome.asyncPayslipPending ?? 0) + 1;
           await qExec(
@@ -370,9 +370,9 @@ export async function parseSessionImportFiles(
             JSON.stringify({
               stage: "llm_queued",
               profile: profileId,
-              payslipAsyncProvider: OPENAI_LLM_PAYSLIP_PROVIDER
+              payslipAsyncProvider: LLM_PAYSLIP_PROVIDER
             }),
-            OPENAI_LLM_PAYSLIP_PROVIDER,
+            LLM_PAYSLIP_PROVIDER,
             file.id
           );
           armPayslipAsyncScheduler();
@@ -398,7 +398,7 @@ export async function parseSessionImportFiles(
             outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unsupported_parser" });
             continue;
           }
-          if (parseResult.reason === "openai_api_not_configured") {
+          if (parseResult.reason === "llm_api_not_configured") {
             await qExec(
               `UPDATE import_file
      SET status = ?, confidence_summary = ?
@@ -406,12 +406,12 @@ export async function parseSessionImportFiles(
               "failed",
               JSON.stringify({
                 stage: "failed",
-                reason: "openai_api_not_configured",
+                reason: "llm_api_not_configured",
                 profile: profileId
               }),
               file.id
             );
-            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_openai_api_not_configured" });
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_llm_api_not_configured" });
             continue;
           }
           if (parseResult.reason === "llm_canonical_validation_failed") {
