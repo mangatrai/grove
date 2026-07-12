@@ -9,7 +9,7 @@
  * Usage (from repo): `npm run pa-task-eval -w backend -- "<goal>" [householdId]`
  * Defaults to the first household in the DB if no householdId is given.
  */
-import { qGet } from "../src/db/query.js";
+import { closeSql, qGet } from "../src/db/query.js";
 import { runPATask } from "../src/modules/family/pa-task-runner.js";
 
 const SCENARIOS = [
@@ -49,7 +49,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.stack ?? err.message : err);
-  process.exit(1);
-});
+main()
+  .catch((err: unknown) => {
+    console.error(err instanceof Error ? err.stack ?? err.message : err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closeSql();
+    process.exit(process.exitCode ?? 0);
+  });

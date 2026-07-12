@@ -36,7 +36,11 @@ export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): 
     });
     if (!res.ok) return { ok: false, code: "http_error", message: `Tavily returned HTTP ${res.status}.` };
     const data = (await res.json()) as { results?: TavilyResult[]; answer?: string };
-    const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.5);
+    // FIX: Tavily occasionally returns results missing title/url/content — without this check
+    // those render as the literal string "undefined" or throw on `.slice()`, which breaks the
+    // downstream compression step's JSON parsing (loop decision fails validation, forces an
+    // early synthesize with an empty findings ledger).
+    const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.5 && r.title?.trim() && r.url?.trim() && r.content?.trim());
     if (results.length === 0) return { ok: false, code: "no_results", message: "No results found." };
     const answerLine = data.answer ? `Summary: ${data.answer}\n\n` : "";
     const text = answerLine + results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 900)}`).join("\n\n");

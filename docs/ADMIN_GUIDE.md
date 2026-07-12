@@ -1234,7 +1234,7 @@ Each run: up to 6 iterations of decide-next-step → run one of `search_web` / `
 
 **Honesty guardrails:** Tavily search snippets can't return live JS-rendered prices (Google Flights, retailer carts). Synthesis is instructed to cite every price/availability claim to its findings-ledger source + observation date ("observed \<date\> — verify at \<link\>"), never assert a live quote, and say "could not verify" rather than fill in a gap — so a flight-research goal returns constraint-satisfying routes/options + typical price ranges + booking links, not fabricated fares.
 
-**Testing:** `backend/tests/pa-task-runner.test.ts` covers loop mechanics only (mocked LLM + Tavily). Live-provider quality is checked manually via `npm run pa-task-eval -w backend -- "<goal>" [householdId]` (`backend/scripts/pa-task-eval.ts`) before shipping any change to the loop — not part of `npm test`.
+**Testing:** `backend/tests/pa-task-runner.test.ts` covers loop mechanics only (mocked LLM + Tavily). `backend/tests/tavily.test.ts` covers `tavilySearch()`'s response parsing directly (malformed/partial Tavily results are filtered out, FIX #226b). Live-provider quality is checked manually via `npm run pa-task-eval -w backend -- "<goal>" [householdId]` (`backend/scripts/pa-task-eval.ts`) before shipping any change to the loop — not part of `npm test`. That script closes its own DB pool and calls `process.exit()` on completion (FIX #226b) — earlier versions left the pool open and hung after finishing.
 
 ---
 

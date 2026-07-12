@@ -14,6 +14,23 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — PA #227: pa-task-eval.ts process hang + Tavily malformed-result crash (2026-07-12)
+
+**What changed:** Two independent bugs found while running the manual PA task-loop eval (`npm run pa-task-eval -w backend`) to compare `LLM_PROVIDER=anthropic` vs `openai` quality — both were live in code shipped by `aaae948` (feat(family/PA2a+PA2c)):
+
+- `backend/scripts/pa-task-eval.ts` — `main()` never called `closeSql()` or `process.exit()` on success. The Postgres pool from `getSql()` kept Node's event loop alive indefinitely: the script's actual work (search, LLM calls, synthesis) finished in 7-17s per its own log timestamps, but the process hung until manually killed. Fixed by awaiting `closeSql()` and calling `process.exit()` in a `.finally()` block on `main()`, mirroring the existing error-path exit code.
+- `backend/src/llm/tools/tavily.ts` (`tavilySearch`) — the result filter checked `score` only, not whether `title`/`url`/`content` were actually present. A result missing `title`/`url` rendered as the literal string `"undefined"` in the compiled search text (template-literal interpolation of `undefined`); a result missing `content` threw on `.slice(0, 900)`, caught by the outer `try/catch` and surfaced as a spurious `network_error` instead of a clean partial result. Fixed by requiring non-empty `title`/`url`/`content` in the filter alongside the existing score check.
+
+**Why:** The Tavily bug is the reason both eval runs (both providers) produced no usable answer — malformed/thrown results fed garbage into the loop's compression step, which failed Zod validation (`"loop decision failed validation, forcing synthesize"`) and caused the agent to bail after 1-2 iterations with an empty findings ledger. This means the original provider-comparison question (which the eval script exists to answer) was never actually answered by either run — it's a pre-existing tool bug, not a provider-quality signal. The hang was a separate, unrelated issue the user flagged directly ("those shell are running way too long... that is not usual") after killing the two runs.
+
+**Verification:** `npx tsc -p backend/tsconfig.json --noEmit` clean. `npm run test -w backend` — 708/708 passing (41 files, incl. 2 new tests). `npm run lint -w backend` clean. Manual: re-ran `pa-task-eval.ts` with a deliberately invalid `householdId` (triggers a fast FK-violation failure with no LLM/Tavily cost) and confirmed the process now exits on its own in under a second instead of hanging — previously it would have hung indefinitely even on this failure path had the DB pool been the only open handle. Live-provider re-run to actually validate PA loop answer quality with the Tavily fix was **not** performed as part of this pass (would incur real LLM/Tavily cost and runtime) — left to the user to trigger if/when they want the original provider comparison re-run.
+
+**Files:** `backend/scripts/pa-task-eval.ts`, `backend/src/llm/tools/tavily.ts`, `backend/tests/tavily.test.ts` (new), `docs/ADMIN_GUIDE.md`.
+
+**GitHub:** closes [#227](https://github.com/mangatrai/grove/issues/227).
+
+---
+
 ## FIX — LLM #226: payslip extraction + year-summary narrative bypassed LLM_PROVIDER (2026-07-12)
 
 **What changed:** Three OpenAI-specific gates/calls that ignored `LLM_PROVIDER` are now provider-generic:
