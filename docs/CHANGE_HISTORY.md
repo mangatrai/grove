@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — SEC #189: cross-household access regression test (2026-07-11)
+
+**What changed:** Added `backend/tests/cross-household-access.test.ts` — logs in as two separately-seeded households (A and B) and, using household B's token, attempts to GET/PATCH/DELETE household A's transaction, payslip, financial account, and protest property by direct ID. Asserts 404 on every attempt, and that `GET /imports/accounts` under household B never lists household A's account. Includes 4 "sanity" tests (household A on its own resources) so the suite can't pass vacuously if a route started 404ing for everyone.
+
+**Why:** Filed as a P3 audit finding proposing a full tenant-isolation middleware/query-helper retrofit across ~22 backend modules. **Scope reduced by the owner on 2026-07-04** (see issue comment): multi-household support is permanently out of scope for this single-family, self-hosted app, so the retrofit buys almost nothing under that constraint. Reduced scope: one regression test proving the existing per-route `WHERE id = ? AND household_id = ?` (or equivalent service-layer) pattern actually holds, as defense-in-depth against a future auth bug — not a tenant-isolation guarantee. No middleware or per-module changes made.
+
+**Tests:** 14 new (`cross-household-access.test.ts`). `npm run test -w backend` — 686/686.
+
+**Files:** `backend/tests/cross-household-access.test.ts` (new).
+
+**GitHub:** closes [#189](https://github.com/mangatrai/grove/issues/189).
+
+---
+
 ## FIX — SEC #187: harden SQL identifier interpolation in restore path (2026-07-11)
 
 **What changed:** Two fixes in the household-restore pipeline (`import-household-bundle.service.ts`):
