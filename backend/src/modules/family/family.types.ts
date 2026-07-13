@@ -143,6 +143,11 @@ export type PATaskResult = {
   tavilyCalls: number;
 };
 
+/** #167: response of POST /family/agent/task — classifier picks which engine answered the note. */
+export type PATaskResponse =
+  | { type: "one_shot"; result: CaptureResult }
+  | { type: "research_loop"; result: PATaskResult; runId: string };
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UpdateAvailabilityInput = {

@@ -94,16 +94,26 @@ describe("pa-task-runner (#164, #166)", () => {
   const HOUSEHOLD_ID = "99990000-test-0000-0000-pataskhh0001";
   const BUDGET_HOUSEHOLD_ID = "99990000-test-0000-0000-pataskhh0002";
   const EMPTY_HOUSEHOLD_ID = "99990000-test-0000-0000-pataskhh0003";
+  const DAILY_BUDGET_HOUSEHOLD_ID = "99990000-test-0000-0000-pataskhh0004";
+  const DEDUP_HOUSEHOLD_ID = "99990000-test-0000-0000-pataskhh0005";
 
   beforeAll(async () => {
     await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, HOUSEHOLD_ID, "PA task test household");
     await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, BUDGET_HOUSEHOLD_ID, "PA task budget test household");
     await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, EMPTY_HOUSEHOLD_ID, "PA task empty test household");
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, DAILY_BUDGET_HOUSEHOLD_ID, "PA task daily budget test household");
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, DEDUP_HOUSEHOLD_ID, "PA task dedup test household");
   });
 
   afterAll(async () => {
-    await qExec(`DELETE FROM pa_task_run WHERE household_id IN (?, ?, ?)`, HOUSEHOLD_ID, BUDGET_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID);
-    await qExec(`DELETE FROM household WHERE id IN (?, ?, ?)`, HOUSEHOLD_ID, BUDGET_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID);
+    await qExec(
+      `DELETE FROM pa_task_run WHERE household_id IN (?, ?, ?, ?, ?)`,
+      HOUSEHOLD_ID, BUDGET_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID, DAILY_BUDGET_HOUSEHOLD_ID, DEDUP_HOUSEHOLD_ID
+    );
+    await qExec(
+      `DELETE FROM household WHERE id IN (?, ?, ?, ?, ?)`,
+      HOUSEHOLD_ID, BUDGET_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID, DAILY_BUDGET_HOUSEHOLD_ID, DEDUP_HOUSEHOLD_ID
+    );
   });
 
   beforeEach(() => {
@@ -307,6 +317,68 @@ describe("pa-task-runner (#164, #166)", () => {
         BUDGET_HOUSEHOLD_ID
       );
       expect(Number(refusedRow?.count ?? "0")).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("daily budget refusal (#167 D6)", () => {
+    beforeAll(async () => {
+      await qExec(
+        `INSERT INTO pa_task_run (household_id, goal, status)
+         SELECT ?, 'filler run', 'succeeded' FROM generate_series(1, ?)`,
+        DAILY_BUDGET_HOUSEHOLD_ID, env.PA_TASK_MAX_RUNS_PER_DAY
+      );
+    });
+
+    it("refuses a new run once the household is at PA_TASK_MAX_RUNS_PER_DAY, without calling the LLM", async () => {
+      const result = await runPATask("one goal too many today", DAILY_BUDGET_HOUSEHOLD_ID);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("PA_BUDGET_EXCEEDED");
+        expect(result.message).toContain(String(env.PA_TASK_MAX_RUNS_PER_DAY));
+      }
+      expect(mockComplete).not.toHaveBeenCalled();
+
+      const refusedRow = await qGet<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM pa_task_run WHERE household_id = ? AND status = 'refused_budget'`,
+        DAILY_BUDGET_HOUSEHOLD_ID
+      );
+      expect(Number(refusedRow?.count ?? "0")).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("concurrency dedup (#167 D5)", () => {
+    it("refuses a new run when a normalized-equal goal is already running for the household", async () => {
+      const runningRow = await qGet<{ id: string }>(
+        `INSERT INTO pa_task_run (household_id, goal, status) VALUES (?, ?, 'running') RETURNING id`,
+        DEDUP_HOUSEHOLD_ID, "  Find   swim CAMPS under $200  "
+      );
+
+      const result = await runPATask("find swim camps under $200", DEDUP_HOUSEHOLD_ID);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("PA_TASK_ALREADY_RUNNING");
+        if (result.code === "PA_TASK_ALREADY_RUNNING") expect(result.runId).toBe(runningRow?.id);
+      }
+      expect(mockComplete).not.toHaveBeenCalled();
+
+      await qExec(`DELETE FROM pa_task_run WHERE id = ?`, runningRow?.id);
+    });
+
+    it("does not dedup against a goal from a different household", async () => {
+      const runningRow = await qGet<{ id: string }>(
+        `INSERT INTO pa_task_run (household_id, goal, status) VALUES (?, ?, 'running') RETURNING id`,
+        DEDUP_HOUSEHOLD_ID, "cross household goal"
+      );
+
+      const result = await runPATask("cross household goal", EMPTY_HOUSEHOLD_ID);
+
+      // Not a dedup refusal — proceeds into the loop with EMPTY_HOUSEHOLD_ID's own budget/mocks.
+      if (!result.ok) expect(result.code).not.toBe("PA_TASK_ALREADY_RUNNING");
+
+      await qExec(`DELETE FROM pa_task_run WHERE id = ?`, runningRow?.id);
+      await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND goal = ?`, EMPTY_HOUSEHOLD_ID, "cross household goal");
     });
   });
 });

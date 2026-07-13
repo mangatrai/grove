@@ -84,6 +84,20 @@ type CaptureResult = {
   actions: CaptureAction[];
 };
 
+// #167: research-loop result shape (pa-task-runner.ts's PATaskResult) — a second, slower engine
+// behind the same Quick Capture box, for asks that need live web research.
+type PATaskResult = {
+  goal: string;
+  summary: string;
+  actions: CaptureAction[];
+  iterationsUsed: number;
+  hitIterationCap: boolean;
+};
+
+type PATaskResponse =
+  | { type: "one_shot"; result: CaptureResult }
+  | { type: "research_loop"; result: PATaskResult; runId: string };
+
 const ALERT_TYPE_LABELS: Record<string, string> = {
   conflict: "Schedule pressure",
   travel: "Travel",
@@ -469,7 +483,7 @@ export function FamilyAgentPage() {
   // Quick capture
   const [captureNote, setCaptureNote] = useState("");
   const [captureLoading, setCaptureLoading] = useState(false);
-  const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
+  const [captureResult, setCaptureResult] = useState<PATaskResponse | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   // Compose modal
@@ -546,7 +560,7 @@ export function FamilyAgentPage() {
     setCaptureResult(null);
     setCaptureError(null);
     try {
-      const res = await apiJson<CaptureResult>("/api/family/agent/capture", {
+      const res = await apiJson<PATaskResponse>("/api/family/agent/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: captureNote }),
@@ -649,7 +663,10 @@ export function FamilyAgentPage() {
             <IconMessageCircle size={18} stroke={1.5} />
             <Title order={5}>Quick capture</Title>
           </Group>
-          <Text size="xs" c="dimmed">Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).</Text>
+          <Text size="xs" c="dimmed">
+            Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).
+            Prefix with "research:" to force a deeper web-research pass.
+          </Text>
           <Textarea
             placeholder="e.g. Find swim camps with summer openings, draft an absence note for Jake's school, remind me to follow up on Mia's referral next Monday…"
             value={captureNote}
@@ -660,7 +677,10 @@ export function FamilyAgentPage() {
             disabled={captureLoading}
           />
           {captureError ? <Text size="xs" c="red">{captureError}</Text> : null}
-          <Group justify="flex-end">
+          <Group justify="space-between" align="center">
+            {captureLoading ? (
+              <Text size="xs" c="dimmed">Working on it — research asks can take up to 45s…</Text>
+            ) : <span />}
             <Button
               size="sm"
               leftSection={<IconSend size={14} />}
@@ -668,14 +688,21 @@ export function FamilyAgentPage() {
               disabled={!captureNote.trim()}
               onClick={() => void handleCapture()}
             >
-              Send to agent
+              Ask
             </Button>
           </Group>
 
           {captureResult ? (
             <Stack gap="sm" mt="xs">
-              <Text size="sm" c="dimmed">{captureResult.responseText}</Text>
-              {captureResult.actions.map((action, i) => (
+              {captureResult.type === "research_loop" ? (
+                <Badge size="sm" variant="light" color="grape" style={{ alignSelf: "flex-start" }}>
+                  Researched · {captureResult.result.iterationsUsed} step{captureResult.result.iterationsUsed === 1 ? "" : "s"}
+                </Badge>
+              ) : null}
+              <Text size="sm" c="dimmed">
+                {captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary}
+              </Text>
+              {captureResult.result.actions.map((action, i) => (
                 <CaptureActionCard
                   key={i}
                   action={action}

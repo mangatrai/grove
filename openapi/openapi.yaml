@@ -4768,6 +4768,143 @@ paths:
         "401": { description: Unauthorized }
         "403": { description: Requires owner or admin role }
 
+  /api/family/agent/task:
+    post:
+      tags: [family]
+      summary: Quick Capture — classify and dispatch a note to the one-shot or research-loop engine (#167)
+      description: |
+        Classifies a freeform note as `one_shot` (existing lightweight tool loop,
+        `processCaptureNote`) or `research_loop` (the bounded BabyAGI-style loop, `runPATask` —
+        see `docs/ADMIN_GUIDE.md` §10.6), then dispatches to that engine. Classification is
+        skipped when the note is prefixed `research:` (stripped before use) or `mode` is set
+        explicitly. Replaces the removed `POST /api/family/agent/capture` (no classifier, always
+        one-shot). Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 2000 }
+                mode:
+                  type: string
+                  enum: [one_shot, research_loop]
+      responses:
+        "200":
+          description: One-shot or research-loop result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      type: { type: string, enum: [one_shot] }
+                      result:
+                        type: object
+                        properties:
+                          responseText: { type: string }
+                          actions:
+                            type: array
+                            items: { $ref: "#/components/schemas/CaptureAction" }
+                  - type: object
+                    properties:
+                      type: { type: string, enum: [research_loop] }
+                      runId: { type: string, format: uuid }
+                      result:
+                        type: object
+                        properties:
+                          goal: { type: string }
+                          summary: { type: string }
+                          actions:
+                            type: array
+                            items: { $ref: "#/components/schemas/CaptureAction" }
+                          iterationsUsed: { type: integer }
+                          hitIterationCap: { type: boolean }
+                          promptTokens: { type: integer }
+                          completionTokens: { type: integer }
+                          tavilyCalls: { type: integer }
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors: { type: array, items: { type: object } }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+        "409":
+          description: A normalized-equal research goal is already running for this household (#167 D5)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: PA_TASK_ALREADY_RUNNING }
+                  message: { type: string }
+                  runId: { type: string, format: uuid }
+        "429":
+          description: Monthly or daily PA task run budget exhausted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: PA_BUDGET_EXCEEDED }
+                  message: { type: string }
+        "502":
+          description: LLM or tool failure on either dispatch path
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, enum: [CAPTURE_FAILED, PA_TASK_FAILED] }
+                  message: { type: string }
+
+  /api/family/agent/task/{runId}:
+    get:
+      tags: [family]
+      summary: Poll a research-loop run's status (#167 D4)
+      description: |
+        Fallback for a slow/timed-out synchronous `POST /agent/task` request. Scoped to the
+        caller's household. Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current run status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string, format: uuid }
+                  status: { type: string, enum: [running, succeeded, failed, refused_budget] }
+                  summary: { type: string, nullable: true }
+                  iterationsUsed: { type: integer, nullable: true }
+                  hitIterationCap: { type: boolean, nullable: true }
+                  createdAt: { type: string, format: date-time }
+                  finishedAt: { type: string, format: date-time, nullable: true }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+        "404":
+          description: Unknown runId, or belongs to a different household
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: NOT_FOUND }
+                  message: { type: string }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4775,6 +4912,18 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CaptureAction:
+      type: object
+      description: A suggested action from Quick Capture (either dispatch path), awaiting approve/compose.
+      properties:
+        type:
+          type: string
+          enum: [create_event, set_reminder, draft_message, note]
+        title: { type: string }
+        summary: { type: string }
+        details:
+          type: object
+          description: Type-specific payload (date/time for events, recipient for messages, etc.)
     UnifiedComp:
       type: object
       description: A comparable property from any source (dcad_search, redfin, manual, cad_evidence)

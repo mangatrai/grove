@@ -18,8 +18,10 @@ const MAX_ITERATIONS = 6;
 const FINDINGS_LEDGER_CAP = 40;
 
 export type RunPATaskResult =
-  | { ok: true; data: PATaskResult }
-  | { ok: false; code: "PA_BUDGET_EXCEEDED" | "PA_TASK_FAILED"; message: string };
+  | { ok: true; data: PATaskResult; runId: string }
+  | { ok: false; code: "PA_BUDGET_EXCEEDED"; message: string }
+  | { ok: false; code: "PA_TASK_ALREADY_RUNNING"; message: string; runId: string }
+  | { ok: false; code: "PA_TASK_FAILED"; message: string };
 
 // ---------------------------------------------------------------------------
 // Tool registry (#166) — consumed by the custom loop below, NOT llm/tool-use.ts's runToolLoop.
@@ -567,10 +569,28 @@ async function synthesize(
 }
 
 // ---------------------------------------------------------------------------
-// Cost metering (#164 A3)
+// Cost metering (#164 A3, daily cap #167) + concurrency dedup (#167 D5)
 // ---------------------------------------------------------------------------
 
-async function checkBudget(householdId: string): Promise<boolean> {
+function normalizeGoal(goal: string): string {
+  return goal.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// #167 D5: text-based dedup (mirrors #165's ratified text-based preference dedup, not cosine
+// similarity) — a second identical-ish research request while one is already running returns the
+// existing run instead of starting a duplicate loop.
+async function findExistingRunningTask(householdId: string, normalizedGoal: string): Promise<string | null> {
+  const row = await qGet<{ id: string }>(
+    `SELECT id FROM pa_task_run
+     WHERE household_id = ? AND status = 'running'
+       AND LOWER(REGEXP_REPLACE(TRIM(goal), '\\s+', ' ', 'g')) = ?
+     ORDER BY created_at DESC LIMIT 1`,
+    householdId, normalizedGoal
+  );
+  return row?.id ?? null;
+}
+
+async function checkMonthlyBudget(householdId: string): Promise<boolean> {
   const row = await qGet<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM pa_task_run
      WHERE household_id = ? AND status != 'failed' AND created_at >= date_trunc('month', NOW())`,
@@ -579,23 +599,49 @@ async function checkBudget(householdId: string): Promise<boolean> {
   return Number(row?.count ?? "0") < env.PA_TASK_MAX_RUNS_PER_MONTH;
 }
 
+// #167: second, tighter cap on top of the monthly one. AT TIME ZONE conversion (rather than a
+// naive UTC date_trunc) is required here per the standing env.TZ rule — the household's local
+// calendar day, not the DB server's, is what "today" should mean to a user hitting this cap.
+async function checkDailyBudget(householdId: string): Promise<boolean> {
+  const row = await qGet<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM pa_task_run
+     WHERE household_id = ? AND status != 'failed'
+       AND (created_at AT TIME ZONE ?) >= date_trunc('day', NOW() AT TIME ZONE ?)`,
+    householdId, env.TZ, env.TZ
+  );
+  return Number(row?.count ?? "0") < env.PA_TASK_MAX_RUNS_PER_DAY;
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
 export async function runPATask(goal: string, householdId: string): Promise<RunPATaskResult> {
-  const withinBudget = await checkBudget(householdId);
-  if (!withinBudget) {
+  const normalizedGoal = normalizeGoal(goal);
+  const existingRunId = await findExistingRunningTask(householdId, normalizedGoal);
+  if (existingRunId) {
+    return {
+      ok: false,
+      code: "PA_TASK_ALREADY_RUNNING",
+      message: "A similar research task is already running for this household — check back shortly.",
+      runId: existingRunId,
+    };
+  }
+
+  const [withinMonthlyBudget, withinDailyBudget] = await Promise.all([
+    checkMonthlyBudget(householdId),
+    checkDailyBudget(householdId),
+  ]);
+  if (!withinMonthlyBudget || !withinDailyBudget) {
     await qExec(
       `INSERT INTO pa_task_run (household_id, goal, origin, status, loop_model, synthesis_model, finished_at)
        VALUES (?, ?, 'user', 'refused_budget', ?, ?, NOW())`,
       householdId, goal, chatModel(), strongModel()
     );
-    return {
-      ok: false,
-      code: "PA_BUDGET_EXCEEDED",
-      message: `This household has reached its PA task limit for the month (${env.PA_TASK_MAX_RUNS_PER_MONTH} runs).`,
-    };
+    const message = !withinMonthlyBudget
+      ? `This household has reached its PA task limit for the month (${env.PA_TASK_MAX_RUNS_PER_MONTH} runs). Resets on the 1st.`
+      : `This household has reached its PA task limit for today (${env.PA_TASK_MAX_RUNS_PER_DAY} runs). Resets at midnight (${env.TZ}).`;
+    return { ok: false, code: "PA_BUDGET_EXCEEDED", message };
   }
 
   const runRow = await qGet<{ id: string }>(
@@ -603,7 +649,11 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
      VALUES (?, ?, 'user', 'running', ?, ?) RETURNING id`,
     householdId, goal, chatModel(), strongModel()
   );
-  const runId = runRow?.id ?? null;
+  if (!runRow?.id) {
+    log.warn("pa-task-runner: failed to create pa_task_run row", { householdId, goal });
+    return { ok: false, code: "PA_TASK_FAILED", message: "The task could not be started due to an internal error." };
+  }
+  const runId = runRow.id;
 
   try {
     const contextHeader = await buildCaptureContextHeader(householdId);
@@ -663,24 +713,20 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
       tavilyCalls,
     };
 
-    if (runId) {
-      await qExec(
-        `UPDATE pa_task_run SET
-           status = 'succeeded', iterations_used = ?, hit_iteration_cap = ?,
-           findings_json = ?, compressed_history_json = ?, result_summary = ?,
-           prompt_tokens = ?, completion_tokens = ?, tavily_calls = ?, finished_at = NOW()
-         WHERE id = ?`,
-        iterationsUsed, hitIterationCap, JSON.stringify(findings), JSON.stringify(history), synthesis.summary,
-        promptTokens, completionTokens, tavilyCalls, runId
-      );
-    }
+    await qExec(
+      `UPDATE pa_task_run SET
+         status = 'succeeded', iterations_used = ?, hit_iteration_cap = ?,
+         findings_json = ?, compressed_history_json = ?, result_summary = ?,
+         prompt_tokens = ?, completion_tokens = ?, tavily_calls = ?, finished_at = NOW()
+       WHERE id = ?`,
+      iterationsUsed, hitIterationCap, JSON.stringify(findings), JSON.stringify(history), synthesis.summary,
+      promptTokens, completionTokens, tavilyCalls, runId
+    );
 
-    return { ok: true, data: result };
+    return { ok: true, data: result, runId };
   } catch (err) {
     log.warn("pa-task-runner: run failed", { householdId, goal, err: String(err) });
-    if (runId) {
-      await qExec(`UPDATE pa_task_run SET status = 'failed', finished_at = NOW() WHERE id = ?`, runId).catch(() => {});
-    }
+    await qExec(`UPDATE pa_task_run SET status = 'failed', finished_at = NOW() WHERE id = ?`, runId).catch(() => {});
     return { ok: false, code: "PA_TASK_FAILED", message: "The task could not be completed due to an internal error." };
   }
 }

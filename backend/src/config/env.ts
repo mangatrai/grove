@@ -153,6 +153,12 @@ const envSchema = z.object({
    */
   PA_TASK_MAX_RUNS_PER_MONTH: optionalIntEnv(60, 1, 10000),
   /**
+   * PA agent task loop (#167): max non-failed pa_task_run rows per household per calendar day.
+   * Second, tighter ceiling on top of PA_TASK_MAX_RUNS_PER_MONTH — cheap insurance against a
+   * runaway frontend bug or a curious family member triggering many research loops in a row.
+   */
+  PA_TASK_MAX_RUNS_PER_DAY: optionalIntEnv(20, 1, 10000),
+  /**
    * OpenAI embedding model for pgvector RAG (protest document store).
    * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
    * Defaults to text-embedding-3-small (1536 dims).

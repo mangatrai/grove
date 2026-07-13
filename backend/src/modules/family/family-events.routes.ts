@@ -12,12 +12,14 @@ import {
   updateFamilyEvent,
 } from "./family-events.service.js";
 import {
+  classifyCaptureNote,
   listAlerts,
   listDigestLog,
   processCaptureNote,
   resolveAlert,
   runFamilyAgent,
 } from "./family-agent.service.js";
+import { runPATask } from "./pa-task-runner.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
 import { getOccasionSettings, setOccasionSettings } from "./family-occasion-settings.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
@@ -227,19 +229,89 @@ familyEventsRouter.post(
   }
 );
 
-/** POST /family/agent/capture — quick-capture inbox: parse freeform note into action suggestions */
+const captureTaskSchema = z.object({
+  note: z.string().min(1).max(2000),
+  mode: z.enum(["one_shot", "research_loop"]).optional(),
+});
+
+/**
+ * POST /family/agent/task (#167) — quick-capture inbox: classifies a freeform note as answerable
+ * immediately (one_shot, reuses the existing capture loop) or requiring web research
+ * (research_loop, dispatches to the BabyAGI runPATask() loop). Replaces the old POST /agent/capture
+ * — nothing else called that route, so it's removed rather than kept alongside this one.
+ */
 familyEventsRouter.post(
-  "/agent/capture",
+  "/agent/task",
   requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
-    const parsed = z.object({ note: z.string().min(1).max(2000) }).safeParse(req.body ?? {});
+    const parsed = captureTaskSchema.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
-    try {
-      const result = await processCaptureNote(parsed.data.note, req.authUser!.householdId);
-      res.json(result);
-    } catch (err) {
-      res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
+    const householdId = req.authUser!.householdId;
+
+    const { mode, note } = await classifyCaptureNote(parsed.data.note, parsed.data.mode);
+
+    if (mode === "one_shot") {
+      try {
+        const result = await processCaptureNote(note, householdId);
+        res.json({ type: "one_shot", result });
+      } catch (err) {
+        res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
+      }
+      return;
     }
+
+    const runResult = await runPATask(note, householdId);
+    if (!runResult.ok) {
+      if (runResult.code === "PA_BUDGET_EXCEEDED") {
+        res.status(429).json({ error: runResult.code, message: runResult.message });
+      } else if (runResult.code === "PA_TASK_ALREADY_RUNNING") {
+        res.status(409).json({ error: runResult.code, message: runResult.message, runId: runResult.runId });
+      } else {
+        res.status(502).json({ error: runResult.code, message: runResult.message });
+      }
+      return;
+    }
+
+    // #167 spec: persist research results into the alerts feed too, for visibility outside the
+    // inline Quick Capture response. source_digest_id has no FK — null is fine, this isn't a digest run.
+    await qExec(
+      `INSERT INTO family_agent_alerts (household_id, alert_type, reason)
+       VALUES (?, 'suggestion', ?)`,
+      householdId, runResult.data.summary
+    );
+
+    res.json({ type: "research_loop", result: runResult.data, runId: runResult.runId });
+  }
+);
+
+/** GET /family/agent/task/:runId (#167 D4) — poll a research-loop run, e.g. after a sync request times out. */
+familyEventsRouter.get(
+  "/agent/task/:runId",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const row = await qGet<{
+      id: string;
+      status: string;
+      result_summary: string | null;
+      iterations_used: number | null;
+      hit_iteration_cap: boolean | null;
+      created_at: string;
+      finished_at: string | null;
+    }>(
+      `SELECT id, status, result_summary, iterations_used, hit_iteration_cap, created_at, finished_at
+       FROM pa_task_run WHERE id = ? AND household_id = ?`,
+      req.params.runId, req.authUser!.householdId
+    );
+    if (!row) { res.status(404).json({ error: "NOT_FOUND", message: "No task run found with that id." }); return; }
+    res.json({
+      runId: row.id,
+      status: row.status,
+      summary: row.result_summary,
+      iterationsUsed: row.iterations_used,
+      hitIterationCap: row.hit_iteration_cap,
+      createdAt: row.created_at,
+      finishedAt: row.finished_at,
+    });
   }
 );
 

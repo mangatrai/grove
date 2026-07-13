@@ -648,6 +648,7 @@ Reuses the existing `SMTP_USER`/`SMTP_PASS` credentials (§8) as the IMAP login 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household monthly ceiling on `runPATask` runs. See §10.6. |
+| `PA_TASK_MAX_RUNS_PER_DAY` | `20` | Per-household daily ceiling on `runPATask` runs (household's `env.TZ`). See §10.6. |
 
 ---
 
@@ -1216,17 +1217,22 @@ A new agent domain, `detectOccasions`, runs on every agent run alongside coverag
 
 **Explicitly deferred:** the Phase 2 auto-enqueue gift-research bridge (turning a `[GIFT-IDEAS]` alert into an automatic Tavily research task) is out of scope for this ship, gated on issue #164.
 
-### 10.6 PA Agent Task Loop — Open-Ended Research (Phase 2a/2c, #164/#166)
+### 10.6 PA Agent Task Loop — Open-Ended Research (Phase 2a/2c/2d, #164/#166/#167)
 
-`runPATask(goal, householdId)` (`backend/src/modules/family/pa-task-runner.ts`) runs a bounded, BabyAGI-style loop for open-ended goals the fixed 5-domain pipeline above can't handle — e.g. "find cheaper flights DFW→Delhi in December", "find a gift for [member] under $40". **Not yet HTTP-reachable** — no route is wired up (that's issue #167); it's a standalone function today, callable from tests or a future scheduled bridge.
+`runPATask(goal, householdId)` (`backend/src/modules/family/pa-task-runner.ts`) runs a bounded, BabyAGI-style loop for open-ended goals the fixed 5-domain pipeline above can't handle — e.g. "find cheaper flights DFW→Delhi in December", "find a gift for [member] under $40".
+
+**HTTP-reachable (#167):** `POST /api/family/agent/task` (owner/admin only) is the Quick Capture box's endpoint (see USER_GUIDE → Family Planner → Quick Capture). A schema-enforced classifier call (`chatModel()`) first decides `one_shot` (routes to the existing `processCaptureNote`) vs. `research_loop` (routes to `runPATask`) — see `classifyCaptureNote()` in `family-agent.service.ts`. Classification is skipped when the note is prefixed `research:` (stripped before use) or the request body sets an explicit `mode`. On any classifier-output validation failure, the default is `one_shot` — a wrong `one_shot` only costs a retry with `research:`, while a wrong `research_loop` burns up to 13 LLM calls and several Tavily calls for nothing. `research_loop` results are also persisted to `family_agent_alerts` (`alert_type = 'suggestion'`). `GET /api/family/agent/task/:runId` polls a run's status/summary by id — added as a fallback in case a synchronous research request runs long enough to hit a platform sync-request timeout; **this has not been verified against the Koyeb prod deployment** and is worth a manual smoke test before relying on it there. The old `POST /agent/capture` route (synchronous one-shot only, no classifier) is removed — `processCaptureNote()` itself is unchanged, just called internally by the new route's `one_shot` branch.
 
 Each run: up to 6 iterations of decide-next-step → run one of `search_web` / `fetch_page` / `search_calendar` / `search_finance_context` → compress the result → repeat, then a final synthesis call. Every run — including refused ones — is persisted to `pa_task_run` (migration `0083_pa_task_run.sql`): status, iteration count, the uncompressed findings ledger, compressed history, and accumulated LLM/Tavily usage.
+
+**Concurrency dedup (#167 D5):** before starting a new loop, `runPATask` normalizes the goal (trim, lowercase, collapse whitespace) and checks it against any `status = 'running'` row for the same household. A match returns `PA_TASK_ALREADY_RUNNING` (409 at the route) with the existing run's id, instead of starting a duplicate loop. This check — and the budget checks below — run inside `runPATask` itself, before it inserts the `'running'` row, to avoid a race between two near-simultaneous requests.
 
 **Environment variables:**
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household ceiling on non-failed `pa_task_run` rows in the current calendar month. At cap, `runPATask` writes a `refused_budget` row and returns `PA_BUDGET_EXCEEDED` without making any LLM or Tavily calls. A run-count ceiling was chosen over a dollar ceiling — no per-model price table to keep current, and it's predictable for the user ("60 research tasks a month"). |
+| `PA_TASK_MAX_RUNS_PER_DAY` | `20` | Same mechanism, scoped to the current calendar day in the household's configured `env.TZ` (not the DB server's default timezone) — added per #167 to catch a single household burning its whole monthly budget in one day. Both caps are checked independently; either one being at capacity refuses the run. |
 
 **Cost:** each run makes roughly 8–13 LLM calls (up to 6 loop-decision + 6 compression calls on `chatModel()`, 1 synthesis call on `strongModel()`) plus one Tavily call per `search_web`/`fetch_page` tool use. `pa_task_run.estimated_cost_usd` is left `null` — deliberately not computed from a static per-model price table that would go stale.
 

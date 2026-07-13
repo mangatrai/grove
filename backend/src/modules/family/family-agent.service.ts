@@ -1780,6 +1780,89 @@ export async function buildCaptureContextHeader(householdId: string): Promise<st
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// PA task classifier (#167) — routes a quick-capture note to the cheap one-shot
+// path above, or the BabyAGI research loop (pa-task-runner.ts's runPATask).
+// ---------------------------------------------------------------------------
+
+export type CaptureMode = "one_shot" | "research_loop";
+
+const CLASSIFY_SYSTEM = `Classify a household quick-capture note as one of two modes:
+
+- "one_shot": reminders, quick scheduling requests, drafting a short message, or capturing a fact
+  for later reference — answerable immediately with no external research.
+- "research_loop": requires searching the web for current information (prices, availability,
+  opening/registration dates, comparing options) before a useful answer is possible.
+
+When uncertain, choose "one_shot" — a wrong one_shot answer only costs the user a retry (they can
+prefix their note with "research:" to force the research path), while a wrong research_loop
+classification burns several LLM calls and web searches for nothing.
+
+Respond with JSON only: {"mode":"one_shot"|"research_loop"}`;
+
+const CLASSIFY_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    mode: { type: "string", enum: ["one_shot", "research_loop"] },
+  },
+  required: ["mode"],
+  additionalProperties: false,
+};
+
+const classifySchema = z.object({ mode: z.enum(["one_shot", "research_loop"]) });
+
+const RESEARCH_PREFIX = /^research:\s*/i;
+
+/**
+ * #167 D2: an explicit "research:" prefix or a caller-supplied mode override skips the
+ * classification call entirely — cheaper and more predictable than asking the LLM to agree with
+ * what the user already told it. Returns the note with any prefix stripped either way, since the
+ * prefix itself isn't part of the goal text passed on to processCaptureNote/runPATask.
+ */
+export async function classifyCaptureNote(
+  note: string,
+  modeOverride?: CaptureMode
+): Promise<{ mode: CaptureMode; note: string }> {
+  const prefixMatch = note.match(RESEARCH_PREFIX);
+  if (prefixMatch) {
+    return { mode: "research_loop", note: note.slice(prefixMatch[0].length).trim() };
+  }
+  if (modeOverride) {
+    return { mode: modeOverride, note };
+  }
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: CLASSIFY_SYSTEM },
+      { role: "user", content: note },
+    ],
+    {
+      model: chatModel(),
+      maxTokens: 60,
+      temperature: 0,
+      responseFormat: "json",
+      jsonSchema: CLASSIFY_JSON_SCHEMA,
+      jsonSchemaName: "capture_classification",
+    }
+  );
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    raw = undefined;
+  }
+  const parsed = classifySchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn("family-agent: capture classification failed validation, defaulting to one_shot", {
+      issues: parsed.error.issues,
+      rawContent: content.slice(0, 300),
+    });
+    return { mode: "one_shot", note };
+  }
+  return { mode: parsed.data.mode, note };
+}
+
 export async function processCaptureNote(note: string, householdId: string): Promise<CaptureResult> {
   const contextHeader = await buildCaptureContextHeader(householdId);
 

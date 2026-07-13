@@ -4184,3 +4184,87 @@ Enables or disables occasion nudges for the caller's household. Requires `owner 
 When disabled, `detectOccasions` returns no alerts on subsequent runs. Existing open occasion alerts are left as-is — they're only cleared by the normal approve/resolve flow.
 
 > **Scope note:** this ships the detection + nudge slice only. The Phase 2 auto-enqueue gift-research bridge (opening a Tavily research task from a `[GIFT-IDEAS]` alert) is deferred, gated on issue #164.
+
+---
+
+### PA task endpoint — Quick Capture (#167)
+
+Backs the Family page's Quick Capture box. A classifier decides whether the note is answerable immediately (`one_shot`, existing lightweight tool loop) or needs web research first (`research_loop`, the bounded BabyAGI-style loop — see `docs/ADMIN_GUIDE.md` §10.6). Replaces the old `POST /api/family/agent/capture` (removed — that route had no classifier and only ever called the one-shot path).
+
+#### `POST /api/family/agent/task`
+
+Requires `owner | admin`.
+
+**Request body:**
+```json
+{ "note": "find swim camps with summer openings under $200", "mode": "research_loop" }
+```
+- `note` — 1-2000 chars, required.
+- `mode` — optional, `"one_shot" | "research_loop"`. Skips the classifier LLM call and forces the given path.
+- A note starting with `research:` (case-insensitive) also forces `research_loop` and skips the classifier — the prefix is stripped before the note is processed. `mode` and the prefix are independent; either alone is sufficient.
+
+**Response `200` (one-shot):**
+```json
+{
+  "type": "one_shot",
+  "result": {
+    "responseText": "Got it — I'll remind you Friday.",
+    "actions": [
+      { "type": "set_reminder", "title": "Call the vet", "summary": "Friday", "details": { "dueDate": "2026-07-17" } }
+    ]
+  }
+}
+```
+
+**Response `200` (research loop):**
+```json
+{
+  "type": "research_loop",
+  "runId": "uuid",
+  "result": {
+    "goal": "find swim camps with summer openings under $200",
+    "summary": "2-5 sentence synthesis, findings cited with observation dates.",
+    "actions": [],
+    "iterationsUsed": 4,
+    "hitIterationCap": false,
+    "promptTokens": 3500,
+    "completionTokens": 600,
+    "tavilyCalls": 3
+  }
+}
+```
+A `research_loop` result is also persisted as an `alert_type = 'suggestion'` row in `family_agent_alerts` (reason = `result.summary`), so it's visible again later in the Alerts panel.
+
+**Response `400`:** `{ "errors": [...] }` — invalid body (empty/oversized note, bad `mode`).
+
+**Response `409` (research loop only):** a normalized-equal goal is already `status = 'running'` for this household (#167 D5 concurrency dedup):
+```json
+{ "error": "PA_TASK_ALREADY_RUNNING", "message": "A similar research task is already running for this household — check back shortly.", "runId": "uuid" }
+```
+
+**Response `429` (research loop only):** monthly or daily run budget exhausted (see `PA_TASK_MAX_RUNS_PER_MONTH` / `PA_TASK_MAX_RUNS_PER_DAY` in `docs/ADMIN_GUIDE.md` §10.6):
+```json
+{ "error": "PA_BUDGET_EXCEEDED", "message": "This household has reached its PA task limit for today (20 runs). Resets at midnight (America/Chicago)." }
+```
+
+**Response `502`:** `{ "error": "CAPTURE_FAILED" | "PA_TASK_FAILED", "message": "..." }` — LLM/tool failure on either path.
+
+#### `GET /api/family/agent/task/:runId`
+
+Polls a `research_loop` run's status by id, scoped to the caller's household. Added as a fallback for a slow/timed-out synchronous `POST /agent/task` request. Requires `owner | admin`.
+
+**Response `200`:**
+```json
+{
+  "runId": "uuid",
+  "status": "running" | "succeeded" | "failed" | "refused_budget",
+  "summary": "string | null",
+  "iterationsUsed": 4,
+  "hitIterationCap": false,
+  "createdAt": "2026-07-13T00:00:00.000Z",
+  "finishedAt": "2026-07-13T00:00:20.000Z"
+}
+```
+`summary`/`iterationsUsed`/`hitIterationCap`/`finishedAt` are `null` while `status = 'running'`.
+
+**Response `404`:** `{ "error": "NOT_FOUND", "message": "No task run found with that id." }` — unknown id, or belongs to a different household.

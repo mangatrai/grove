@@ -842,6 +842,15 @@ Nudges arrive in tiers, tagged in the alert text:
 
 Each nudge only fires once per tier — you won't get a repeat reminder every day of the lead-time window. Resolve them with the same Resolve dropdown as any other alert. Turn the whole feature off in Settings → Family → **Occasion Nudges**.
 
+### Quick Capture
+
+The Family page's **Quick capture** box turns a freeform note into a reminder, drafted message, calendar event, or saved fact — type it and click **Ask**. Behind the scenes the agent decides how to handle it:
+
+- **Quick asks** ("remind me to call the vet Friday", "draft a message to the nanny about pickup") get an answer in a couple of seconds.
+- **Research asks** ("find swim camps with summer openings under $200", "compare flights to Chicago next weekend") take longer — up to about 45 seconds — while the agent searches the web and checks its findings before answering. A "Working on it…" note appears while this runs, and the response is tagged **Researched · N step(s)**.
+
+If a quick ask should have triggered research (or vice versa), start your note with `research:` to force the deeper research path — for example `research: find a birthday gift for a 7 year old under $40`. Research results are also added to the Alerts panel as a suggestion, so you can find them again later.
+
 ## Year-in-Review
 
 In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:
