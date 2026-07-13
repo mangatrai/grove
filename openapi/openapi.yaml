@@ -151,7 +151,7 @@ paths:
                     type: string
                     example: If that address is registered, a reset link is on its way.
         "400":
-          description: Validation failure (`{ errors: z.issues }`)
+          description: "Validation failure (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -283,7 +283,7 @@ paths:
                   profile:
                     $ref: '#/components/schemas/HouseholdProfile'
         "400":
-          description: Validation failure (`{ errors: z.issues }`)
+          description: "Validation failure (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -853,7 +853,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/InsightJob'
         "400":
-          description: Invalid path params (`{ errors: z.issues }`)
+          description: "Invalid path params (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -906,7 +906,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/InsightRecord'
         "400":
-          description: Invalid path params (`{ errors: z.issues }`)
+          description: "Invalid path params (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
