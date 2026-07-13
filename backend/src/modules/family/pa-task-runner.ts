@@ -262,43 +262,39 @@ const synthesisOutputSchema = z.object({
 // the real superset of keys their consumers read (pa-task-runner tool executors above;
 // family-events.routes.ts:283-291 for action details) rather than allowing free-form objects,
 // which strict mode does not support.
+// OpenAI strict mode forbids oneOf/anyOf/enum/const at the schema *root* — the discriminated
+// union (loopDecisionSchema) is flattened into one object with every field from both branches
+// present and nullable. loopDecisionSchema's z.object() branches default to "strip" mode, so the
+// irrelevant branch's fields (present as null) are silently dropped after parsing; only the
+// fields for whichever `action` came back actually reach the caller.
 const LOOP_DECISION_JSON_SCHEMA: Record<string, unknown> = {
-  anyOf: [
-    {
-      type: "object",
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["tool_call", "synthesize"] },
+    tool: {
+      type: ["string", "null"],
+      enum: ["search_web", "fetch_page", "search_calendar", "search_finance_context", null],
+    },
+    args: {
+      type: ["object", "null"],
       properties: {
-        action: { const: "tool_call" },
-        tool: { enum: ["search_web", "fetch_page", "search_calendar", "search_finance_context"] },
-        args: {
-          type: "object",
-          properties: {
-            query: { type: ["string", "null"] },
-            url: { type: ["string", "null"] },
-            recent_only: { type: ["boolean", "null"] },
-            start_date: { type: ["string", "null"] },
-            end_date: { type: ["string", "null"] },
-            member_filter: { type: ["string", "null"] },
-            category: { type: ["string", "null"] },
-            months: { type: ["number", "null"] },
-          },
-          required: ["query", "url", "recent_only", "start_date", "end_date", "member_filter", "category", "months"],
-          additionalProperties: false,
-        },
-        reasoning: { type: "string" },
+        query: { type: ["string", "null"] },
+        url: { type: ["string", "null"] },
+        recent_only: { type: ["boolean", "null"] },
+        start_date: { type: ["string", "null"] },
+        end_date: { type: ["string", "null"] },
+        member_filter: { type: ["string", "null"] },
+        category: { type: ["string", "null"] },
+        months: { type: ["number", "null"] },
       },
-      required: ["action", "tool", "args", "reasoning"],
+      required: ["query", "url", "recent_only", "start_date", "end_date", "member_filter", "category", "months"],
       additionalProperties: false,
     },
-    {
-      type: "object",
-      properties: {
-        action: { const: "synthesize" },
-        because: { type: "string" },
-      },
-      required: ["action", "because"],
-      additionalProperties: false,
-    },
-  ],
+    reasoning: { type: ["string", "null"] },
+    because: { type: ["string", "null"] },
+  },
+  required: ["action", "tool", "args", "reasoning", "because"],
+  additionalProperties: false,
 };
 
 const COMPRESSION_JSON_SCHEMA: Record<string, unknown> = {
@@ -313,7 +309,7 @@ const COMPRESSION_JSON_SCHEMA: Record<string, unknown> = {
           fact: { type: "string" },
           entity: { type: ["string", "null"] },
           sourceUrl: { type: ["string", "null"] },
-          kind: { enum: ["price", "contact", "option", "constraint", "other"] },
+          kind: { type: "string", enum: ["price", "contact", "option", "constraint", "other"] },
         },
         required: ["fact", "entity", "sourceUrl", "kind"],
         additionalProperties: false,
@@ -333,7 +329,7 @@ const SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         properties: {
-          type: { enum: ["create_event", "set_reminder", "draft_message", "note"] },
+          type: { type: "string", enum: ["create_event", "set_reminder", "draft_message", "note"] },
           title: { type: "string" },
           summary: { type: "string" },
           details: {
@@ -480,7 +476,11 @@ async function compressToolResult(
     ],
     {
       model: chatModel(),
-      maxTokens: 500,
+      // #228: strict-mode schema requires every finding's entity/sourceUrl/kind explicitly (even
+      // as null), which is more verbose than the old loose json_object output. 500 truncated
+      // mid-object on every run against a moderately-sized search_web result (deterministic at
+      // temperature 0); 900 gives headroom for a handful of findings plus the null boilerplate.
+      maxTokens: 900,
       temperature: 0,
       responseFormat: "json",
       jsonSchema: COMPRESSION_JSON_SCHEMA,
@@ -658,6 +658,9 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
       actions: synthesis.actions,
       iterationsUsed,
       hitIterationCap,
+      promptTokens,
+      completionTokens,
+      tavilyCalls,
     };
 
     if (runId) {

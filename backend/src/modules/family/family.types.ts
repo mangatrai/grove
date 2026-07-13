@@ -138,6 +138,9 @@ export type PATaskResult = {
   actions: CaptureAction[];
   iterationsUsed: number;
   hitIterationCap: boolean;
+  promptTokens: number;
+  completionTokens: number;
+  tavilyCalls: number;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

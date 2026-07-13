@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     }
 
     console.log(`\niterationsUsed=${result.data.iterationsUsed} hitIterationCap=${result.data.hitIterationCap} elapsedMs=${elapsedMs}`);
+    console.log(`promptTokens=${result.data.promptTokens} completionTokens=${result.data.completionTokens} tavilyCalls=${result.data.tavilyCalls}`);
     console.log(`\nSUMMARY:\n${result.data.summary}`);
     if (result.data.actions.length > 0) {
       console.log(`\nACTIONS:\n${JSON.stringify(result.data.actions, null, 2)}`);
