@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — pa-task-runner: zero informational logging on the success path (2026-07-13)
+
+**What changed:** Added structured `log.info` calls through the full Quick Capture → PA task path: `runPATask()`'s 6-iteration loop (`pa-task-runner.ts`) now logs iteration start, the loop's decision (synthesize vs. tool call), each tool execution (tool name, whether it hit Tavily, findings added), the move into synthesis, and the final run-succeeded summary (iterations used, Tavily calls, token counts) — all keyed by `householdId` + `runId`, matching the structured-field style the file's existing `log.warn` calls already use. `classifyCaptureNote()` (`family-agent.service.ts`) now logs the classification outcome and how it was reached (prefix override, explicit mode override, or the LLM call) instead of only logging on validation failure. The `POST /agent/task` route handler (`family-events.routes.ts`) now logs at request start and completion. Also hardened `executeSearchWeb`/`executeFetchPage` (`pa-task-runner.ts`) with their own `try/catch`, matching the existing pattern in `executeSearchCalendar`/`executeSearchFinanceContext` — on catch, `log.warn` + a safe fallback text so one failed tool call doesn't abort the whole loop.
+
+**Why:** Found during due diligence after running a research-loop Ask (flight search) through Quick Capture and seeing zero log output — traced to the loop genuinely having no informational logging at all on its success path, not a `LOG_LEVEL`/transport misconfiguration (`.env`'s `LOG_LEVEL=debug` and `LOG_FILE=.runtime/logs/app.log` were both correct and would have surfaced any logging that existed). Separately verified `tavilySearch`/`tavilyExtract` (`backend/src/llm/tools/tavily.ts`) already internally catch everything and never throw, so the missing try/catch on the two web tools was not an active crash risk today — added anyway for parity/defense-in-depth, not as a crash fix. This gap has existed since #164/#166 shipped the loop; it just wasn't noticed until someone tried to observe a live run.
+
+**Verification:** `npm run test -w backend` — `pa-task-runner.test.ts` 16/16 passing, including 2 new tests that force `tavilySearch`/`tavilyExtract` to throw synchronously and assert the run still completes (`ok: true`) instead of aborting. Full suite: 2 pre-existing failing files (`app.test.ts`, `import-upload-flow.test.ts`) confirmed unrelated — same failures reproduce with this change fully stashed. Manual: ran a research-shaped Quick Capture Ask locally and confirmed iteration-by-iteration `log.info` lines appear in `.runtime/logs/app.log` in real time.
+
+**Files:** `backend/src/modules/family/pa-task-runner.ts`, `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/family/family-events.routes.ts`, `backend/tests/pa-task-runner.test.ts`, `CLAUDE.md` (trimmed 139 → 85 lines; also fixed the stale "Anthropic is optional" gotcha — it's load-bearing for Family Planner now).
+
+**GitHub:** closes [#233](https://github.com/mangatrai/grove/issues/233).
+
+---
+
 ## FIX — openapi.yaml: 4 unquoted descriptions broke the file as valid YAML (2026-07-13)
 
 **What changed:** Quoted 4 `description:` values (`400` responses on `/auth/forgot-password`, `/auth/reset-password`, and two `insights` job endpoints) that read `` Validation failure (`{ errors: z.issues }`) `` / `` Invalid path params (`{ errors: z.issues }`) `` — an unquoted plain YAML scalar containing a bare `: ` (inside the backtick-quoted code span) is ambiguous with a nested mapping key, and both `js-yaml` and PyYAML reject the whole file with a parse error at the first occurrence.

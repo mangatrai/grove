@@ -59,15 +59,25 @@ async function executeSearchWeb(args: Record<string, unknown>): Promise<PAToolEx
   // content (a venue's pricing page can be a year old and still correct).
   const recentOnly = args.recent_only === true;
   const opts = recentOnly ? { startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) } : {};
-  const result = await tavilySearch(query, opts);
-  return { text: result.ok ? result.text : `[search_web ${result.code}] ${result.message}`, tavilyCall: true };
+  try {
+    const result = await tavilySearch(query, opts);
+    return { text: result.ok ? result.text : `[search_web ${result.code}] ${result.message}`, tavilyCall: true };
+  } catch (err) {
+    log.warn("pa-task-runner: search_web failed", { err: String(err) });
+    return { text: "[search_web error] Web search failed unexpectedly.", tavilyCall: true };
+  }
 }
 
 async function executeFetchPage(args: Record<string, unknown>): Promise<PAToolExecuteResult> {
   const url = typeof args.url === "string" ? args.url : "";
   const query = typeof args.query === "string" ? args.query : undefined;
-  const result = await tavilyExtract(url, query);
-  return { text: result.ok ? result.text : `[fetch_page ${result.code}] ${result.message}`, tavilyCall: true };
+  try {
+    const result = await tavilyExtract(url, query);
+    return { text: result.ok ? result.text : `[fetch_page ${result.code}] ${result.message}`, tavilyCall: true };
+  } catch (err) {
+    log.warn("pa-task-runner: fetch_page failed", { err: String(err) });
+    return { text: "[fetch_page error] Page fetch failed unexpectedly.", tavilyCall: true };
+  }
 }
 
 const SEARCH_CALENDAR_TOOL: Tool = {
@@ -669,9 +679,14 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
 
     for (let i = 1; i <= MAX_ITERATIONS; i++) {
       iterationsUsed = i;
+      log.info("pa-task-runner: iteration start", { householdId, runId, iteration: i, maxIterations: MAX_ITERATIONS });
       const { decision, usage } = await decideNextStep(goal, contextHeader, history, i);
       promptTokens += usage.promptTokens ?? 0;
       completionTokens += usage.completionTokens ?? 0;
+      log.info("pa-task-runner: iteration decision", {
+        householdId, runId, iteration: i, action: decision.action,
+        tool: decision.action === "tool_call" ? decision.tool : undefined,
+      });
 
       if (decision.action === "synthesize") {
         synthesizeSignalled = true;
@@ -694,9 +709,13 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
       history.push(`[${decision.tool}] ${compressed.summary}`);
       const dateObserved = new Date().toISOString().slice(0, 10);
       findings = evictFindings([...findings, ...compressed.findings.map(f => ({ ...f, dateObserved }))]);
+      log.info("pa-task-runner: tool executed", {
+        householdId, runId, iteration: i, tool: decision.tool, tavilyCall, findingsAdded: compressed.findings.length,
+      });
     }
 
     const hitIterationCap = !synthesizeSignalled && iterationsUsed === MAX_ITERATIONS;
+    log.info("pa-task-runner: synthesizing", { householdId, runId, iterationsUsed, hitIterationCap });
 
     const synthesis = await synthesize(goal, contextHeader, findings, history);
     promptTokens += synthesis.usage.promptTokens ?? 0;
@@ -723,6 +742,9 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
       promptTokens, completionTokens, tavilyCalls, runId
     );
 
+    log.info("pa-task-runner: run succeeded", {
+      householdId, runId, iterationsUsed, tavilyCalls, promptTokens, completionTokens,
+    });
     return { ok: true, data: result, runId };
   } catch (err) {
     log.warn("pa-task-runner: run failed", { householdId, goal, err: String(err) });

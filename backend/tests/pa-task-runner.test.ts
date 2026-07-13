@@ -225,6 +225,32 @@ describe("pa-task-runner (#164, #166)", () => {
     expect(run?.tavily_calls).toBe(2);
   });
 
+  it("fails closed when search_web throws unexpectedly, without crashing the run (defensive try/catch)", async () => {
+    mockTavilySearch.mockRejectedValueOnce(new Error("simulated network failure"));
+    mockComplete.mockResolvedValueOnce(loopToolCall("search_web", { query: "anything" }));
+    mockComplete.mockResolvedValueOnce(compressionResult("noted the search failure"));
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult());
+
+    const result = await runPATask("goal", HOUSEHOLD_ID);
+
+    expect(result.ok).toBe(true);
+    expect(mockTavilySearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when fetch_page throws unexpectedly, without crashing the run (defensive try/catch)", async () => {
+    mockTavilyExtract.mockRejectedValueOnce(new Error("simulated network failure"));
+    mockComplete.mockResolvedValueOnce(loopToolCall("fetch_page", { url: "https://example.com" }));
+    mockComplete.mockResolvedValueOnce(compressionResult("noted the fetch failure"));
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult());
+
+    const result = await runPATask("goal", HOUSEHOLD_ID);
+
+    expect(result.ok).toBe(true);
+    expect(mockTavilyExtract).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed on malformed compression JSON output, without crashing the run", async () => {
     mockComplete.mockResolvedValueOnce(loopToolCall("search_web", { query: "anything" }));
     mockComplete.mockResolvedValueOnce({ content: "not valid json {{{", usage: { promptTokens: 1, completionTokens: 1 } });

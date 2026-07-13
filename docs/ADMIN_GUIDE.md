@@ -1032,6 +1032,7 @@ sudo tail -f /var/log/postgresql/postgresql-17-main.log
 | **Import processing hangs** | Parser or canonicalize taking too long | Check CPU/memory on the server; review logs for errors. For very large imports, consider async canonicalize (backlog item #12) |
 | **Email not sending** | SMTP not configured or credentials wrong | Verify all `SMTP_*` are set correctly; test with `telnet smtp.gmail.com 587` |
 | **Certbot renewal fails (OCI)** | Port 80 not open in firewall or DNS stale | Check OCI Security List and ufw (`sudo ufw status`); verify DuckDNS A record points to correct IP |
+| **A Family Planner research-loop Ask seems stuck or you want to see what it did** | PA task loop now logs each iteration | Tail `.runtime/logs/app.log` for `pa-task-runner: iteration start` / `tool executed` / `run succeeded` lines (needs `LOG_LEVEL=info` or lower) |
 
 **Restore from backup (quick recovery):**
 

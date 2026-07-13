@@ -1825,9 +1825,11 @@ export async function classifyCaptureNote(
 ): Promise<{ mode: CaptureMode; note: string }> {
   const prefixMatch = note.match(RESEARCH_PREFIX);
   if (prefixMatch) {
+    log.info("family-agent: capture classified", { mode: "research_loop", source: "prefix" });
     return { mode: "research_loop", note: note.slice(prefixMatch[0].length).trim() };
   }
   if (modeOverride) {
+    log.info("family-agent: capture classified", { mode: modeOverride, source: "override" });
     return { mode: modeOverride, note };
   }
 
@@ -1860,6 +1862,7 @@ export async function classifyCaptureNote(
     });
     return { mode: "one_shot", note };
   }
+  log.info("family-agent: capture classified", { mode: parsed.data.mode, source: "llm" });
   return { mode: parsed.data.mode, note };
 }
 

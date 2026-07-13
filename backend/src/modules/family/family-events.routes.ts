@@ -247,12 +247,14 @@ familyEventsRouter.post(
     const parsed = captureTaskSchema.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
     const householdId = req.authUser!.householdId;
+    log.info("family-events: agent/task request", { householdId, noteLength: parsed.data.note.length });
 
     const { mode, note } = await classifyCaptureNote(parsed.data.note, parsed.data.mode);
 
     if (mode === "one_shot") {
       try {
         const result = await processCaptureNote(note, householdId);
+        log.info("family-events: agent/task completed", { householdId, type: "one_shot" });
         res.json({ type: "one_shot", result });
       } catch (err) {
         res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
@@ -280,6 +282,7 @@ familyEventsRouter.post(
       householdId, runResult.data.summary
     );
 
+    log.info("family-events: agent/task completed", { householdId, type: "research_loop", runId: runResult.runId });
     res.json({ type: "research_loop", result: runResult.data, runId: runResult.runId });
   }
 );
