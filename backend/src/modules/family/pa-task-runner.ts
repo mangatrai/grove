@@ -255,12 +255,151 @@ const synthesisOutputSchema = z.object({
     .default([]),
 });
 
+// #228: hand-written JSON Schema equivalents of the Zod schemas above, for OpenAI json_schema
+// strict mode / Anthropic forced tool-use (see llm/providers/{openai,anthropic}.ts). Strict mode
+// requires every object closed (additionalProperties: false) with all properties in `required`,
+// so Zod-optional/default fields become nullable here instead of omitted. `args`/`details` enumerate
+// the real superset of keys their consumers read (pa-task-runner tool executors above;
+// family-events.routes.ts:283-291 for action details) rather than allowing free-form objects,
+// which strict mode does not support.
+const LOOP_DECISION_JSON_SCHEMA: Record<string, unknown> = {
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        action: { const: "tool_call" },
+        tool: { enum: ["search_web", "fetch_page", "search_calendar", "search_finance_context"] },
+        args: {
+          type: "object",
+          properties: {
+            query: { type: ["string", "null"] },
+            url: { type: ["string", "null"] },
+            recent_only: { type: ["boolean", "null"] },
+            start_date: { type: ["string", "null"] },
+            end_date: { type: ["string", "null"] },
+            member_filter: { type: ["string", "null"] },
+            category: { type: ["string", "null"] },
+            months: { type: ["number", "null"] },
+          },
+          required: ["query", "url", "recent_only", "start_date", "end_date", "member_filter", "category", "months"],
+          additionalProperties: false,
+        },
+        reasoning: { type: "string" },
+      },
+      required: ["action", "tool", "args", "reasoning"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "synthesize" },
+        because: { type: "string" },
+      },
+      required: ["action", "because"],
+      additionalProperties: false,
+    },
+  ],
+};
+
+const COMPRESSION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          fact: { type: "string" },
+          entity: { type: ["string", "null"] },
+          sourceUrl: { type: ["string", "null"] },
+          kind: { enum: ["price", "contact", "option", "constraint", "other"] },
+        },
+        required: ["fact", "entity", "sourceUrl", "kind"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["summary", "findings"],
+  additionalProperties: false,
+};
+
+const SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: { enum: ["create_event", "set_reminder", "draft_message", "note"] },
+          title: { type: "string" },
+          summary: { type: "string" },
+          details: {
+            type: "object",
+            properties: {
+              date: { type: ["string", "null"] },
+              time: { type: ["string", "null"] },
+              duration_mins: { type: ["number", "null"] },
+              description: { type: ["string", "null"] },
+              participants: { type: ["array", "null"], items: { type: "string" } },
+            },
+            required: ["date", "time", "duration_mins", "description", "participants"],
+            additionalProperties: false,
+          },
+        },
+        required: ["type", "title", "summary", "details"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["summary", "actions"],
+  additionalProperties: false,
+};
+
+// #228: defense-in-depth, not the primary fix — schema-enforced structured output (above) is
+// what actually prevents malformed LLM output now. This only recovers from stragglers: call
+// sites not yet migrated to jsonSchema, or a model still emitting extra content despite it.
+// A model can echo/restart its answer (observed: two JSON objects concatenated, the second
+// truncated) — a plain JSON.parse() throws on the whole string even though a valid object opens
+// it, so recover just the first balanced-brace top-level value before giving up.
+function extractFirstJsonObject(raw: string): string | null {
+  const start = raw.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function tryParseJson(raw: string): unknown {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   try {
-    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
     return JSON.parse(cleaned);
   } catch {
-    return null;
+    const recovered = extractFirstJsonObject(cleaned);
+    if (!recovered) return null;
+    try {
+      return JSON.parse(recovered);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -291,11 +430,18 @@ async function decideNextStep(
       { role: "system", content: LOOP_SYSTEM },
       { role: "user", content: userPrompt },
     ],
-    { model: chatModel(), maxTokens: 400, temperature: 0.2, responseFormat: "json" }
+    {
+      model: chatModel(),
+      maxTokens: 400,
+      temperature: 0.2,
+      responseFormat: "json",
+      jsonSchema: LOOP_DECISION_JSON_SCHEMA,
+      jsonSchemaName: "loop_decision",
+    }
   );
   const parsed = loopDecisionSchema.safeParse(tryParseJson(content));
   if (!parsed.success) {
-    log.warn("pa-task-runner: loop decision failed validation, forcing synthesize", { issues: parsed.error.issues });
+    log.warn("pa-task-runner: loop decision failed validation, forcing synthesize", { issues: parsed.error.issues, rawContent: content.slice(0, 500) });
     return { decision: { action: "synthesize", because: "malformed loop output" }, usage };
   }
   return { decision: parsed.data, usage };
@@ -332,11 +478,18 @@ async function compressToolResult(
       { role: "system", content: COMPRESSION_SYSTEM },
       { role: "user", content: `Goal: ${goal}\nTool: ${toolName}\nTool output (untrusted data):\n${rawText.slice(0, 8000)}` },
     ],
-    { model: chatModel(), maxTokens: 500, temperature: 0, responseFormat: "json" }
+    {
+      model: chatModel(),
+      maxTokens: 500,
+      temperature: 0,
+      responseFormat: "json",
+      jsonSchema: COMPRESSION_JSON_SCHEMA,
+      jsonSchemaName: "compression_output",
+    }
   );
   const parsed = compressionOutputSchema.safeParse(tryParseJson(content));
   if (!parsed.success) {
-    log.warn("pa-task-runner: compression output failed validation", { toolName, issues: parsed.error.issues });
+    log.warn("pa-task-runner: compression output failed validation", { toolName, issues: parsed.error.issues, rawContent: content.slice(0, 500) });
     return { summary: `${toolName} returned a result (could not summarize).`, findings: [], usage };
   }
   return { summary: parsed.data.summary, findings: parsed.data.findings, usage };
@@ -392,11 +545,18 @@ async function synthesize(
       { role: "system", content: SYNTHESIS_SYSTEM },
       { role: "user", content: userPrompt },
     ],
-    { model: strongModel(), maxTokens: 1200, temperature: 0.3, responseFormat: "json" }
+    {
+      model: strongModel(),
+      maxTokens: 1200,
+      temperature: 0.3,
+      responseFormat: "json",
+      jsonSchema: SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "synthesis_output",
+    }
   );
   const parsed = synthesisOutputSchema.safeParse(tryParseJson(content));
   if (!parsed.success) {
-    log.warn("pa-task-runner: synthesis output failed validation", { issues: parsed.error.issues });
+    log.warn("pa-task-runner: synthesis output failed validation", { issues: parsed.error.issues, rawContent: content.slice(0, 500) });
     return {
       summary: "Research completed, but the result could not be summarized due to an internal formatting error.",
       actions: [],

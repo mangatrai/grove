@@ -231,6 +231,25 @@ describe("pa-task-runner (#164, #166)", () => {
     expect(history[0]).toContain("could not summarize");
   });
 
+  it("recovers a tool_call decision even when the model echoes a second, truncated JSON object after it (#228)", async () => {
+    // Captured verbatim from a live gpt-4.1-mini run under json_object mode: the model emitted
+    // a complete decision object, then started restating it and got cut off mid-string.
+    const concatenatedJson =
+      '{"action":"tool_call","tool":"search_web","args":{"query":"dinosaur building sets 10 year old under $40"},"reasoning":"start research"}\n' +
+      '{"action":"tool_call","tool":"search_web","args":{"query":"dinosaur building sets 10 year old under $40"},"reasoning":"To find suitable gift options 10 year old who lik';
+    mockComplete.mockResolvedValueOnce({ content: concatenatedJson, usage: { promptTokens: 10, completionTokens: 5 } });
+    mockComplete.mockResolvedValueOnce(compressionResult("recovered and searched successfully"));
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult());
+
+    const result = await runPATask("find a gift", HOUSEHOLD_ID);
+
+    expect(result.ok).toBe(true);
+    // proves the tool_call was recovered and executed, not dropped to a forced-synthesize
+    // fallback because the raw content failed a naive JSON.parse().
+    expect(mockTavilySearch).toHaveBeenCalledTimes(1);
+  });
+
   it("search_web calls Tavily with no startDate by default, and only sets one when recent_only is requested (#166 C3)", async () => {
     mockComplete.mockResolvedValueOnce(loopToolCall("search_web", { query: "durable content query" }));
     mockComplete.mockResolvedValueOnce(compressionResult("summary"));

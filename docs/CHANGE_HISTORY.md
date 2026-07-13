@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — PA #228: PA loop JSON output unreliable — schema-enforced structured output, both providers (2026-07-12)
+
+**What changed:** `backend/src/llm/types.ts` — `CompletionOptions` gained optional `jsonSchema`/`jsonSchemaName` fields, matching `VisionCompletionOptions`'s existing shape. `backend/src/llm/providers/openai.ts` (`openaiChat`) now uses `response_format: { type: "json_schema", json_schema: { name, strict: true, schema } }` when a schema is supplied, instead of the weaker `{ type: "json_object" }`. `backend/src/llm/providers/anthropic.ts` (`anthropicChat`) now uses forced tool-use — a synthetic tool built from `{ name: jsonSchemaName, input_schema: jsonSchema }` with `tool_choice: { type: "tool", name }` — instead of a system-prompt-only JSON instruction; the `tool_use` block's already-parsed `.input` is `JSON.stringify()`'d back into the `{ content: string }` return so existing `JSON.parse()` + Zod callers are unchanged. Both fall back to prior behavior when no schema is passed. `backend/src/modules/family/pa-task-runner.ts` gained 3 hand-written JSON Schemas (mirroring `loopDecisionSchema`/`compressionOutputSchema`/`synthesisOutputSchema`, OpenAI strict-mode rules: `additionalProperties: false`, all properties in `required`, discriminated union via top-level `anyOf` + `const`) wired into all 3 loop LLM calls (`decideNextStep`, compression, `synthesize`). `tryParseJson()` also gained a defense-in-depth fallback (`extractFirstJsonObject()`, a balanced-brace scanner) that recovers the first complete top-level JSON object from a string when a straight `JSON.parse()` fails.
+
+**Why:** Both a live OpenAI (`gpt-4.1-mini`) and live Anthropic (`claude-haiku-4-5`) `pa-task-eval.ts` run broke this session on `JSON.parse()` failures. Root cause (verified directly, not assumed): OpenAI's `json_object` mode only guarantees *syntactically valid JSON*, not one top-level value or a shape — the captured raw content was two concatenated JSON objects (~150 tokens total, ruling out the initially-suspected `maxTokens: 400` truncation). Anthropic's `anthropicChat()` had no structural enforcement at all, just a prompt instruction. Both providers' real enforcement mechanisms (OpenAI `json_schema` strict mode, Anthropic forced tool-use) were already used elsewhere in the codebase (`PAYSLIP_JSON_SCHEMA_FOR_OPENAI` for payslip vision extraction, `anthropicToolLoop`'s tools API) but never wired into plain chat completions. This is the proper fix per explicit user direction ("fix it properly than doing patch work") rather than a parser-only patch — `tryParseJson()` hardening is kept as a secondary safety net, not the primary fix.
+
+**Scope note:** a sweep during investigation found 9 other LLM-JSON call sites in `family-agent.service.ts` / `email-ingest.service.ts` without schema enforcement or Zod validation — tracked separately, not fixed here (GitHub #229, DEBT).
+
+**Verification:** `npx tsc -p backend/tsconfig.json --noEmit` clean. `npm run test -w backend` — 715/715 passing (43 files, incl. 2 new provider test files + 1 new recovery-path test in `pa-task-runner.test.ts`).
+
+**Files:** `backend/src/llm/types.ts`, `backend/src/llm/providers/openai.ts`, `backend/src/llm/providers/anthropic.ts`, `backend/src/modules/family/pa-task-runner.ts`, `backend/tests/llm-openai-provider.test.ts` (new), `backend/tests/llm-anthropic-provider.test.ts` (new), `backend/tests/pa-task-runner.test.ts`, `docs/ADMIN_GUIDE.md`.
+
+**GitHub:** closes [#228](https://github.com/mangatrai/grove/issues/228). Related: [#229](https://github.com/mangatrai/grove/issues/229) (DEBT, not fixed here).
+
+---
+
 ## FIX — PA #227: pa-task-eval.ts process hang + Tavily malformed-result crash (2026-07-12)
 
 **What changed:** Two independent bugs found while running the manual PA task-loop eval (`npm run pa-task-eval -w backend`) to compare `LLM_PROVIDER=anthropic` vs `openai` quality — both were live in code shipped by `aaae948` (feat(family/PA2a+PA2c)):

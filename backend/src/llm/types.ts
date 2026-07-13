@@ -26,8 +26,19 @@ export interface CompletionOptions {
   model: string;
   maxTokens?: number;
   temperature?: number;
-  /** Request JSON-only output. OpenAI uses json_object mode; Anthropic gets a system instruction. */
+  /**
+   * Request JSON-only output. Without `jsonSchema`: OpenAI uses json_object mode (guarantees
+   * valid JSON syntax only, not a single top-level value or a shape — can still fail to parse),
+   * Anthropic gets a system instruction (no enforcement at all). Prefer `jsonSchema` below.
+   */
   responseFormat?: "json";
+  /**
+   * JSON Schema for real structured-output enforcement (requires `responseFormat: "json"` too).
+   * OpenAI: json_schema strict mode. Anthropic: forced tool-use with this schema as the tool's
+   * input_schema. Falls back to the weaker `responseFormat`-only behavior when omitted.
+   */
+  jsonSchema?: Record<string, unknown>;
+  jsonSchemaName?: string;
 }
 
 export interface LlmUsage {
