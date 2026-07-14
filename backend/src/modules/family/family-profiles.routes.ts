@@ -16,6 +16,7 @@ import {
   suggestPreferencesFromNotes,
   updateAvailability,
   updateMemberProfile,
+  updatePreference,
 } from "./family-profiles.service.js";
 
 export const familyProfilesRouter = Router();
@@ -148,7 +149,17 @@ familyProfilesRouter.delete(
 // ── PA preferences / memory store (#165, topic_tag + suggest/classify #238) ─────────────────
 
 const paPreferenceCategoryEnum = z.enum(["preference", "discovered_fact", "decision_history"]);
-const paPreferenceTopicTagEnum = z.enum(["travel", "school", "health", "finance", "gifts", "household", "other"]);
+const paPreferenceTopicTagEnum = z.enum([
+  "travel",
+  "school",
+  "health",
+  "finance",
+  "gifts",
+  "household",
+  "food",
+  "interests",
+  "other",
+]);
 
 familyProfilesRouter.get(
   "/pa-preferences",
@@ -171,12 +182,7 @@ const createPreferenceSchema = z
     topicTag: paPreferenceTopicTagEnum.nullable().optional(),
   })
   .superRefine((val, ctx) => {
-    if (val.category === "preference") {
-      if (val.topicTag) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["topicTag"], message: "topicTag must not be set for category=preference" });
-      }
-      return;
-    }
+    if (val.category === "preference") return;
     if (!val.topicTag) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["topicTag"], message: "topicTag is required for discovered_fact/decision_history" });
     }
@@ -193,6 +199,29 @@ familyProfilesRouter.post(
     }
     const preference = await createPreference(req.authUser!.householdId, parsed.data);
     res.status(201).json({ preference });
+  }
+);
+
+familyProfilesRouter.patch(
+  "/pa-preferences/:id",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid preference id" });
+      return;
+    }
+    const parsed = createPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+    const preference = await updatePreference(id, req.authUser!.householdId, parsed.data);
+    if (!preference) {
+      res.status(404).json({ error: "Preference not found" });
+      return;
+    }
+    res.json({ preference });
   }
 );
 

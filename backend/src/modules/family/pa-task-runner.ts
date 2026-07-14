@@ -213,7 +213,7 @@ export async function executeSearchFinanceContext(householdId: string, args: Rec
   }
 }
 
-const MEMORY_TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "other"] as const;
+const MEMORY_TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "food", "interests", "other"] as const;
 
 const SEARCH_MEMORY_TOOL: Tool = {
   name: "search_memory",

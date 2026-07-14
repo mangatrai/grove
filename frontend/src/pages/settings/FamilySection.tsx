@@ -60,7 +60,16 @@ type HelpAvailabilitySlot = {
 
 type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
 type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
-type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
+type PaPreferenceTopicTag =
+  | "travel"
+  | "school"
+  | "health"
+  | "finance"
+  | "gifts"
+  | "household"
+  | "food"
+  | "interests"
+  | "other";
 
 type PaPreference = {
   id: number;
@@ -105,6 +114,8 @@ const PA_PREFERENCE_TOPIC_TAG_LABELS: Record<PaPreferenceTopicTag, string> = {
   finance: "Finance",
   gifts: "Gifts",
   household: "Household",
+  food: "Food",
+  interests: "Interests",
   other: "Other",
 };
 
@@ -115,6 +126,8 @@ const PA_PREFERENCE_TOPIC_TAG_SELECT_DATA = [
   { value: "finance", label: "Finance" },
   { value: "gifts", label: "Gifts" },
   { value: "household", label: "Household" },
+  { value: "food", label: "Food" },
+  { value: "interests", label: "Interests" },
   { value: "other", label: "Other" },
 ];
 
@@ -271,6 +284,12 @@ export function FamilySection({ active }: FamilySectionProps) {
 
   const [deletePreferenceId, setDeletePreferenceId] = useState<number | null>(null);
   const [deletingPreference, setDeletingPreference] = useState(false);
+
+  const [editPreference, setEditPreference] = useState<
+    (Pick<PaPreference, "category" | "factText" | "topicTag"> & { id: number }) | null
+  >(null);
+  const [editPreferenceSaving, setEditPreferenceSaving] = useState(false);
+  const [editPreferenceError, setEditPreferenceError] = useState<string | null>(null);
   const [deletePreferenceError, setDeletePreferenceError] = useState<string | null>(null);
 
   // ── PA Preferences: suggest-from-notes approval ─────────────────────────────
@@ -401,7 +420,7 @@ export function FamilySection({ active }: FamilySectionProps) {
         body: JSON.stringify({
           category: newPreference.category,
           factText: newPreference.factText.trim(),
-          topicTag: newPreference.category === "preference" ? undefined : newPreference.topicTag,
+          topicTag: newPreference.topicTag,
         }),
       });
       await loadPreferences();
@@ -455,7 +474,7 @@ export function FamilySection({ active }: FamilySectionProps) {
           body: JSON.stringify({
             category: c.category,
             factText: c.factText.trim(),
-            topicTag: c.category === "preference" ? undefined : c.topicTag,
+            topicTag: c.topicTag,
             source: "notes_extraction",
           }),
         });
@@ -489,6 +508,49 @@ export function FamilySection({ active }: FamilySectionProps) {
       setDeletePreferenceError(e instanceof Error ? e.message : "Could not remove preference");
     } finally {
       setDeletingPreference(false);
+    }
+  }
+
+  function openEditPreference(pref: PaPreference) {
+    setEditPreference({
+      id: pref.id,
+      category: pref.category,
+      factText: pref.factText,
+      topicTag: pref.topicTag,
+    });
+    setEditPreferenceError(null);
+  }
+
+  async function saveEditPreference() {
+    if (!editPreference) return;
+    if (!editPreference.factText.trim()) {
+      setEditPreferenceError("Enter a fact.");
+      return;
+    }
+    if (editPreference.category !== "preference" && !editPreference.topicTag) {
+      setEditPreferenceError("Pick a topic tag.");
+      return;
+    }
+    setEditPreferenceSaving(true);
+    setEditPreferenceError(null);
+    try {
+      await apiJson<{ preference: PaPreference }>(
+        `/api/family/pa-preferences/${editPreference.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            category: editPreference.category,
+            factText: editPreference.factText.trim(),
+            topicTag: editPreference.topicTag,
+          }),
+        }
+      );
+      await loadPreferences();
+      setEditPreference(null);
+    } catch (e) {
+      setEditPreferenceError(e instanceof Error ? e.message : "Could not save preference");
+    } finally {
+      setEditPreferenceSaving(false);
     }
   }
 
@@ -886,6 +948,14 @@ export function FamilySection({ active }: FamilySectionProps) {
                   <Group gap={4} wrap="nowrap">
                     <ActionIcon
                       variant="subtle"
+                      onClick={() => openEditPreference(p)}
+                      title="Edit preference"
+                      aria-label="Edit preference"
+                    >
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="subtle"
                       color="red"
                       onClick={() => setDeletePreferenceId(p.id)}
                       title="Remove preference"
@@ -917,21 +987,20 @@ export function FamilySection({ active }: FamilySectionProps) {
               data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
               value={newPreference.category}
               onChange={(v) =>
-                setNewPreference((p) => ({ ...p, category: (v as PaPreferenceCategory) ?? "preference", topicTag: v === "preference" ? null : p.topicTag }))
+                setNewPreference((p) => ({ ...p, category: (v as PaPreferenceCategory) ?? "preference" }))
               }
               disabled={addingPreference}
               allowDeselect={false}
             />
-            {newPreference.category !== "preference" ? (
-              <Select
-                label="Topic"
-                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
-                value={newPreference.topicTag}
-                onChange={(v) => setNewPreference((p) => ({ ...p, topicTag: v as PaPreferenceTopicTag | null }))}
-                disabled={addingPreference}
-                placeholder="Pick a topic"
-              />
-            ) : null}
+            <Select
+              label={newPreference.category === "preference" ? "Topic (optional)" : "Topic"}
+              data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+              value={newPreference.topicTag}
+              onChange={(v) => setNewPreference((p) => ({ ...p, topicTag: v as PaPreferenceTopicTag | null }))}
+              disabled={addingPreference}
+              placeholder="Pick a topic"
+              clearable={newPreference.category === "preference"}
+            />
           </Group>
           <Textarea
             label="Fact"
@@ -1103,6 +1172,60 @@ export function FamilySection({ active }: FamilySectionProps) {
       </Modal>
 
       <Modal
+        opened={editPreference !== null}
+        onClose={() => { setEditPreference(null); setEditPreferenceError(null); }}
+        title="Edit preference"
+        centered
+      >
+        {editPreference ? (
+          <Stack gap="sm">
+            <Textarea
+              label="Fact"
+              value={editPreference.factText}
+              onChange={(e) =>
+                setEditPreference((p) => (p ? { ...p, factText: e.currentTarget.value } : null))
+              }
+              disabled={editPreferenceSaving}
+              autosize
+              minRows={2}
+            />
+            <Group align="end" grow>
+              <Select
+                label="Category"
+                data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+                value={editPreference.category}
+                onChange={(v) =>
+                  setEditPreference((p) => (p ? { ...p, category: (v as PaPreferenceCategory) ?? "preference" } : null))
+                }
+                disabled={editPreferenceSaving}
+                allowDeselect={false}
+              />
+              <Select
+                label={editPreference.category === "preference" ? "Topic (optional)" : "Topic"}
+                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                value={editPreference.topicTag}
+                onChange={(v) =>
+                  setEditPreference((p) => (p ? { ...p, topicTag: v as PaPreferenceTopicTag | null } : null))
+                }
+                disabled={editPreferenceSaving}
+                placeholder="Pick a topic"
+                clearable={editPreference.category === "preference"}
+              />
+            </Group>
+            {editPreferenceError ? <Alert color="red" p="xs">{editPreferenceError}</Alert> : null}
+            <Group justify="flex-end" mt="xs">
+              <Button variant="default" onClick={() => { setEditPreference(null); setEditPreferenceError(null); }} disabled={editPreferenceSaving}>
+                Cancel
+              </Button>
+              <Button loading={editPreferenceSaving} onClick={() => void saveEditPreference()}>
+                Save
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+
+      <Modal
         opened={deletePreferenceId !== null}
         onClose={() => { setDeletePreferenceId(null); setDeletePreferenceError(null); }}
         title="Remove preference?"
@@ -1167,19 +1290,18 @@ export function FamilySection({ active }: FamilySectionProps) {
                     value={c.category}
                     onChange={(v) => {
                       const category = (v as PaPreferenceCategory) ?? "discovered_fact";
-                      updateCandidate(i, { category, topicTag: category === "preference" ? null : c.topicTag });
+                      updateCandidate(i, { category });
                     }}
                     allowDeselect={false}
                   />
-                  {c.category !== "preference" ? (
-                    <Select
-                      label="Topic"
-                      data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
-                      value={c.topicTag}
-                      onChange={(v) => updateCandidate(i, { topicTag: v as PaPreferenceTopicTag | null })}
-                      placeholder="Pick a topic"
-                    />
-                  ) : null}
+                  <Select
+                    label={c.category === "preference" ? "Topic (optional)" : "Topic"}
+                    data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                    value={c.topicTag}
+                    onChange={(v) => updateCandidate(i, { topicTag: v as PaPreferenceTopicTag | null })}
+                    placeholder="Pick a topic"
+                    clearable={c.category === "preference"}
+                  />
                 </Group>
               </Stack>
             </Paper>

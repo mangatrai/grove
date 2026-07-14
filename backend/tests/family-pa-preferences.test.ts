@@ -184,14 +184,40 @@ describe("PA preferences topic_tag (#238)", () => {
     await deletePreference(fact.id, HOUSEHOLD_ID);
   });
 
-  it("forces topicTag to null for category=preference even if a value is passed in", async () => {
+  it("accepts an optional topicTag on category=preference rows for browsability (#239)", async () => {
     const pref = await createPreference(HOUSEHOLD_ID, {
       category: "preference",
       factText: "Always book direct flights",
       topicTag: "travel",
     });
+    expect(pref.topicTag).toBe("travel");
+    await deletePreference(pref.id, HOUSEHOLD_ID);
+  });
+
+  it("leaves topicTag null for category=preference when none is passed in", async () => {
+    const pref = await createPreference(HOUSEHOLD_ID, {
+      category: "preference",
+      factText: "Always book direct flights, no topic given",
+    });
     expect(pref.topicTag).toBeNull();
     await deletePreference(pref.id, HOUSEHOLD_ID);
+  });
+
+  it("accepts the food and interests topic tags (#239)", async () => {
+    const food = await createPreference(HOUSEHOLD_ID, {
+      category: "discovered_fact",
+      factText: "Favorite cuisines are Indian, Thai, and Italian",
+      topicTag: "food",
+    });
+    expect(food.topicTag).toBe("food");
+    const interests = await createPreference(HOUSEHOLD_ID, {
+      category: "discovered_fact",
+      factText: "Enjoys hiking and live music",
+      topicTag: "interests",
+    });
+    expect(interests.topicTag).toBe("interests");
+    await deletePreference(food.id, HOUSEHOLD_ID);
+    await deletePreference(interests.id, HOUSEHOLD_ID);
   });
 });
 
@@ -267,7 +293,7 @@ describe("suggestPreferencesFromNotes (#238)", () => {
     expect(mockComplete).not.toHaveBeenCalled();
   });
 
-  it("filters out candidates that already match an existing row, forces topicTag null for preference candidates", async () => {
+  it("filters out candidates that already match an existing row, keeps topicTag on preference candidates (#239)", async () => {
     const existing = await createPreference(HOUSEHOLD_ID, {
       category: "discovered_fact",
       factText: "Allergic to peanuts",
@@ -298,7 +324,7 @@ describe("suggestPreferencesFromNotes (#238)", () => {
     const redEye = candidates.find(c => c.factText === "No red-eye flights");
     expect(redEye).toBeDefined();
     expect(redEye!.category).toBe("preference");
-    expect(redEye!.topicTag).toBeNull();
+    expect(redEye!.topicTag).toBe("travel");
 
     await deletePreference(existing.id, HOUSEHOLD_ID);
   });
@@ -308,9 +334,39 @@ describe("suggestPreferencesFromNotes (#238)", () => {
     const candidates = await suggestPreferencesFromNotes(HOUSEHOLD_ID);
     expect(candidates).toEqual([]);
   });
+
+  it("skips only the malformed candidate instead of discarding the whole batch (#239 live-testing regression)", async () => {
+    // A real Anthropic call once returned a topic word ("school") in the category field for one
+    // candidate — the old whole-array z.array().safeParse() discarded every candidate in the
+    // response because of that single bad item. Candidates are now validated one at a time.
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        candidates: [
+          { personName: "Notes Test Parent", category: "school", factText: "Bad category value", topicTag: "school" },
+          { personName: "Notes Test Parent", category: "discovered_fact", factText: "Enjoys hiking and live music", topicTag: "interests" },
+        ],
+      }),
+      usage: {},
+    });
+
+    const candidates = await suggestPreferencesFromNotes(HOUSEHOLD_ID);
+    expect(candidates.find((c) => c.factText === "Bad category value")).toBeUndefined();
+    const good = candidates.find((c) => c.factText === "Enjoys hiking and live music");
+    expect(good).toBeDefined();
+    expect(good!.topicTag).toBe("interests");
+  });
 });
 
 describe("classifyPreferenceText (#238)", () => {
+  it("pins the travel-tag pass-through regression (#239): an explicit travel mention isn't stripped to other", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({ category: "discovered_fact", topicTag: "travel" }),
+      usage: {},
+    });
+    const result = await classifyPreferenceText("Likes music, movies, and travel");
+    expect(result).toEqual({ category: "discovered_fact", topicTag: "travel" });
+  });
+
   it("returns the LLM's category/topicTag classification", async () => {
     mockComplete.mockResolvedValueOnce({
       content: JSON.stringify({ category: "discovered_fact", topicTag: "gifts" }),
@@ -321,13 +377,13 @@ describe("classifyPreferenceText (#238)", () => {
     expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
   });
 
-  it("forces topicTag null when the LLM classifies as preference", async () => {
+  it("keeps topicTag when the LLM classifies as preference (#239: optional, not forbidden)", async () => {
     mockComplete.mockResolvedValueOnce({
       content: JSON.stringify({ category: "preference", topicTag: "travel" }),
       usage: {},
     });
     const result = await classifyPreferenceText("Never book connecting flights under 60 minutes");
-    expect(result).toEqual({ category: "preference", topicTag: null });
+    expect(result).toEqual({ category: "preference", topicTag: "travel" });
   });
 
   it("defaults to discovered_fact/other on malformed LLM output", async () => {
@@ -347,13 +403,15 @@ describe("POST /api/family/pa-preferences — topicTag validation (#238)", () =>
     expect(res.status).toBe(400);
   });
 
-  it("rejects category=preference with a topicTag set", async () => {
+  it("accepts category=preference with an optional topicTag set (#239)", async () => {
     const token = await ownerToken();
     const res = await request(app)
       .post("/api/family/pa-preferences")
       .set("authorization", `Bearer ${token}`)
-      .send({ category: "preference", factText: "Should not have a topic tag", topicTag: "travel" });
-    expect(res.status).toBe(400);
+      .send({ category: "preference", factText: "May have a topic tag now", topicTag: "travel" });
+    expect(res.status).toBe(201);
+    expect(res.body.preference.topicTag).toBe("travel");
+    await deletePreference(res.body.preference.id, HOUSEHOLD_ID);
   });
 
   it("accepts discovered_fact with a valid topicTag", async () => {
@@ -414,5 +472,65 @@ describe("POST /api/family/pa-preferences/suggest (#238)", () => {
 
     const stillUnpersisted = await listPreferences(HOUSEHOLD_ID, "discovered_fact");
     expect(stillUnpersisted.find(p => p.factText === "Route-level suggestion")).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/family/pa-preferences/:id (#239)", () => {
+  it("updates an existing row's category/factText/topicTag", async () => {
+    const token = await ownerToken();
+    const created = await createPreference(HOUSEHOLD_ID, {
+      category: "discovered_fact",
+      factText: "Original wording",
+      topicTag: "other",
+    });
+
+    const res = await request(app)
+      .patch(`/api/family/pa-preferences/${created.id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ category: "discovered_fact", factText: "Corrected wording", topicTag: "food" });
+    expect(res.status).toBe(200);
+    expect(res.body.preference).toMatchObject({
+      id: created.id,
+      category: "discovered_fact",
+      factText: "Corrected wording",
+      topicTag: "food",
+    });
+
+    await deletePreference(created.id, HOUSEHOLD_ID);
+  });
+
+  it("returns 404 for an id that doesn't exist in this household", async () => {
+    const token = await ownerToken();
+    const res = await request(app)
+      .patch("/api/family/pa-preferences/999999999")
+      .set("authorization", `Bearer ${token}`)
+      .send({ category: "discovered_fact", factText: "Doesn't matter", topicTag: "food" });
+    expect(res.status).toBe(404);
+  });
+
+  it("400s on the same validation rules as create (topicTag required for discovered_fact)", async () => {
+    const token = await ownerToken();
+    const created = await createPreference(HOUSEHOLD_ID, {
+      category: "discovered_fact",
+      factText: "Row to patch invalidly",
+      topicTag: "other",
+    });
+
+    const res = await request(app)
+      .patch(`/api/family/pa-preferences/${created.id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ category: "discovered_fact", factText: "Missing topic tag now" });
+    expect(res.status).toBe(400);
+
+    await deletePreference(created.id, HOUSEHOLD_ID);
+  });
+
+  it("400s on a non-integer id", async () => {
+    const token = await ownerToken();
+    const res = await request(app)
+      .patch("/api/family/pa-preferences/not-a-number")
+      .set("authorization", `Bearer ${token}`)
+      .send({ category: "discovered_fact", factText: "Irrelevant", topicTag: "food" });
+    expect(res.status).toBe(400);
   });
 });

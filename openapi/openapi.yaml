@@ -4625,8 +4625,8 @@ paths:
                 topicTag:
                   type: string
                   nullable: true
-                  enum: [travel, school, health, finance, gifts, household, other]
-                  description: Required when category is discovered_fact/decision_history; must be omitted/null when category is preference.
+                  enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  description: Required when category is discovered_fact/decision_history; optional when category is preference (GH #239 — may be set for browsability, no longer forbidden).
       responses:
         "201":
           description: Created (or dedup-updated) preference
@@ -4636,10 +4636,46 @@ paths:
                 type: object
                 properties:
                   preference: { $ref: '#/components/schemas/PaPreference' }
-        "400": { description: Validation error (including topicTag/category mismatch) }
+        "400": { description: Validation error }
         "401": { description: Unauthorized }
 
   /api/family/pa-preferences/{id}:
+    patch:
+      tags: [family]
+      summary: Update a PA preference in place (GH #239)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, factText]
+              properties:
+                category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+                topicTag:
+                  type: string
+                  nullable: true
+                  enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  description: Required when category is discovered_fact/decision_history; optional when category is preference.
+      responses:
+        "200":
+          description: Updated preference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preference: { $ref: '#/components/schemas/PaPreference' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "404": { description: Preference not found }
     delete:
       tags: [family]
       summary: Delete a PA preference
@@ -4707,7 +4743,7 @@ paths:
                   topicTag:
                     type: string
                     nullable: true
-                    enum: [travel, school, health, finance, gifts, household, other]
+                    enum: [travel, school, health, finance, gifts, household, food, interests, other]
         "400": { description: Validation error }
         "401": { description: Unauthorized }
 
@@ -6016,8 +6052,8 @@ components:
         topicTag:
           type: string
           nullable: true
-          enum: [travel, school, health, finance, gifts, household, other]
-          description: Always null for category=preference; required for discovered_fact/decision_history.
+          enum: [travel, school, health, finance, gifts, household, food, interests, other]
+          description: Required for discovered_fact/decision_history; optional (browsability only) for category=preference.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -6030,7 +6066,7 @@ components:
         topicTag:
           type: string
           nullable: true
-          enum: [travel, school, health, finance, gifts, household, other]
+          enum: [travel, school, health, finance, gifts, household, food, interests, other]
 
     HelpAvailabilitySlot:
       type: object

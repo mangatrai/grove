@@ -166,7 +166,16 @@ export type UpdateAvailabilityInput = {
 
 export type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
 export type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
-export type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
+export type PaPreferenceTopicTag =
+  | "travel"
+  | "school"
+  | "health"
+  | "finance"
+  | "gifts"
+  | "household"
+  | "food"
+  | "interests"
+  | "other";
 
 export type PaPreference = {
   id: number;

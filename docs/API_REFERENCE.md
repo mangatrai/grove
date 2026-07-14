@@ -4102,7 +4102,7 @@ Lists PA agent memory-store rows (standing facts/constraints for the planning as
 
 `category` — `preference` rows are injected in full into every PA loop prompt (no similarity filtering). `discovered_fact` / `decision_history` rows are stored with a `topicTag` and pulled on demand by the loop's `search_memory` tool (GH #238) instead of full-included.
 `source` — `manual` (added via this API), `feedback` (reserved for a future agent-write path), or `notes_extraction` (approved via `POST /pa-preferences/suggest` or the "Save as preference" flow, GH #238).
-`topicTag` — one of `travel | school | health | finance | gifts | household | other`. Always `null` for `category=preference`; required for `discovered_fact` / `decision_history`.
+`topicTag` — one of `travel | school | health | finance | gifts | household | food | interests | other` (GH #239 added `food`/`interests`). Required for `discovered_fact` / `decision_history`; optional (browsability only, no effect on loop behavior — `preference` rows are always full-included regardless of tag) for `category=preference`.
 
 ---
 
@@ -4119,10 +4119,29 @@ Creates a preference row. Text-based dedup: if a near-exact match (trimmed/lower
   "topicTag": "school"
 }
 ```
-`source` is optional, defaults to `manual`. `topicTag` is **required** when `category` is `discovered_fact` or `decision_history`, and **must be omitted/null** when `category` is `preference` — both enforced by a `400` validation error.
+`source` is optional, defaults to `manual`. `topicTag` is **required** when `category` is `discovered_fact` or `decision_history`; **optional** (may be set or omitted) when `category` is `preference` (GH #239 — previously forbidden).
 
 **Response `201`** — `{ "preference": PaPreference }`
-**Error `400`** — validation failure (including the `topicTag`/`category` mismatch above), `{ "errors": ZodIssue[] }`.
+**Error `400`** — validation failure (missing `topicTag` on `discovered_fact`/`decision_history`), `{ "errors": ZodIssue[] }`.
+
+---
+
+### `PATCH /api/family/pa-preferences/:id`
+
+Updates a preference row in place (correct a miscategorized or misworded row without delete-and-re-add). `:id` is an integer. Same body shape and validation as `POST /api/family/pa-preferences` (full replace, not a partial merge — all three fields are re-validated together). Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "category": "discovered_fact",
+  "factText": "Kids attend Lincoln Elementary",
+  "topicTag": "school"
+}
+```
+
+**Response `200`** — `{ "preference": PaPreference }`
+**Error `400`** — validation failure, `{ "errors": ZodIssue[] }`.
+**Error `404`** — row not in caller's household.
 
 ---
 
@@ -4138,7 +4157,7 @@ Permanently removes a preference row. `:id` is an integer. Requires `owner | adm
 
 ### `POST /api/family/pa-preferences/suggest`
 
-Scans every household member's `notes` field and asks the LLM (`chatModel()` tier, forced JSON schema) to propose candidate memory-store facts. Returns **unpersisted** candidates only — nothing is written until the caller approves individual rows via `POST /pa-preferences`. Candidates that already match an existing row (same normalized-text dedup as above) are filtered out before returning. Requires `owner | admin`.
+Scans every household member's `notes` field and asks the LLM (`chatModel()` tier, forced JSON schema) to propose candidate memory-store facts. Returns **unpersisted** candidates only — nothing is written until the caller approves individual rows via `POST /pa-preferences`. Candidates that already match an existing row (same normalized-text dedup as above) are filtered out before returning. The prompt also consolidates near-duplicate facts (multiple facts about the same person+topic, or the same fact shared across household members — e.g. `personName: "Jane Doe and John Doe"`) into a single candidate rather than emitting one per person/mention. Requires `owner | admin`.
 
 **Request body:** none.
 
@@ -4150,12 +4169,12 @@ Scans every household member's `notes` field and asks the LLM (`chatModel()` tie
       "personName": "Jane Doe",
       "category": "discovered_fact",
       "factText": "Enjoys hiking",
-      "topicTag": "other"
+      "topicTag": "interests"
     }
   ]
 }
 ```
-`topicTag` is always `null` when `category` is `preference`. Returns `{ "candidates": [] }` without calling the LLM if no household member has non-empty notes.
+`topicTag` is always present (GH #239 — every candidate carries a tag, including `category=preference` ones, for browsability). Each item validates independently; a single malformed candidate is dropped (logged, not surfaced) rather than discarding the whole batch. Returns `{ "candidates": [] }` without calling the LLM if no household member has non-empty notes.
 
 ---
 

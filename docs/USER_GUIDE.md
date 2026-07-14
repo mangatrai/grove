@@ -774,13 +774,13 @@ Standing facts and constraints the planning assistant agent should take into acc
 
 - **Fact** — the standing fact or constraint, in plain language (e.g. "No Schengen transit — visa risk").
 - **Category** — Preference, Discovered fact, or Decision history.
-  - **Preference** rows are hard constraints — every one is included in full on every agent run, never filtered or summarized.
-  - **Discovered fact** and **Decision history** rows are stored with a **Topic** tag and pulled on demand by the agent (via a memory-lookup tool) only when relevant to the current task, instead of being included on every run.
-- **Topic** — required for Discovered fact/Decision history (Travel, School, Health, Finance, Gifts, Household, Other); not set for Preference rows.
+  - **Preference** should be reserved for absolute, always-relevant constraints — allergies, dietary restrictions, visa/citizenship travel rules, or anything explicitly stated as non-negotiable ("never", "always", "must"). Every Preference row is included in full on every agent run, never filtered or summarized, so keep this list short and hard-constraint-only.
+  - **Discovered fact** and **Decision history** rows are stored with a **Topic** tag and pulled on demand by the agent (via a memory-lookup tool) only when relevant to the current task, instead of being included on every run. Recurring schedules and other logistics (e.g. a caregiver's weekly hours) belong here, not under Preference.
+- **Topic** — required for Discovered fact/Decision history (Travel, School, Health, Finance, Gifts, Household, Food, Interests, Other); optional for Preference rows (useful for browsing the list, has no effect on agent behavior since Preference rows are always fully included regardless of tag).
 - **Source** — Manual (added here), From feedback (reserved for a future agent-write path), or From notes (added via **Suggest from notes**, below).
-- Click **Add preference** to save. Use the trash icon to delete an entry — there's no edit-in-place; delete and re-add to correct wording.
+- Click **Add preference** to save. Use the pencil icon to edit an entry in place (fact text, category, topic) or the trash icon to delete it.
 
-**Suggest from notes** — click this button to have the agent scan every household member's **Notes** field (in the Members section above) and propose candidate facts. A checklist modal opens with each suggestion pre-checked and editable (fact text, category, topic) — uncheck any you don't want, edit wording as needed, then click **Approve selected** to save them. Suggestions that already match an existing row are filtered out automatically. Nothing is saved until you approve it.
+**Suggest from notes** — click this button to have the agent scan every household member's **Notes** field (in the Members section above) and propose candidate facts. Facts shared across multiple household members (e.g. two parents who both enjoy the same cuisine) are consolidated into a single suggestion naming everyone who shares it, rather than one per person. A checklist modal opens with each suggestion pre-checked and editable (fact text, category, topic) — uncheck any you don't want, edit wording as needed, then click **Approve selected** to save them. Suggestions that already match an existing row are filtered out automatically. Nothing is saved until you approve it.
 
 On the **Family** page (see Quick Capture, below), task and research results have a **Save as preference** button — it pre-fills a save dialog with a suggested category/topic (editable) so you can turn a result into a standing memory-store fact without retyping it.
 

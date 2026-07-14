@@ -360,7 +360,7 @@ export async function createPreference(
     input.category
   );
   const match = existing.find((row) => normalizeFactText(row.fact_text) === normalized);
-  const topicTag = input.category === "preference" ? null : (input.topicTag ?? null);
+  const topicTag = input.topicTag ?? null;
   if (match) {
     const updated = await qGet<PaPreferenceRow>(
       `UPDATE household_pa_preferences SET fact_text = ?, topic_tag = ?, updated_at = NOW() WHERE id = ? RETURNING *`,
@@ -382,6 +382,30 @@ export async function createPreference(
     topicTag
   );
   return preferenceFromRow(row!);
+}
+
+/**
+ * #239: manual correction path for the "Edit" (pencil) icon. Deliberately no cross-row dedup
+ * check here — createPreference's dedup already prevents most duplicates at creation time, and an
+ * edit is a manual correction of one specific row, not a new-fact write path.
+ */
+export async function updatePreference(
+  id: number,
+  householdId: string,
+  input: CreatePaPreferenceInput
+): Promise<PaPreference | undefined> {
+  const row = await qGet<PaPreferenceRow>(
+    `UPDATE household_pa_preferences
+     SET category = ?, fact_text = ?, topic_tag = ?, updated_at = NOW()
+     WHERE id = ? AND household_id = ?
+     RETURNING *`,
+    input.category,
+    input.factText,
+    input.topicTag ?? null,
+    id,
+    householdId
+  );
+  return row ? preferenceFromRow(row) : undefined;
 }
 
 export async function deletePreference(id: number, householdId: string): Promise<boolean> {
@@ -413,7 +437,7 @@ export async function searchMemory(
   return rows.map(preferenceFromRow);
 }
 
-const TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "other"] as const;
+const TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "food", "interests", "other"] as const;
 const CATEGORIES = ["preference", "discovered_fact", "decision_history"] as const;
 
 const SUGGEST_JSON_SCHEMA: Record<string, unknown> = {
@@ -424,10 +448,18 @@ const SUGGEST_JSON_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         properties: {
-          personName: { type: "string" },
-          category: { type: "string", enum: CATEGORIES },
-          factText: { type: "string" },
-          topicTag: { type: "string", enum: TOPIC_TAGS },
+          personName: { type: "string", description: "Full name of the household member this fact is about, or everyone it names if shared." },
+          category: {
+            type: "string",
+            enum: CATEGORIES,
+            description: "The RECORD TYPE, not the subject matter — always one of the three literal enum values. Never a topic word like 'school' or 'travel'.",
+          },
+          factText: { type: "string", description: "The durable fact itself, consolidated across any duplicate or overlapping notes." },
+          topicTag: {
+            type: "string",
+            enum: TOPIC_TAGS,
+            description: "The topic bucket this fact belongs to — separate from and unrelated to the category field above.",
+          },
         },
         required: ["personName", "category", "factText", "topicTag"],
         additionalProperties: false,
@@ -438,33 +470,59 @@ const SUGGEST_JSON_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
 };
 
-const suggestSchema = z.object({
-  candidates: z.array(
-    z.object({
-      personName: z.string(),
-      category: z.enum(CATEGORIES),
-      factText: z.string().trim().min(1),
-      topicTag: z.enum(TOPIC_TAGS),
-    })
-  ),
+const candidateSchema = z.object({
+  personName: z.string(),
+  category: z.enum(CATEGORIES),
+  factText: z.string().trim().min(1),
+  topicTag: z.enum(TOPIC_TAGS),
 });
+
+const suggestSchema = z.object({
+  candidates: z.array(z.unknown()),
+});
+
+const TOPIC_TAG_GUIDE = `- travel: trips, vacations, flights, visas/citizenship, transit restrictions
+- school: enrollment, grade, teachers, homework, school-tied extracurriculars
+- health: medical/dental appointments, allergies, medications, checkups
+- finance: money, accounts, bills, insurance, budgeting facts
+- gifts: gift ideas, sizes, wishlist items, past gifts given
+- household: recurring chores, caregiving/nanny schedules, home logistics, vendors
+- food: cuisine preferences, dietary likes/dislikes, restaurants, recipes
+- interests: hobbies, entertainment, media, non-school activities
+- other: durable and worth remembering, but doesn't fit any tag above`;
 
 const SUGGEST_SYSTEM = `You extract durable household-planning facts from personal notes so they can be
 saved as structured memory for a planning assistant.
 
 For each note, propose zero or more candidate facts:
-- "preference": a hard constraint the assistant must always honor (e.g. visa/citizenship travel
-  restrictions, dietary/medical restrictions, non-negotiable scheduling rules).
-- "discovered_fact": a useful fact learned in passing that isn't a hard rule (e.g. a stated interest,
-  a recurring vendor, a size/preference detail).
+- "preference": an ABSOLUTE, always-relevant constraint the assistant must honor on every task,
+  regardless of topic — allergies/medical restrictions, dietary restrictions, visa/citizenship
+  travel restrictions, or a rule explicitly stated as non-negotiable ("never", "always", "must").
+  This is a high bar — use it sparingly.
+- "discovered_fact": everything else worth remembering — recurring schedules, caregiving/nanny
+  hours, interests, cuisine preferences, vendor details. This is the default for anything that
+  isn't an absolute constraint, even if it recurs regularly (e.g. a nanny's fixed weekly hours are
+  a discovered_fact with topic "household", not a preference — the assistant looks it up when a
+  scheduling task needs it, rather than carrying it on every unrelated task).
 - "decision_history": a past decision worth remembering for consistency (e.g. "chose X over Y
   because...").
 
-Every candidate needs a topicTag from the fixed set: travel, school, health, finance, gifts,
-household, other. Only propose candidates that are clearly useful to remember — skip vague or
-trivial notes. If a note has nothing worth extracting, propose nothing for that person.
+Every candidate needs a topicTag from this fixed set, including "preference" candidates (topicTag
+is used for browsability there, not for lookup — the assistant always has full preference rows in
+context regardless of tag):
+${TOPIC_TAG_GUIDE}
 
-Respond with JSON only: {"candidates": [{"personName": string, "category": "preference"|"discovered_fact"|"decision_history", "factText": string, "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"other"}]}`;
+Before finalizing, consolidate:
+- If the same person has multiple facts about the same topic (e.g. two separate notes about their
+  favorite cuisines), merge them into ONE candidate instead of near-duplicate entries.
+- If multiple household members share the same fact or interest (e.g. both spouses enjoy the same
+  cuisine or hobby), merge them into ONE candidate whose personName names everyone who shares it
+  (e.g. "Owner Test Name and Sam Spouse"), instead of one candidate per person.
+
+Only propose candidates that are clearly useful to remember — skip vague or trivial notes. If a
+note has nothing worth extracting, propose nothing for that person.
+
+Respond with JSON only: {"candidates": [{"personName": string, "category": "preference"|"discovered_fact"|"decision_history", "factText": string, "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"food"|"interests"|"other"}]}`;
 
 /**
  * #238: household-wide (not per-person) on-demand notes scan. Returns unpersisted candidates —
@@ -500,14 +558,31 @@ export async function suggestPreferencesFromNotes(householdId: string): Promise<
   } catch {
     raw = undefined;
   }
-  const parsed = suggestSchema.safeParse(raw);
-  if (!parsed.success) {
-    log.warn("family-profiles: suggestPreferencesFromNotes failed validation", {
+  const envelope = suggestSchema.safeParse(raw);
+  if (!envelope.success) {
+    log.warn("family-profiles: suggestPreferencesFromNotes got an unparseable response, discarding", {
       householdId,
-      issues: parsed.error.issues,
+      issues: envelope.error.issues,
       rawContent: content.slice(0, 300),
     });
     return [];
+  }
+
+  // Validate per-candidate rather than the whole array at once — one malformed candidate
+  // (e.g. the model putting a topic word in the category field) shouldn't discard every
+  // other valid candidate in the same response (#239 live-testing regression).
+  const candidates: PaPreferenceCandidate[] = [];
+  for (const raw of envelope.data.candidates) {
+    const parsed = candidateSchema.safeParse(raw);
+    if (!parsed.success) {
+      log.warn("family-profiles: suggestPreferencesFromNotes skipped one malformed candidate", {
+        householdId,
+        issues: parsed.error.issues,
+        candidate: raw,
+      });
+      continue;
+    }
+    candidates.push(parsed.data);
   }
 
   const existing = await qAll<PaPreferenceRow>(
@@ -516,21 +591,29 @@ export async function suggestPreferencesFromNotes(householdId: string): Promise<
   );
   const existingNormalized = new Set(existing.map((row) => normalizeFactText(row.fact_text)));
 
-  return parsed.data.candidates
+  return candidates
     .filter((c) => !existingNormalized.has(normalizeFactText(c.factText)))
     .map((c) => ({
       personName: c.personName,
       category: c.category,
       factText: c.factText,
-      topicTag: c.category === "preference" ? null : c.topicTag,
+      topicTag: c.topicTag,
     }));
 }
 
 const CLASSIFY_PREFERENCE_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   properties: {
-    category: { type: "string", enum: CATEGORIES },
-    topicTag: { type: "string", enum: TOPIC_TAGS },
+    category: {
+      type: "string",
+      enum: CATEGORIES,
+      description: "The RECORD TYPE, not the subject matter — always one of the three literal enum values. Never a topic word like 'school' or 'travel'.",
+    },
+    topicTag: {
+      type: "string",
+      enum: TOPIC_TAGS,
+      description: "The topic bucket this fact belongs to — separate from and unrelated to the category field above.",
+    },
   },
   required: ["category", "topicTag"],
   additionalProperties: false,
@@ -543,13 +626,18 @@ const classifyPreferenceSchema = z.object({
 
 const CLASSIFY_PREFERENCE_SYSTEM = `Classify a single household-planning fact for storage:
 
-- "preference": a hard constraint that must always be honored.
-- "discovered_fact": a useful fact learned in passing, not a hard rule.
+- "preference": an ABSOLUTE, always-relevant constraint — allergies/medical restrictions, dietary
+  restrictions, visa/citizenship travel restrictions, or a rule explicitly stated as non-negotiable
+  ("never", "always", "must"). This is a high bar — use it sparingly.
+- "discovered_fact": everything else worth remembering, including recurring schedules/logistics
+  that aren't stated as an absolute rule (e.g. a caregiving schedule is a discovered_fact with
+  topic "household", not a preference).
 - "decision_history": a past decision worth remembering for consistency.
 
-Also assign a topicTag from the fixed set: travel, school, health, finance, gifts, household, other.
+Also assign a topicTag from the fixed set (used for browsability even on "preference" rows):
+${TOPIC_TAG_GUIDE}
 
-Respond with JSON only: {"category": "preference"|"discovered_fact"|"decision_history", "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"other"}`;
+Respond with JSON only: {"category": "preference"|"discovered_fact"|"decision_history", "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"food"|"interests"|"other"}`;
 
 /**
  * #238: used by the "Save as preference" button — classifies one ad-hoc string (e.g. a PA task
@@ -590,6 +678,6 @@ export async function classifyPreferenceText(
   }
   return {
     category: parsed.data.category,
-    topicTag: parsed.data.category === "preference" ? null : parsed.data.topicTag,
+    topicTag: parsed.data.topicTag,
   };
 }
