@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — Payslip vision extraction used cheap/fast model tier instead of strong tier (2026-07-14)
+
+**What changed:** `extract-payslip-llm.ts` called `chatModel()` for payslip vision extraction, resolving to each provider's cheapest/fastest tier (Anthropic: `claude-haiku-4-5`, OpenAI: `gpt-4.1-mini`). Changed to `strongModel()` — Anthropic now uses `claude-sonnet-5`, OpenAI now uses `gpt-4o`.
+
+**Why:** Contradicts the codebase's own tier convention (`backend/src/llm/index.ts:14-21`): `chatModel()` is documented "use for summarization, insights"; `strongModel()` is documented "use for vision, agentic loops, complex generation." Owner re-tested a real IBM payslip through the app right after FIX #236 shipped and found Anthropic vision misread `483.56` as `463.56` on an ESPP line item — a classic digit-confusion error typical of a weaker vision model. OpenAI's `gpt-4.1-mini` happened to perform acceptably at this task (an existing `.env.example` comment calls it out as deliberately chosen for payslip vision), which masked the tier-selection bug — the "OpenAI worked better" comparison wasn't apples-to-apples: OpenAI's cheap-but-capable mini tier vs Anthropic's cheapest/fastest tier, a much bigger capability drop relative to Anthropic's own `strongModel()`. Applies to both providers (same code path, no per-provider override) rather than special-casing Anthropic only — owner's explicit choice among presented options.
+
+**Verification:** `npm run test -w backend` 741/741 passing, `npx tsc --noEmit` clean. Live-API smoke test confirms `extraction_model: claude-sonnet-5` now recorded on extraction (was `claude-haiku-4-5-20251001`). Could not re-verify the exact reported digit against the owner's real payslip — that file/DB row was lost when the backend test suite reset the shared dev/test database earlier in the same session; owner to re-verify via the app UI.
+
+**Files:** `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`.
+
+**GitHub:** closes [#237](https://github.com/mangatrai/grove/issues/237).
+
+---
+
 ## FIX — Anthropic payslip vision extraction failed with non-JSON content error (2026-07-14)
 
 **What changed:** `anthropicVision()` (`backend/src/llm/providers/anthropic.ts`), used only by payslip PDF extraction, never received the schema-enforced structured-output fix that `anthropicChat()` got in FIX #228 — it only appended "Return ONLY valid JSON. No prose outside the JSON." to the system prompt and did a plain-text `JSON.parse()` on the response. Ported the same forced-tool-use pattern `anthropicChat()` already uses: when `responseFormat: "json"` + `jsonSchema` + `jsonSchemaName` are present, force a synthetic tool call (`tools: [{ name, input_schema }]`, `tool_choice: { type: "tool", name }`) and read the already-parsed `tool_use.input` back out instead of parsing free text. Also added a normalization step in `extract-payslip-llm.ts` that backfills any missing `line_items` array keys (earnings, pre_tax_deductions, post_tax_deductions, tax_deductions, other_deductions, other_information, taxable_earnings) with `[]` before zod validation.

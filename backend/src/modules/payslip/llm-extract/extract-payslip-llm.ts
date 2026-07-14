@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getVisionAdapter, chatModel, visionParserSource } from "../../../llm/index.js";
+import { getVisionAdapter, strongModel, visionParserSource } from "../../../llm/index.js";
 import type { LlmUsage } from "../../../llm/index.js";
 import {
   payslipDocumentMetadataSchema,
@@ -47,7 +47,7 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     throw new Error("Exactly one of pdfPath or pdfBuffer must be provided.");
   }
 
-  const model = chatModel();
+  const model = strongModel();
 
   let pdfPathForRender: string;
   let tempDir: string | undefined;
