@@ -14,8 +14,8 @@ import {
   getDecryptedRefreshToken,
   heuristicCalendarRole
 } from "../gcal/gcal.service.js";
-import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
-import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
+import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember, PaPreference } from "./family.types.js";
+import { listAvailability, listHouseholdMembers, listPreferences } from "./family-profiles.service.js";
 import { getOccasionSettings } from "./family-occasion-settings.service.js";
 import { decryptDob } from "../household/dob-crypto.js";
 
@@ -625,6 +625,15 @@ function buildCaregiverLines(slots: HelpAvailabilitySlot[]): string {
     const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
     return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
   }).join("\n");
+}
+
+// #165: `preference`-category rows are full-inclusion (never top-K filtered) — a dropped hard
+// constraint (e.g. "no Schengen transit") is a wrong answer, not a slightly worse one. At the
+// ratified ~10-30 row scale this is ~300 tokens; `discovered_fact`/`decision_history` retrieval via
+// `search_memory` is deferred to #238.
+function buildPreferenceLines(preferences: PaPreference[]): string {
+  if (preferences.length === 0) return "No preferences recorded.";
+  return preferences.map(p => `- ${p.factText}`).join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1763,10 +1772,11 @@ JSON response format (valid JSON only, no prose outside):
 // scheduled pipeline already has the data for, reusing its exact helpers (buildMemberProfile,
 // buildCaregiverLines, env.TZ-based today) rather than re-deriving any of it.
 export async function buildCaptureContextHeader(householdId: string): Promise<string> {
-  const [members, caregiverSlots, location] = await Promise.all([
+  const [members, caregiverSlots, location, preferences] = await Promise.all([
     listHouseholdMembers(householdId),
     listAvailability(householdId),
     getHouseholdLocation(householdId),
+    listPreferences(householdId, "preference"),
   ]);
 
   const now = new Date();
@@ -1777,6 +1787,7 @@ export async function buildCaptureContextHeader(householdId: string): Promise<st
   if (location) lines.push(`Location: ${location}.`);
   if (members.length > 0) lines.push(`Household:\n${buildMemberProfile(members)}`);
   if (caregiverSlots.length > 0) lines.push(`Caregivers:\n${buildCaregiverLines(caregiverSlots)}`);
+  if (preferences.length > 0) lines.push(`Preferences:\n${buildPreferenceLines(preferences)}`);
   return lines.join("\n");
 }
 

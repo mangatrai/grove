@@ -745,7 +745,7 @@ Configure how and when the app alerts you:
 
 ### Family Tab
 
-Available to owners and admins. Three subsections:
+Available to owners and admins. Five subsections:
 
 **Household Members**
 
@@ -767,6 +767,15 @@ Track regular and one-off care arrangements for any household member:
 - **Start / End time** — optional time window.
 - **Label** — optional short description (e.g. "Regular hours").
 - Click **Add entry** to save. Use the pencil icon to edit or the trash icon to delete an entry.
+
+**PA Preferences**
+
+Standing facts and constraints the planning assistant agent should always take into account when planning or answering — e.g. dietary restrictions, travel rules, recurring household decisions. Unlike other agent context, these are never filtered or summarized: every row is included in full on every agent run.
+
+- **Fact** — the standing fact or constraint, in plain language (e.g. "No Schengen transit — visa risk").
+- **Category** — Preference, Discovered fact, or Decision history.
+- **Source** — Manual (added here) or From feedback (reserved for a future agent-write path).
+- Click **Add preference** to save. Use the trash icon to delete an entry — there's no edit-in-place; delete and re-add to correct wording.
 
 **Google Calendar**
 

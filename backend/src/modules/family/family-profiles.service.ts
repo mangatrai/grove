@@ -1,8 +1,12 @@
 import { qAll, qExec, qGet } from "../../db/query.js";
 import {
   type CreateAvailabilityInput,
+  type CreatePaPreferenceInput,
   type HelpAvailabilitySlot,
   type HouseholdMember,
+  type PaPreference,
+  type PaPreferenceCategory,
+  type PaPreferenceRow,
   type UpdateAvailabilityInput,
   type UpdateMemberProfileInput,
 } from "./family.types.js";
@@ -297,4 +301,84 @@ export async function deleteAvailability(id: string, householdId: string): Promi
     householdId
   );
   return true;
+}
+
+// ── PA preferences / memory store (#165) ────────────────────────────────────
+// topic_tag, search_memory, and notes-extraction write paths are deferred to #238.
+// `preference` rows are full-inclusion (see buildCaptureContextHeader in family-agent.service.ts).
+
+function normalizeFactText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function preferenceFromRow(row: PaPreferenceRow): PaPreference {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    category: row.category,
+    factText: row.fact_text,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function listPreferences(
+  householdId: string,
+  category?: PaPreferenceCategory
+): Promise<PaPreference[]> {
+  const rows = await qAll<PaPreferenceRow>(
+    `SELECT * FROM household_pa_preferences
+     WHERE household_id = ?
+       ${category ? "AND category = ?" : ""}
+     ORDER BY category, created_at`,
+    ...(category ? [householdId, category] : [householdId])
+  );
+  return rows.map(preferenceFromRow);
+}
+
+/**
+ * Text-based dedup (ratified 2026-07-12): exact/near-exact match (case-insensitive, whitespace-
+ * normalized) against existing rows in the same household+category updates in place instead of
+ * inserting a duplicate.
+ */
+export async function createPreference(
+  householdId: string,
+  input: CreatePaPreferenceInput
+): Promise<PaPreference> {
+  const normalized = normalizeFactText(input.factText);
+  const existing = await qAll<PaPreferenceRow>(
+    `SELECT * FROM household_pa_preferences WHERE household_id = ? AND category = ?`,
+    householdId,
+    input.category
+  );
+  const match = existing.find((row) => normalizeFactText(row.fact_text) === normalized);
+  if (match) {
+    const updated = await qGet<PaPreferenceRow>(
+      `UPDATE household_pa_preferences SET fact_text = ?, updated_at = NOW() WHERE id = ? RETURNING *`,
+      input.factText,
+      match.id
+    );
+    return preferenceFromRow(updated!);
+  }
+
+  const row = await qGet<PaPreferenceRow>(
+    `INSERT INTO household_pa_preferences (household_id, category, fact_text, source)
+     VALUES (?, ?, ?, ?)
+     RETURNING *`,
+    householdId,
+    input.category,
+    input.factText,
+    input.source ?? "manual"
+  );
+  return preferenceFromRow(row!);
+}
+
+export async function deletePreference(id: number, householdId: string): Promise<boolean> {
+  const row = await qGet<{ id: number }>(
+    `DELETE FROM household_pa_preferences WHERE id = ? AND household_id = ? RETURNING id`,
+    id,
+    householdId
+  );
+  return row !== undefined;
 }

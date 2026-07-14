@@ -4075,6 +4075,64 @@ Permanently removes an availability slot. Requires `owner | admin`.
 
 ---
 
+### `GET /api/family/pa-preferences`
+
+Lists PA agent memory-store rows (standing facts/constraints for the planning assistant). Requires `owner | admin | member`.
+
+**Query params**
+- `category=preference|discovered_fact|decision_history` — filter to one category (default: all).
+
+**Response `200`**
+```json
+{
+  "preferences": [
+    {
+      "id": 1,
+      "householdId": "uuid",
+      "category": "preference",
+      "factText": "No Schengen transit — visa risk for H1B holders",
+      "source": "manual",
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "updatedAt": "2026-07-14T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+`category` — `preference` rows are injected in full into every PA loop prompt (no similarity filtering); `discovered_fact` / `decision_history` are stored but not yet consumed by the loop (see GH #238).
+`source` — `manual` (added via this API) or `feedback` (reserved for a future agent-write path, GH #238).
+
+---
+
+### `POST /api/family/pa-preferences`
+
+Creates a preference row. Text-based dedup: if a near-exact match (trimmed/lowercased/whitespace-collapsed) already exists in the same household + category, the existing row is updated in place instead of inserting a duplicate. Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "category": "preference",
+  "factText": "No Schengen transit — visa risk for H1B holders",
+  "source": "manual"
+}
+```
+`source` is optional, defaults to `manual`.
+
+**Response `201`** — `{ "preference": PaPreference }`
+**Error `400`** — validation failure, `{ "errors": ZodIssue[] }`.
+
+---
+
+### `DELETE /api/family/pa-preferences/:id`
+
+Permanently removes a preference row. `:id` is an integer. Requires `owner | admin`.
+
+**Response `204`** — no body.
+**Error `400`** — `:id` is not an integer.
+**Error `404`** — row not in caller's household.
+
+---
+
 ### `POST /api/family/alerts/:alertId/approve`
 
 Execute the action associated with a family agent alert. Currently only supports `action_type = 'create_gcal_event'` — creates a Google Calendar event from the alert's structured payload, writes a `family_events` row, and marks the alert resolved. Requires `owner | admin`.

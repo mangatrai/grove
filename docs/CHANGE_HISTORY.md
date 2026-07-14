@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — PA agent memory store: household_pa_preferences table + CRUD + full-inclusion in loop context (2026-07-14)
+
+**What changed:** New `household_pa_preferences` table (migration `0084`) — flat rows of `{category: preference|discovered_fact|decision_history, fact_text, source: manual|feedback}`, no embedding/vector column. `GET/POST/DELETE /api/family/pa-preferences` routes (`family-profiles.routes.ts`). Text-based dedup on create: normalized (trimmed/lowercased/whitespace-collapsed) `fact_text` compared within the same household+category; a near-exact match updates the existing row in place (preserving the caller's raw text) instead of inserting a duplicate. `preference`-category rows are injected in full (not top-K/similarity-filtered) into every PA loop prompt via `buildCaptureContextHeader()` — the single function shared by both the task-loop runner (`pa-task-runner.ts`) and the quick-capture path. New Settings › Family "PA Preferences" section: list table + add-row form + delete confirmation, mirroring the existing "Care & Help Schedule" pattern.
+
+**Why:** GH #165 (originally scoped around pgvector embeddings) was descoped across three amendment passes (2026-07-06, 07-12, 07-14) to a flat table — the household-scale row count (~10-30) makes similarity search unnecessary, and full-inclusion avoids the failure mode of a hard constraint (e.g. "no Schengen transit — visa risk") getting silently dropped by a similarity filter and producing a wrong answer instead of a slightly worse one. `SERIAL` integer PK (not the codebase's usual TEXT/UUID) and no `topic_tag` column are deliberate — both are exactly as ratified in the GH comment DDL. `topic_tag`, `search_memory` tool, notes-extraction endpoint, and an editable-checkbox approval UI were split out to sub-issue #238 (deferred, higher-uncertainty half) rather than bundled here.
+
+**Verification:** `npm run test -w backend` 749/749 passing (8 new tests in `family-pa-preferences.test.ts`; `family-agent.test.ts` updated to assert `buildCaptureContextHeader` includes/excludes the `Preferences:` block). `npm run build -w frontend` clean.
+
+**Files:** `backend/db/migrations/0084_household_pa_preferences.sql`, `backend/src/modules/family/family.types.ts`, `backend/src/modules/family/family-profiles.service.ts`, `backend/src/modules/family/family-profiles.routes.ts`, `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/tests/family-pa-preferences.test.ts`, `backend/tests/family-agent.test.ts`, `frontend/src/pages/settings/FamilySection.tsx`.
+
+**GitHub:** closes [#165](https://github.com/mangatrai/grove/issues/165). Related: [#238](https://github.com/mangatrai/grove/issues/238) (deferred, sub-issue).
+
+---
+
 ## FIX — Payslip vision extraction used cheap/fast model tier instead of strong tier (2026-07-14)
 
 **What changed:** `extract-payslip-llm.ts` called `chatModel()` for payslip vision extraction, resolving to each provider's cheapest/fastest tier (Anthropic: `claude-haiku-4-5`, OpenAI: `gpt-4.1-mini`). Changed to `strongModel()` — Anthropic now uses `claude-sonnet-5`, OpenAI now uses `gpt-4o`.

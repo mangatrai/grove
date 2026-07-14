@@ -57,6 +57,36 @@ type HelpAvailabilitySlot = {
   createdAt: string;
 };
 
+type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+type PaPreferenceSource = "manual" | "feedback";
+
+type PaPreference = {
+  id: number;
+  householdId: string;
+  category: PaPreferenceCategory;
+  factText: string;
+  source: PaPreferenceSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const PA_PREFERENCE_CATEGORY_LABELS: Record<PaPreferenceCategory, string> = {
+  preference: "Preference",
+  discovered_fact: "Discovered fact",
+  decision_history: "Decision history",
+};
+
+const PA_PREFERENCE_SOURCE_LABELS: Record<PaPreferenceSource, string> = {
+  manual: "Manual",
+  feedback: "From feedback",
+};
+
+const PA_PREFERENCE_CATEGORY_SELECT_DATA = [
+  { value: "preference", label: "Preference" },
+  { value: "discovered_fact", label: "Discovered fact" },
+  { value: "decision_history", label: "Decision history" },
+];
+
 type MemberDraft = {
   interestsJson: string[];
   notes: string;
@@ -195,6 +225,19 @@ export function FamilySection({ active }: FamilySectionProps) {
   const [occasionSettingsSaving, setOccasionSettingsSaving] = useState(false);
   const [occasionSettingsError, setOccasionSettingsError] = useState<string | null>(null);
 
+  // ── PA Preferences ──────────────────────────────────────────────────────────
+  const [preferences, setPreferences] = useState<PaPreference[]>([]);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+
+  const [newPreference, setNewPreference] = useState({ category: "preference", factText: "" });
+  const [addingPreference, setAddingPreference] = useState(false);
+  const [addPreferenceError, setAddPreferenceError] = useState<string | null>(null);
+
+  const [deletePreferenceId, setDeletePreferenceId] = useState<number | null>(null);
+  const [deletingPreference, setDeletingPreference] = useState(false);
+  const [deletePreferenceError, setDeletePreferenceError] = useState<string | null>(null);
+
   function initDrafts(ms: HouseholdMember[]) {
     const map: Record<string, MemberDraft> = {};
     for (const m of ms) {
@@ -278,6 +321,69 @@ export function FamilySection({ active }: FamilySectionProps) {
       setOccasionSettingsSaving(false);
     }
   }, [occasionNudgesEnabled]);
+
+  const loadPreferences = useCallback(async () => {
+    setPreferencesLoading(true);
+    setPreferencesError(null);
+    try {
+      const res = await apiJson<{ preferences: PaPreference[] }>("/api/family/pa-preferences");
+      setPreferences(res.preferences);
+    } catch (e) {
+      setPreferencesError(e instanceof Error ? e.message : "Failed to load PA preferences");
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadPreferences();
+  }, [active, loadPreferences]);
+
+  async function addPreference() {
+    if (!newPreference.factText.trim()) {
+      setAddPreferenceError("Enter a fact.");
+      return;
+    }
+    setAddingPreference(true);
+    setAddPreferenceError(null);
+    try {
+      await apiJson<{ preference: PaPreference }>("/api/family/pa-preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          category: newPreference.category,
+          factText: newPreference.factText.trim(),
+        }),
+      });
+      await loadPreferences();
+      setNewPreference((prev) => ({ ...prev, factText: "" }));
+    } catch (e) {
+      setAddPreferenceError(e instanceof Error ? e.message : "Could not add preference");
+    } finally {
+      setAddingPreference(false);
+    }
+  }
+
+  async function deletePreferenceRow() {
+    if (deletePreferenceId === null) return;
+    setDeletingPreference(true);
+    setDeletePreferenceError(null);
+    try {
+      const res = await apiFetch(`/api/family/pa-preferences/${deletePreferenceId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setPreferences((prev) => prev.filter((p) => p.id !== deletePreferenceId));
+      setDeletePreferenceId(null);
+    } catch (e) {
+      setDeletePreferenceError(e instanceof Error ? e.message : "Could not remove preference");
+    } finally {
+      setDeletingPreference(false);
+    }
+  }
 
   function setDraftField<K extends keyof MemberDraft>(profileId: string, key: K, value: MemberDraft[K]) {
     setDrafts((prev) => ({
@@ -631,6 +737,94 @@ export function FamilySection({ active }: FamilySectionProps) {
 
       <Divider my="lg" />
 
+      {/* ── PA Preferences ────────────────────────────────────────────────── */}
+      <Title order={3}>PA Preferences</Title>
+      <Text c="dimmed" size="sm">
+        Standing facts and constraints the planning assistant should always take into account —
+        e.g. dietary restrictions, travel rules, recurring decisions.
+      </Text>
+      {preferencesError ? <Alert color="red">{preferencesError}</Alert> : null}
+      {preferencesLoading ? (
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading preferences…</Text>
+        </Group>
+      ) : null}
+      {!preferencesLoading && preferences.length > 0 ? (
+        <Table withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Fact</Table.Th>
+              <Table.Th>Category</Table.Th>
+              <Table.Th>Source</Table.Th>
+              <Table.Th style={{ width: 64 }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {preferences.map((p) => (
+              <Table.Tr key={p.id}>
+                <Table.Td>{p.factText}</Table.Td>
+                <Table.Td>{PA_PREFERENCE_CATEGORY_LABELS[p.category] ?? p.category}</Table.Td>
+                <Table.Td>{PA_PREFERENCE_SOURCE_LABELS[p.source] ?? p.source}</Table.Td>
+                <Table.Td>
+                  <Group gap={4} wrap="nowrap">
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      onClick={() => setDeletePreferenceId(p.id)}
+                      title="Remove preference"
+                      aria-label="Remove preference"
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : null}
+      {!preferencesLoading && preferences.length === 0 ? (
+        <Text size="sm" c="dimmed">No preferences saved yet.</Text>
+      ) : null}
+
+      {/* Add preference form */}
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="sm">
+          <Group gap="xs" align="center">
+            <IconPlus size={14} />
+            <Text fw={600} size="sm">Add preference</Text>
+          </Group>
+          <Group align="end" grow>
+            <Select
+              label="Category"
+              data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+              value={newPreference.category}
+              onChange={(v) => setNewPreference((p) => ({ ...p, category: v ?? "preference" }))}
+              disabled={addingPreference}
+              allowDeselect={false}
+            />
+          </Group>
+          <Textarea
+            label="Fact"
+            placeholder="e.g. No Schengen transit — visa risk"
+            value={newPreference.factText}
+            onChange={(e) => setNewPreference((p) => ({ ...p, factText: e.currentTarget.value }))}
+            disabled={addingPreference}
+            autosize
+            minRows={2}
+          />
+          {addPreferenceError ? <Alert color="red" p="xs">{addPreferenceError}</Alert> : null}
+          <Group>
+            <Button size="sm" loading={addingPreference} onClick={() => void addPreference()}>
+              {addingPreference ? "Adding…" : "Add preference"}
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+
+      <Divider my="lg" />
+
       {/* ── Google Calendar ────────────────────────────────────────────────── */}
       <GCalSection active={active} />
 
@@ -774,6 +968,26 @@ export function FamilySection({ active }: FamilySectionProps) {
               Cancel
             </Button>
             <Button color="red" loading={deleting} onClick={() => void deleteSlot()}>
+              Remove
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deletePreferenceId !== null}
+        onClose={() => { setDeletePreferenceId(null); setDeletePreferenceError(null); }}
+        title="Remove preference?"
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">This preference will no longer be included in planning assistant context.</Text>
+          {deletePreferenceError ? <Alert color="red" p="xs">{deletePreferenceError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => { setDeletePreferenceId(null); setDeletePreferenceError(null); }}>
+              Cancel
+            </Button>
+            <Button color="red" loading={deletingPreference} onClick={() => void deletePreferenceRow()}>
               Remove
             </Button>
           </Group>

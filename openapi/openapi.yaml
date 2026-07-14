@@ -4585,6 +4585,71 @@ paths:
         "401": { description: Unauthorized }
         "404": { description: Slot not found }
 
+  /api/family/pa-preferences:
+    get:
+      tags: [family]
+      summary: List PA agent memory-store rows
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string, enum: [preference, discovered_fact, decision_history] }
+          description: Filter to one category (default returns all categories)
+      responses:
+        "200":
+          description: Preference list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaPreference' }
+        "401": { description: Unauthorized }
+    post:
+      tags: [family]
+      summary: Create a PA preference (dedups near-exact text in place)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, factText]
+              properties:
+                category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+                source: { type: string, enum: [manual, feedback] }
+      responses:
+        "201":
+          description: Created (or dedup-updated) preference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preference: { $ref: '#/components/schemas/PaPreference' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+
+  /api/family/pa-preferences/{id}:
+    delete:
+      tags: [family]
+      summary: Delete a PA preference
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
+        "400": { description: Invalid id }
+        "401": { description: Unauthorized }
+        "404": { description: Preference not found }
+
   /api/family/alerts/{alertId}/approve:
     post:
       tags: [family]
@@ -5878,6 +5943,17 @@ components:
           type: array
           items: { type: string }
         notes: { type: string, nullable: true }
+
+    PaPreference:
+      type: object
+      properties:
+        id: { type: integer }
+        householdId: { type: string }
+        category: { type: string, enum: [preference, discovered_fact, decision_history] }
+        factText: { type: string }
+        source: { type: string, enum: [manual, feedback] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     HelpAvailabilitySlot:
       type: object

@@ -753,6 +753,7 @@ describe("FIX #213 — quick-capture context injection", () => {
   const NANNY_PROFILE_ID = "99990000-test-0000-0000-captureprof02";
   const MEMBERSHIP_ID = "99990000-test-0000-0000-capturemem001";
   const AVAILABILITY_ID = "99990000-test-0000-0000-captureavl001";
+  let preferenceId: number;
 
   beforeAll(async () => {
     await qExec(
@@ -782,10 +783,16 @@ describe("FIX #213 — quick-capture context injection", () => {
        ON CONFLICT (id) DO NOTHING`,
       AVAILABILITY_ID, WITH_CONTEXT_HOUSEHOLD_ID, NANNY_PROFILE_ID
     );
+    const pref = await qGet<{ id: number }>(
+      `INSERT INTO household_pa_preferences (household_id, category, fact_text) VALUES (?, 'preference', ?) RETURNING id`,
+      WITH_CONTEXT_HOUSEHOLD_ID, "No Schengen transit — visa risk"
+    );
+    preferenceId = pref!.id;
   });
 
   afterAll(async () => {
     await qExec(`DELETE FROM household_help_availability WHERE id = ?`, AVAILABILITY_ID);
+    await qExec(`DELETE FROM household_pa_preferences WHERE id = ?`, preferenceId);
     await qExec(`DELETE FROM household_membership WHERE id = ?`, MEMBERSHIP_ID);
     await qExec(`DELETE FROM person_profile WHERE id IN (?, ?)`, CHILD_PROFILE_ID, NANNY_PROFILE_ID);
     await qExec(`DELETE FROM household WHERE id IN (?, ?)`, WITH_CONTEXT_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID);
@@ -795,7 +802,7 @@ describe("FIX #213 — quick-capture context injection", () => {
     mockRunToolLoop.mockReset();
   });
 
-  it("buildCaptureContextHeader: includes today, location, members, and caregivers when configured", async () => {
+  it("buildCaptureContextHeader: includes today, location, members, caregivers, and preferences when configured", async () => {
     const header = await buildCaptureContextHeader(WITH_CONTEXT_HOUSEHOLD_ID);
 
     expect(header).toMatch(/^Today: \w+, \w+ \d{1,2}, \d{4} \(\d{4}-\d{2}-\d{2}\)\.$/m);
@@ -804,15 +811,18 @@ describe("FIX #213 — quick-capture context injection", () => {
     expect(header).toContain("Test Nanny [nanny]");
     expect(header).toContain("every Mon/Wed/Fri");
     expect(header).toContain("08:00–16:00");
+    expect(header).toContain("Preferences:");
+    expect(header).toContain("No Schengen transit — visa risk");
   });
 
-  it("buildCaptureContextHeader: omits location/household/caregiver sections cleanly when nothing is configured", async () => {
+  it("buildCaptureContextHeader: omits location/household/caregiver/preference sections cleanly when nothing is configured", async () => {
     const header = await buildCaptureContextHeader(EMPTY_HOUSEHOLD_ID);
 
     expect(header).toMatch(/^Today: /);
     expect(header).not.toContain("Location:");
     expect(header).not.toContain("Household:");
     expect(header).not.toContain("Caregivers:");
+    expect(header).not.toContain("Preferences:");
   });
 
   it("processCaptureNote: the resolved concrete today's date reaches the LLM prompt content", async () => {

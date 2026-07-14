@@ -161,3 +161,35 @@ export type UpdateAvailabilityInput = {
   notes?: string | null;
   isActive?: boolean;
 };
+
+// ── PA preferences / memory store (#165) ───────────────────────────────────
+// topic_tag and discovered_fact/decision_history-specific tooling are deferred to #238.
+
+export type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+export type PaPreferenceSource = "manual" | "feedback";
+
+export type PaPreference = {
+  id: number;
+  householdId: string;
+  category: PaPreferenceCategory;
+  factText: string;
+  source: PaPreferenceSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaPreferenceRow = {
+  id: number;
+  household_id: string;
+  category: PaPreferenceCategory;
+  fact_text: string;
+  source: PaPreferenceSource;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreatePaPreferenceInput = {
+  category: PaPreferenceCategory;
+  factText: string;
+  source?: PaPreferenceSource;
+};
