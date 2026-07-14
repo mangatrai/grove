@@ -39,6 +39,8 @@ import { friendlyParserLabel, DISABLED_PROFILES } from "../import/profileLabels"
 import { formatUsd } from "../utils/format";
 
 const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
+/** Payslip profiles that use async LLM extraction (queued, not inline) — must mirror backend LLM_PAYSLIP_PROFILE_IDS (payslip.types.ts). */
+const LLM_PAYSLIP_PROFILE_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf"]);
 const OFX_PARSER_ID = "ofx_transactions";
 
 type OfxSuggestion = {
@@ -640,7 +642,7 @@ export function ImportWorkspacePage() {
 
   useEffect(() => {
     const pending = files.some(
-      (f) => f.parser_profile_id === "deloitte_payslip_pdf" && f.status === "processing"
+      (f) => !!f.parser_profile_id && LLM_PAYSLIP_PROFILE_IDS.has(f.parser_profile_id) && f.status === "processing"
     );
     if (!sessionId || !pending) {
       return;

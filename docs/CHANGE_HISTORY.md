@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — ImportWorkspacePage: client-side payslip poller missed IBM profile (2026-07-14)
+
+**What changed:** `ImportWorkspacePage.tsx`'s auto-poll `useEffect` (fires `runReconcilePayslipAsync` at 2.5s then every 120s while a payslip is mid-extraction) checked `f.parser_profile_id === "deloitte_payslip_pdf"` — a hardcoded single-profile string that silently excluded `ibm_pay_contributions_pdf`. Added a `LLM_PAYSLIP_PROFILE_IDS` set (mirroring the backend's, `payslip.types.ts`) and switched the check to `LLM_PAYSLIP_PROFILE_IDS.has(f.parser_profile_id)`.
+
+**Why:** Found debugging a 40+ minute stuck IBM payslip import in local dev. Root cause was actually two independent gaps: (1) `MODE=TEST` disables all background schedulers including `payslip-async-scheduler.service.ts` (`server.ts:49`) — true in local dev regardless of this fix, unrelated to it; (2) this frontend poller, the *only* other trigger for the async reconcile endpoint, only ever matched Deloitte. Gap (2) traces back to `1027671` (unifying IBM into the async queue) — that commit widened the backend fully and de-branded 4 display strings in this file, but missed this one control-flow check. Invisible in production because the server-side scheduler there is profile-agnostic and processes files regardless of what the browser does; only surfaces when the server-side path is unavailable (local dev). Deferred: a related check-then-act race in the scheduler's idle-gating flag (`hasPendingWork`, from the Neon-burn fix `b307f1e`/FIX-220) was found during the same investigation but is out of scope here — tracked as informational debt, not fixed.
+
+**Verification:** `npx tsc --noEmit` (frontend) clean, `npm run test -w frontend` 86/86 passing, `npm run lint -w frontend` clean. Not covered by a new unit test — no existing component-test harness for this page to extract the one-line boolean into; verified by direct code/type-check review instead.
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`.
+
+**GitHub:** closes [#234](https://github.com/mangatrai/grove/issues/234). Related: [#235](https://github.com/mangatrai/grove/issues/235) (deferred, informational).
+
+---
+
 ## FIX — pa-task-runner: zero informational logging on the success path (2026-07-13)
 
 **What changed:** Added structured `log.info` calls through the full Quick Capture → PA task path: `runPATask()`'s 6-iteration loop (`pa-task-runner.ts`) now logs iteration start, the loop's decision (synthesize vs. tool call), each tool execution (tool name, whether it hit Tavily, findings added), the move into synthesis, and the final run-succeeded summary (iterations used, Tavily calls, token counts) — all keyed by `householdId` + `runId`, matching the structured-field style the file's existing `log.warn` calls already use. `classifyCaptureNote()` (`family-agent.service.ts`) now logs the classification outcome and how it was reached (prefix override, explicit mode override, or the LLM call) instead of only logging on validation failure. The `POST /agent/task` route handler (`family-events.routes.ts`) now logs at request start and completion. Also hardened `executeSearchWeb`/`executeFetchPage` (`pa-task-runner.ts`) with their own `try/catch`, matching the existing pattern in `executeSearchCalendar`/`executeSearchFinanceContext` — on catch, `log.warn` + a safe fallback text so one failed tool call doesn't abort the whole loop.
