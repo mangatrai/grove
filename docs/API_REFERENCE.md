@@ -4092,6 +4092,7 @@ Lists PA agent memory-store rows (standing facts/constraints for the planning as
       "category": "preference",
       "factText": "No Schengen transit — visa risk for H1B holders",
       "source": "manual",
+      "topicTag": null,
       "createdAt": "2026-07-14T00:00:00.000Z",
       "updatedAt": "2026-07-14T00:00:00.000Z"
     }
@@ -4099,8 +4100,9 @@ Lists PA agent memory-store rows (standing facts/constraints for the planning as
 }
 ```
 
-`category` — `preference` rows are injected in full into every PA loop prompt (no similarity filtering); `discovered_fact` / `decision_history` are stored but not yet consumed by the loop (see GH #238).
-`source` — `manual` (added via this API) or `feedback` (reserved for a future agent-write path, GH #238).
+`category` — `preference` rows are injected in full into every PA loop prompt (no similarity filtering). `discovered_fact` / `decision_history` rows are stored with a `topicTag` and pulled on demand by the loop's `search_memory` tool (GH #238) instead of full-included.
+`source` — `manual` (added via this API), `feedback` (reserved for a future agent-write path), or `notes_extraction` (approved via `POST /pa-preferences/suggest` or the "Save as preference" flow, GH #238).
+`topicTag` — one of `travel | school | health | finance | gifts | household | other`. Always `null` for `category=preference`; required for `discovered_fact` / `decision_history`.
 
 ---
 
@@ -4111,15 +4113,16 @@ Creates a preference row. Text-based dedup: if a near-exact match (trimmed/lower
 **Body**
 ```json
 {
-  "category": "preference",
-  "factText": "No Schengen transit — visa risk for H1B holders",
-  "source": "manual"
+  "category": "discovered_fact",
+  "factText": "Kids attend Lincoln Elementary",
+  "source": "manual",
+  "topicTag": "school"
 }
 ```
-`source` is optional, defaults to `manual`.
+`source` is optional, defaults to `manual`. `topicTag` is **required** when `category` is `discovered_fact` or `decision_history`, and **must be omitted/null** when `category` is `preference` — both enforced by a `400` validation error.
 
 **Response `201`** — `{ "preference": PaPreference }`
-**Error `400`** — validation failure, `{ "errors": ZodIssue[] }`.
+**Error `400`** — validation failure (including the `topicTag`/`category` mismatch above), `{ "errors": ZodIssue[] }`.
 
 ---
 
@@ -4130,6 +4133,46 @@ Permanently removes a preference row. `:id` is an integer. Requires `owner | adm
 **Response `204`** — no body.
 **Error `400`** — `:id` is not an integer.
 **Error `404`** — row not in caller's household.
+
+---
+
+### `POST /api/family/pa-preferences/suggest`
+
+Scans every household member's `notes` field and asks the LLM (`chatModel()` tier, forced JSON schema) to propose candidate memory-store facts. Returns **unpersisted** candidates only — nothing is written until the caller approves individual rows via `POST /pa-preferences`. Candidates that already match an existing row (same normalized-text dedup as above) are filtered out before returning. Requires `owner | admin`.
+
+**Request body:** none.
+
+**Response `200`**
+```json
+{
+  "candidates": [
+    {
+      "personName": "Jane Doe",
+      "category": "discovered_fact",
+      "factText": "Enjoys hiking",
+      "topicTag": "other"
+    }
+  ]
+}
+```
+`topicTag` is always `null` when `category` is `preference`. Returns `{ "candidates": [] }` without calling the LLM if no household member has non-empty notes.
+
+---
+
+### `POST /api/family/pa-preferences/classify`
+
+Classifies a single ad-hoc string into `{ category, topicTag }` (`chatModel()` tier, forced JSON schema). Used by the Family Agent page's "Save as preference" button so the caller starts from a suggested category/tag instead of picking from scratch — the result is not persisted by this endpoint. Requires `owner | admin`.
+
+**Body**
+```json
+{ "factText": "Kids loved the LEGO set last Christmas" }
+```
+
+**Response `200`**
+```json
+{ "category": "discovered_fact", "topicTag": "gifts" }
+```
+**Error `400`** — `factText` empty or missing.
 
 ---
 

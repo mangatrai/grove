@@ -4621,7 +4621,12 @@ paths:
               properties:
                 category: { type: string, enum: [preference, discovered_fact, decision_history] }
                 factText: { type: string, minLength: 1, maxLength: 2000 }
-                source: { type: string, enum: [manual, feedback] }
+                source: { type: string, enum: [manual, feedback, notes_extraction] }
+                topicTag:
+                  type: string
+                  nullable: true
+                  enum: [travel, school, health, finance, gifts, household, other]
+                  description: Required when category is discovered_fact/decision_history; must be omitted/null when category is preference.
       responses:
         "201":
           description: Created (or dedup-updated) preference
@@ -4631,7 +4636,7 @@ paths:
                 type: object
                 properties:
                   preference: { $ref: '#/components/schemas/PaPreference' }
-        "400": { description: Validation error }
+        "400": { description: Validation error (including topicTag/category mismatch) }
         "401": { description: Unauthorized }
 
   /api/family/pa-preferences/{id}:
@@ -4649,6 +4654,62 @@ paths:
         "400": { description: Invalid id }
         "401": { description: Unauthorized }
         "404": { description: Preference not found }
+
+  /api/family/pa-preferences/suggest:
+    post:
+      tags: [family]
+      summary: Suggest PA preference candidates from household member notes (GH #238)
+      description: |
+        Scans every household member's `notes` field and asks the LLM to propose candidate memory-store
+        facts. Returns unpersisted candidates only — nothing is written until the caller approves individual
+        rows via `POST /pa-preferences`. Candidates matching an existing row (normalized-text dedup) are
+        filtered out. Returns an empty list without calling the LLM if no member has non-empty notes.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Candidate list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaPreferenceCandidate' }
+        "401": { description: Unauthorized }
+
+  /api/family/pa-preferences/classify:
+    post:
+      tags: [family]
+      summary: Classify an ad-hoc fact string into category + topicTag (GH #238)
+      description: |
+        Used by the Family Agent page's "Save as preference" button to suggest a starting category/tag.
+        Does not persist anything.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factText]
+              properties:
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Classification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                  topicTag:
+                    type: string
+                    nullable: true
+                    enum: [travel, school, health, finance, gifts, household, other]
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
 
   /api/family/alerts/{alertId}/approve:
     post:
@@ -5951,9 +6012,25 @@ components:
         householdId: { type: string }
         category: { type: string, enum: [preference, discovered_fact, decision_history] }
         factText: { type: string }
-        source: { type: string, enum: [manual, feedback] }
+        source: { type: string, enum: [manual, feedback, notes_extraction] }
+        topicTag:
+          type: string
+          nullable: true
+          enum: [travel, school, health, finance, gifts, household, other]
+          description: Always null for category=preference; required for discovered_fact/decision_history.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    PaPreferenceCandidate:
+      type: object
+      properties:
+        personName: { type: string, nullable: true }
+        category: { type: string, enum: [preference, discovered_fact, decision_history] }
+        factText: { type: string }
+        topicTag:
+          type: string
+          nullable: true
+          enum: [travel, school, health, finance, gifts, household, other]
 
     HelpAvailabilitySlot:
       type: object

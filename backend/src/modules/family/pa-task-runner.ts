@@ -6,7 +6,8 @@ import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { buildCaptureContextHeader, fetchCalendarEvents, getConnectedParents } from "./family-agent.service.js";
-import type { FamilyEventRow, PAFinding, PATaskResult } from "./family.types.js";
+import { searchMemory } from "./family-profiles.service.js";
+import type { FamilyEventRow, PAFinding, PaPreferenceTopicTag, PATaskResult } from "./family.types.js";
 
 // #164: BabyAGI-style bounded loop — search -> compress -> decide next step -> repeat -> synthesize.
 // Core discipline (A1): every tool result is compressed to <=150 tokens before it enters the next
@@ -212,12 +213,49 @@ export async function executeSearchFinanceContext(householdId: string, args: Rec
   }
 }
 
+const MEMORY_TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "other"] as const;
+
+const SEARCH_MEMORY_TOOL: Tool = {
+  name: "search_memory",
+  description: "Look up previously stored discovered facts or decision history for a topic, when the household's preferences alone don't answer the goal.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      topicTag: { type: "string", enum: [...MEMORY_TOPIC_TAGS], description: "Topic to filter stored facts by" },
+    },
+    required: ["topicTag"],
+  },
+};
+
+// #238: exact topic_tag match only, no fuzzy fallback — keeps this a finite, deterministic tool
+// call for the model instead of an open-ended search. discovered_fact/decision_history rows only;
+// preference rows are already full-included in the loop's context header, never fetched here.
+export async function executeSearchMemory(householdId: string, args: Record<string, unknown>): Promise<PAToolExecuteResult> {
+  const topicTag = typeof args.topicTag === "string" ? (args.topicTag as PaPreferenceTopicTag) : null;
+  if (!topicTag || !(MEMORY_TOPIC_TAGS as readonly string[]).includes(topicTag)) {
+    return { text: `Invalid topicTag. Must be one of: ${MEMORY_TOPIC_TAGS.join(", ")}.`, tavilyCall: false };
+  }
+
+  try {
+    const rows = await searchMemory(householdId, topicTag);
+    if (rows.length === 0) {
+      return { text: `No stored facts for topic "${topicTag}".`, tavilyCall: false };
+    }
+    const lines = rows.map(r => `[${r.category}] ${r.factText}`).join("\n");
+    return { text: lines, tavilyCall: false };
+  } catch (err) {
+    log.warn("pa-task-runner: search_memory failed", { householdId, err: String(err) });
+    return { text: "No stored facts available (lookup failed).", tavilyCall: false };
+  }
+}
+
 function buildPaTools(householdId: string): PATool[] {
   return [
     { definition: SEARCH_WEB_PA_TOOL, execute: executeSearchWeb },
     { definition: FETCH_PAGE_TOOL, execute: executeFetchPage },
     { definition: SEARCH_CALENDAR_TOOL, execute: (args) => executeSearchCalendar(householdId, args) },
     { definition: SEARCH_FINANCE_TOOL, execute: (args) => executeSearchFinanceContext(householdId, args) },
+    { definition: SEARCH_MEMORY_TOOL, execute: (args) => executeSearchMemory(householdId, args) },
   ];
 }
 
@@ -228,7 +266,7 @@ function buildPaTools(householdId: string): PATool[] {
 const loopDecisionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("tool_call"),
-    tool: z.enum(["search_web", "fetch_page", "search_calendar", "search_finance_context"]),
+    tool: z.enum(["search_web", "fetch_page", "search_calendar", "search_finance_context", "search_memory"]),
     args: z.record(z.unknown()).default({}),
     reasoning: z.string().default(""),
   }),
@@ -285,7 +323,7 @@ const LOOP_DECISION_JSON_SCHEMA: Record<string, unknown> = {
     action: { type: "string", enum: ["tool_call", "synthesize"] },
     tool: {
       type: ["string", "null"],
-      enum: ["search_web", "fetch_page", "search_calendar", "search_finance_context", null],
+      enum: ["search_web", "fetch_page", "search_calendar", "search_finance_context", "search_memory", null],
     },
     args: {
       type: ["object", "null"],
@@ -298,8 +336,9 @@ const LOOP_DECISION_JSON_SCHEMA: Record<string, unknown> = {
         member_filter: { type: ["string", "null"] },
         category: { type: ["string", "null"] },
         months: { type: ["number", "null"] },
+        topicTag: { type: ["string", "null"], enum: [...MEMORY_TOPIC_TAGS, null] },
       },
-      required: ["query", "url", "recent_only", "start_date", "end_date", "member_filter", "category", "months"],
+      required: ["query", "url", "recent_only", "start_date", "end_date", "member_filter", "category", "months", "topicTag"],
       additionalProperties: false,
     },
     reasoning: { type: ["string", "null"] },
@@ -419,6 +458,9 @@ Available tools:
 - fetch_page(url, query?): pull concrete pricing/contact details from a specific URL found by search_web.
 - search_calendar(start_date, end_date, member_filter?): check household calendar for a date range.
 - search_finance_context(category?, months?): check spending totals for a category.
+- search_memory(topicTag): look up previously stored discovered facts or decision history for a topic
+  (travel, school, health, finance, gifts, household, other). Hard-constraint preferences are already
+  in your context above — use this only for facts not already given to you.
 
 Typical pattern: search_web to find 2-3 candidates, then fetch_page each for pricing/contact details,
 then synthesize. Respond with JSON only, matching exactly one of:

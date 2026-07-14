@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   Divider,
   Group,
   Modal,
@@ -58,7 +59,8 @@ type HelpAvailabilitySlot = {
 };
 
 type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
-type PaPreferenceSource = "manual" | "feedback";
+type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
+type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
 
 type PaPreference = {
   id: number;
@@ -66,8 +68,16 @@ type PaPreference = {
   category: PaPreferenceCategory;
   factText: string;
   source: PaPreferenceSource;
+  topicTag: PaPreferenceTopicTag | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type PaPreferenceCandidate = {
+  personName: string | null;
+  category: PaPreferenceCategory;
+  factText: string;
+  topicTag: PaPreferenceTopicTag | null;
 };
 
 const PA_PREFERENCE_CATEGORY_LABELS: Record<PaPreferenceCategory, string> = {
@@ -79,12 +89,33 @@ const PA_PREFERENCE_CATEGORY_LABELS: Record<PaPreferenceCategory, string> = {
 const PA_PREFERENCE_SOURCE_LABELS: Record<PaPreferenceSource, string> = {
   manual: "Manual",
   feedback: "From feedback",
+  notes_extraction: "From notes",
 };
 
 const PA_PREFERENCE_CATEGORY_SELECT_DATA = [
   { value: "preference", label: "Preference" },
   { value: "discovered_fact", label: "Discovered fact" },
   { value: "decision_history", label: "Decision history" },
+];
+
+const PA_PREFERENCE_TOPIC_TAG_LABELS: Record<PaPreferenceTopicTag, string> = {
+  travel: "Travel",
+  school: "School",
+  health: "Health",
+  finance: "Finance",
+  gifts: "Gifts",
+  household: "Household",
+  other: "Other",
+};
+
+const PA_PREFERENCE_TOPIC_TAG_SELECT_DATA = [
+  { value: "travel", label: "Travel" },
+  { value: "school", label: "School" },
+  { value: "health", label: "Health" },
+  { value: "finance", label: "Finance" },
+  { value: "gifts", label: "Gifts" },
+  { value: "household", label: "Household" },
+  { value: "other", label: "Other" },
 ];
 
 type MemberDraft = {
@@ -230,13 +261,26 @@ export function FamilySection({ active }: FamilySectionProps) {
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
 
-  const [newPreference, setNewPreference] = useState({ category: "preference", factText: "" });
+  const [newPreference, setNewPreference] = useState<{ category: PaPreferenceCategory; factText: string; topicTag: PaPreferenceTopicTag | null }>({
+    category: "preference",
+    factText: "",
+    topicTag: null,
+  });
   const [addingPreference, setAddingPreference] = useState(false);
   const [addPreferenceError, setAddPreferenceError] = useState<string | null>(null);
 
   const [deletePreferenceId, setDeletePreferenceId] = useState<number | null>(null);
   const [deletingPreference, setDeletingPreference] = useState(false);
   const [deletePreferenceError, setDeletePreferenceError] = useState<string | null>(null);
+
+  // ── PA Preferences: suggest-from-notes approval ─────────────────────────────
+  const [suggestModalOpen, setSuggestModalOpen] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<PaPreferenceCandidate[]>([]);
+  const [checkedCandidates, setCheckedCandidates] = useState<Set<number>>(new Set());
+  const [approvingCandidates, setApprovingCandidates] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   function initDrafts(ms: HouseholdMember[]) {
     const map: Record<string, MemberDraft> = {};
@@ -345,6 +389,10 @@ export function FamilySection({ active }: FamilySectionProps) {
       setAddPreferenceError("Enter a fact.");
       return;
     }
+    if (newPreference.category !== "preference" && !newPreference.topicTag) {
+      setAddPreferenceError("Pick a topic tag.");
+      return;
+    }
     setAddingPreference(true);
     setAddPreferenceError(null);
     try {
@@ -353,14 +401,73 @@ export function FamilySection({ active }: FamilySectionProps) {
         body: JSON.stringify({
           category: newPreference.category,
           factText: newPreference.factText.trim(),
+          topicTag: newPreference.category === "preference" ? undefined : newPreference.topicTag,
         }),
       });
       await loadPreferences();
-      setNewPreference((prev) => ({ ...prev, factText: "" }));
+      setNewPreference((prev) => ({ ...prev, factText: "", topicTag: null }));
     } catch (e) {
       setAddPreferenceError(e instanceof Error ? e.message : "Could not add preference");
     } finally {
       setAddingPreference(false);
+    }
+  }
+
+  async function suggestFromNotes() {
+    setSuggestModalOpen(true);
+    setSuggesting(true);
+    setSuggestError(null);
+    setApproveError(null);
+    try {
+      const res = await apiJson<{ candidates: PaPreferenceCandidate[] }>("/api/family/pa-preferences/suggest", {
+        method: "POST",
+      });
+      setCandidates(res.candidates);
+      setCheckedCandidates(new Set(res.candidates.map((_, i) => i)));
+    } catch (e) {
+      setSuggestError(e instanceof Error ? e.message : "Could not fetch suggestions");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  function updateCandidate(index: number, patch: Partial<PaPreferenceCandidate>) {
+    setCandidates((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  }
+
+  function toggleCandidate(index: number) {
+    setCheckedCandidates((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
+  async function approveCandidates() {
+    setApprovingCandidates(true);
+    setApproveError(null);
+    try {
+      const selected = candidates.filter((_, i) => checkedCandidates.has(i));
+      for (const c of selected) {
+        await apiJson<{ preference: PaPreference }>("/api/family/pa-preferences", {
+          method: "POST",
+          body: JSON.stringify({
+            category: c.category,
+            factText: c.factText.trim(),
+            topicTag: c.category === "preference" ? undefined : c.topicTag,
+            source: "notes_extraction",
+          }),
+        });
+      }
+      await loadPreferences();
+      setSuggestModalOpen(false);
+      setCandidates([]);
+      setCheckedCandidates(new Set());
+    } catch (e) {
+      setApproveError(e instanceof Error ? e.message : "Could not save selected preferences");
+    } finally {
+      setApprovingCandidates(false);
     }
   }
 
@@ -738,10 +845,17 @@ export function FamilySection({ active }: FamilySectionProps) {
       <Divider my="lg" />
 
       {/* ── PA Preferences ────────────────────────────────────────────────── */}
-      <Title order={3}>PA Preferences</Title>
+      <Group justify="space-between" align="center">
+        <Title order={3}>PA Preferences</Title>
+        <Button size="xs" variant="light" onClick={() => void suggestFromNotes()}>
+          Suggest from notes
+        </Button>
+      </Group>
       <Text c="dimmed" size="sm">
         Standing facts and constraints the planning assistant should always take into account —
-        e.g. dietary restrictions, travel rules, recurring decisions.
+        e.g. dietary restrictions, travel rules, recurring decisions. Discovered facts and decision
+        history carry a topic tag so the assistant can look them up on demand instead of reading
+        every fact on every run.
       </Text>
       {preferencesError ? <Alert color="red">{preferencesError}</Alert> : null}
       {preferencesLoading ? (
@@ -756,6 +870,7 @@ export function FamilySection({ active }: FamilySectionProps) {
             <Table.Tr>
               <Table.Th>Fact</Table.Th>
               <Table.Th>Category</Table.Th>
+              <Table.Th>Topic</Table.Th>
               <Table.Th>Source</Table.Th>
               <Table.Th style={{ width: 64 }} />
             </Table.Tr>
@@ -765,6 +880,7 @@ export function FamilySection({ active }: FamilySectionProps) {
               <Table.Tr key={p.id}>
                 <Table.Td>{p.factText}</Table.Td>
                 <Table.Td>{PA_PREFERENCE_CATEGORY_LABELS[p.category] ?? p.category}</Table.Td>
+                <Table.Td>{p.topicTag ? PA_PREFERENCE_TOPIC_TAG_LABELS[p.topicTag] ?? p.topicTag : "—"}</Table.Td>
                 <Table.Td>{PA_PREFERENCE_SOURCE_LABELS[p.source] ?? p.source}</Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
@@ -800,10 +916,22 @@ export function FamilySection({ active }: FamilySectionProps) {
               label="Category"
               data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
               value={newPreference.category}
-              onChange={(v) => setNewPreference((p) => ({ ...p, category: v ?? "preference" }))}
+              onChange={(v) =>
+                setNewPreference((p) => ({ ...p, category: (v as PaPreferenceCategory) ?? "preference", topicTag: v === "preference" ? null : p.topicTag }))
+              }
               disabled={addingPreference}
               allowDeselect={false}
             />
+            {newPreference.category !== "preference" ? (
+              <Select
+                label="Topic"
+                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                value={newPreference.topicTag}
+                onChange={(v) => setNewPreference((p) => ({ ...p, topicTag: v as PaPreferenceTopicTag | null }))}
+                disabled={addingPreference}
+                placeholder="Pick a topic"
+              />
+            ) : null}
           </Group>
           <Textarea
             label="Fact"
@@ -991,6 +1119,86 @@ export function FamilySection({ active }: FamilySectionProps) {
               Remove
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={suggestModalOpen}
+        onClose={() => { setSuggestModalOpen(false); setCandidates([]); setCheckedCandidates(new Set()); }}
+        title="Suggest preferences from notes"
+        centered
+        size="lg"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Scanned each household member&apos;s notes for durable facts worth remembering. Review,
+            edit, and uncheck anything that isn&apos;t useful before saving.
+          </Text>
+          {suggesting ? (
+            <Group gap="sm">
+              <GroveLoader size="sm" color="muted" />
+              <Text size="sm" c="dimmed">Scanning notes…</Text>
+            </Group>
+          ) : null}
+          {suggestError ? <Alert color="red" p="xs">{suggestError}</Alert> : null}
+          {!suggesting && !suggestError && candidates.length === 0 ? (
+            <Text size="sm" c="dimmed">No new facts found in current notes.</Text>
+          ) : null}
+          {candidates.map((c, i) => (
+            <Paper key={i} withBorder p="sm" radius="md">
+              <Stack gap="xs">
+                <Group justify="space-between" align="flex-start">
+                  <Checkbox
+                    checked={checkedCandidates.has(i)}
+                    onChange={() => toggleCandidate(i)}
+                    label={c.personName ?? "Household"}
+                  />
+                </Group>
+                <Textarea
+                  value={c.factText}
+                  onChange={(e) => updateCandidate(i, { factText: e.currentTarget.value })}
+                  autosize
+                  minRows={2}
+                />
+                <Group align="end" grow>
+                  <Select
+                    label="Category"
+                    data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+                    value={c.category}
+                    onChange={(v) => {
+                      const category = (v as PaPreferenceCategory) ?? "discovered_fact";
+                      updateCandidate(i, { category, topicTag: category === "preference" ? null : c.topicTag });
+                    }}
+                    allowDeselect={false}
+                  />
+                  {c.category !== "preference" ? (
+                    <Select
+                      label="Topic"
+                      data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                      value={c.topicTag}
+                      onChange={(v) => updateCandidate(i, { topicTag: v as PaPreferenceTopicTag | null })}
+                      placeholder="Pick a topic"
+                    />
+                  ) : null}
+                </Group>
+              </Stack>
+            </Paper>
+          ))}
+          {approveError ? <Alert color="red" p="xs">{approveError}</Alert> : null}
+          {candidates.length > 0 ? (
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => { setSuggestModalOpen(false); setCandidates([]); setCheckedCandidates(new Set()); }}>
+                Cancel
+              </Button>
+              <Button
+                loading={approvingCandidates}
+                disabled={checkedCandidates.size === 0}
+                onClick={() => void approveCandidates()}
+              >
+                Approve selected ({checkedCandidates.size})
+              </Button>
+            </Group>
+          ) : null}
         </Stack>
       </Modal>
 

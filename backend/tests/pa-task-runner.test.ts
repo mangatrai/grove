@@ -50,6 +50,7 @@ vi.mock("../src/llm/tools/tavily.js", async (importOriginal) => {
 import {
   executeSearchCalendar,
   executeSearchFinanceContext,
+  executeSearchMemory,
   runPATask,
 } from "../src/modules/family/pa-task-runner.js";
 
@@ -320,6 +321,61 @@ describe("pa-task-runner (#164, #166)", () => {
     const result = await executeSearchFinanceContext(EMPTY_HOUSEHOLD_ID, {});
     expect(result.tavilyCall).toBe(false);
     expect(result.text.toLowerCase()).toContain("no spending data");
+  });
+
+  describe("search_memory (#238)", () => {
+    it("returns a no-data sentinel instead of throwing when no facts match the topic", async () => {
+      const result = await executeSearchMemory(EMPTY_HOUSEHOLD_ID, { topicTag: "travel" });
+      expect(result.tavilyCall).toBe(false);
+      expect(result.text.toLowerCase()).toContain("no stored facts");
+    });
+
+    it("rejects an invalid topicTag without querying the database", async () => {
+      const result = await executeSearchMemory(EMPTY_HOUSEHOLD_ID, { topicTag: "not_a_real_topic" });
+      expect(result.tavilyCall).toBe(false);
+      expect(result.text.toLowerCase()).toContain("invalid topictag");
+    });
+
+    it("returns stored discovered_fact/decision_history rows matching the topic", async () => {
+      await qExec(
+        `INSERT INTO household_pa_preferences (household_id, category, fact_text, source, topic_tag)
+         VALUES (?, 'discovered_fact', 'Family flew United for last 3 trips', 'manual', 'travel')`,
+        HOUSEHOLD_ID
+      );
+
+      const result = await executeSearchMemory(HOUSEHOLD_ID, { topicTag: "travel" });
+      expect(result.tavilyCall).toBe(false);
+      expect(result.text).toContain("Family flew United for last 3 trips");
+
+      await qExec(`DELETE FROM household_pa_preferences WHERE household_id = ?`, HOUSEHOLD_ID);
+    });
+
+    it("is reachable as a tool_call from the loop decision (registration + dispatch)", async () => {
+      await qExec(
+        `INSERT INTO household_pa_preferences (household_id, category, fact_text, source, topic_tag)
+         VALUES (?, 'discovered_fact', 'Kids attend Lincoln Elementary', 'manual', 'school')`,
+        HOUSEHOLD_ID
+      );
+
+      mockComplete.mockResolvedValueOnce(loopToolCall("search_memory", { topicTag: "school" }));
+      mockComplete.mockResolvedValueOnce(compressionResult("found a stored school fact"));
+      mockComplete.mockResolvedValueOnce(loopSynthesize());
+      mockComplete.mockResolvedValueOnce(synthesisResult("Synthesized from memory."));
+
+      const result = await runPATask("what school do the kids attend", HOUSEHOLD_ID);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.summary).toBe("Synthesized from memory.");
+      }
+      // Proves the compression step actually received search_memory's DB-backed text, not a
+      // fallback/unknown-tool skip.
+      const compressionCallMessages = mockComplete.mock.calls[1][0];
+      const compressionUserMessage = compressionCallMessages.find((m: { role: string }) => m.role === "user");
+      expect(compressionUserMessage?.content).toContain("Kids attend Lincoln Elementary");
+
+      await qExec(`DELETE FROM household_pa_preferences WHERE household_id = ?`, HOUSEHOLD_ID);
+    });
   });
 
   describe("budget refusal", () => {

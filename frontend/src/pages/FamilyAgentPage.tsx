@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -12,6 +13,7 @@ import {
   Menu,
   Modal,
   Paper,
+  Select,
   Stack,
   Table,
   Text,
@@ -23,6 +25,7 @@ import {
 import {
   IconAlertTriangle,
   IconBell,
+  IconBookmarkPlus,
   IconCalendarPlus,
   IconCheck,
   IconChevronDown,
@@ -97,6 +100,26 @@ type PATaskResult = {
 type PATaskResponse =
   | { type: "one_shot"; result: CaptureResult }
   | { type: "research_loop"; result: PATaskResult; runId: string };
+
+// #238: "Save as preference" — lets the household save a task result as durable PA memory.
+type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
+
+const PA_PREFERENCE_CATEGORY_SELECT_DATA = [
+  { value: "preference", label: "Preference" },
+  { value: "discovered_fact", label: "Discovered fact" },
+  { value: "decision_history", label: "Decision history" },
+];
+
+const PA_PREFERENCE_TOPIC_TAG_SELECT_DATA = [
+  { value: "travel", label: "Travel" },
+  { value: "school", label: "School" },
+  { value: "health", label: "Health" },
+  { value: "finance", label: "Finance" },
+  { value: "gifts", label: "Gifts" },
+  { value: "household", label: "Household" },
+  { value: "other", label: "Other" },
+];
 
 const ALERT_TYPE_LABELS: Record<string, string> = {
   conflict: "Schedule pressure",
@@ -486,6 +509,17 @@ export function FamilyAgentPage() {
   const [captureResult, setCaptureResult] = useState<PATaskResponse | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
+  // Save as preference (#238)
+  const [saveAsPrefOpen, setSaveAsPrefOpen] = useState(false);
+  const [saveAsPrefClassifying, setSaveAsPrefClassifying] = useState(false);
+  const [saveAsPrefDraft, setSaveAsPrefDraft] = useState<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null; factText: string }>({
+    category: "discovered_fact",
+    topicTag: "other",
+    factText: "",
+  });
+  const [savingAsPref, setSavingAsPref] = useState(false);
+  const [saveAsPrefError, setSaveAsPrefError] = useState<string | null>(null);
+
   // Compose modal
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState({ to: "", subject: "", body: "" });
@@ -571,6 +605,53 @@ export function FamilyAgentPage() {
       setCaptureError(e instanceof Error ? e.message : "Capture failed.");
     } finally {
       setCaptureLoading(false);
+    }
+  }
+
+  async function openSaveAsPreference(text: string) {
+    setSaveAsPrefOpen(true);
+    setSaveAsPrefError(null);
+    setSaveAsPrefDraft({ category: "discovered_fact", topicTag: "other", factText: text });
+    setSaveAsPrefClassifying(true);
+    try {
+      const res = await apiJson<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null }>(
+        "/api/family/pa-preferences/classify",
+        { method: "POST", body: JSON.stringify({ factText: text }) }
+      );
+      setSaveAsPrefDraft({ category: res.category, topicTag: res.topicTag, factText: text });
+    } catch {
+      // classification is a convenience suggestion; keep the fallback draft and let the user pick manually
+    } finally {
+      setSaveAsPrefClassifying(false);
+    }
+  }
+
+  async function confirmSaveAsPreference() {
+    if (!saveAsPrefDraft.factText.trim()) {
+      setSaveAsPrefError("Enter a fact.");
+      return;
+    }
+    if (saveAsPrefDraft.category !== "preference" && !saveAsPrefDraft.topicTag) {
+      setSaveAsPrefError("Pick a topic tag.");
+      return;
+    }
+    setSavingAsPref(true);
+    setSaveAsPrefError(null);
+    try {
+      await apiJson("/api/family/pa-preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          category: saveAsPrefDraft.category,
+          factText: saveAsPrefDraft.factText.trim(),
+          topicTag: saveAsPrefDraft.category === "preference" ? undefined : saveAsPrefDraft.topicTag,
+          source: "notes_extraction",
+        }),
+      });
+      setSaveAsPrefOpen(false);
+    } catch (e) {
+      setSaveAsPrefError(e instanceof Error ? e.message : "Could not save preference");
+    } finally {
+      setSavingAsPref(false);
     }
   }
 
@@ -702,6 +783,19 @@ export function FamilyAgentPage() {
               <Text size="sm" c="dimmed">
                 {captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary}
               </Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                leftSection={<IconBookmarkPlus size={14} />}
+                style={{ alignSelf: "flex-start" }}
+                onClick={() =>
+                  void openSaveAsPreference(
+                    captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary
+                  )
+                }
+              >
+                Save as preference
+              </Button>
               {captureResult.result.actions.map((action, i) => (
                 <CaptureActionCard
                   key={i}
@@ -862,6 +956,59 @@ export function FamilyAgentPage() {
         onClose={() => setComposeOpen(false)}
         initial={composeInitial}
       />
+
+      <Modal
+        opened={saveAsPrefOpen}
+        onClose={() => setSaveAsPrefOpen(false)}
+        title="Save as preference"
+        centered
+      >
+        <Stack gap="sm">
+          {saveAsPrefClassifying ? (
+            <Group gap="sm">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">Suggesting category…</Text>
+            </Group>
+          ) : null}
+          <Textarea
+            label="Fact"
+            value={saveAsPrefDraft.factText}
+            onChange={(e) => setSaveAsPrefDraft((d) => ({ ...d, factText: e.currentTarget.value }))}
+            autosize
+            minRows={2}
+          />
+          <Group align="end" grow>
+            <Select
+              label="Category"
+              data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+              value={saveAsPrefDraft.category}
+              onChange={(v) => {
+                const category = (v as PaPreferenceCategory) ?? "discovered_fact";
+                setSaveAsPrefDraft((d) => ({ ...d, category, topicTag: category === "preference" ? null : d.topicTag ?? "other" }));
+              }}
+              allowDeselect={false}
+            />
+            {saveAsPrefDraft.category !== "preference" ? (
+              <Select
+                label="Topic"
+                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                value={saveAsPrefDraft.topicTag}
+                onChange={(v) => setSaveAsPrefDraft((d) => ({ ...d, topicTag: v as PaPreferenceTopicTag | null }))}
+                placeholder="Pick a topic"
+              />
+            ) : null}
+          </Group>
+          {saveAsPrefError ? <Alert color="red" p="xs">{saveAsPrefError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setSaveAsPrefOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={savingAsPref} onClick={() => void confirmSaveAsPreference()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

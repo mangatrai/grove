@@ -162,11 +162,11 @@ export type UpdateAvailabilityInput = {
   isActive?: boolean;
 };
 
-// ── PA preferences / memory store (#165) ───────────────────────────────────
-// topic_tag and discovered_fact/decision_history-specific tooling are deferred to #238.
+// ── PA preferences / memory store (#165, topic_tag + search_memory #238) ──────────────────────
 
 export type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
-export type PaPreferenceSource = "manual" | "feedback";
+export type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
+export type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
 
 export type PaPreference = {
   id: number;
@@ -174,6 +174,7 @@ export type PaPreference = {
   category: PaPreferenceCategory;
   factText: string;
   source: PaPreferenceSource;
+  topicTag: PaPreferenceTopicTag | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -184,6 +185,7 @@ export type PaPreferenceRow = {
   category: PaPreferenceCategory;
   fact_text: string;
   source: PaPreferenceSource;
+  topic_tag: PaPreferenceTopicTag | null;
   created_at: string;
   updated_at: string;
 };
@@ -192,4 +194,12 @@ export type CreatePaPreferenceInput = {
   category: PaPreferenceCategory;
   factText: string;
   source?: PaPreferenceSource;
+  topicTag?: PaPreferenceTopicTag | null;
+};
+
+export type PaPreferenceCandidate = {
+  personName: string | null;
+  category: PaPreferenceCategory;
+  factText: string;
+  topicTag: PaPreferenceTopicTag | null;
 };

@@ -770,12 +770,19 @@ Track regular and one-off care arrangements for any household member:
 
 **PA Preferences**
 
-Standing facts and constraints the planning assistant agent should always take into account when planning or answering — e.g. dietary restrictions, travel rules, recurring household decisions. Unlike other agent context, these are never filtered or summarized: every row is included in full on every agent run.
+Standing facts and constraints the planning assistant agent should take into account when planning or answering — e.g. dietary restrictions, travel rules, recurring household decisions, or facts worth remembering. How a row is used depends on its category:
 
 - **Fact** — the standing fact or constraint, in plain language (e.g. "No Schengen transit — visa risk").
 - **Category** — Preference, Discovered fact, or Decision history.
-- **Source** — Manual (added here) or From feedback (reserved for a future agent-write path).
+  - **Preference** rows are hard constraints — every one is included in full on every agent run, never filtered or summarized.
+  - **Discovered fact** and **Decision history** rows are stored with a **Topic** tag and pulled on demand by the agent (via a memory-lookup tool) only when relevant to the current task, instead of being included on every run.
+- **Topic** — required for Discovered fact/Decision history (Travel, School, Health, Finance, Gifts, Household, Other); not set for Preference rows.
+- **Source** — Manual (added here), From feedback (reserved for a future agent-write path), or From notes (added via **Suggest from notes**, below).
 - Click **Add preference** to save. Use the trash icon to delete an entry — there's no edit-in-place; delete and re-add to correct wording.
+
+**Suggest from notes** — click this button to have the agent scan every household member's **Notes** field (in the Members section above) and propose candidate facts. A checklist modal opens with each suggestion pre-checked and editable (fact text, category, topic) — uncheck any you don't want, edit wording as needed, then click **Approve selected** to save them. Suggestions that already match an existing row are filtered out automatically. Nothing is saved until you approve it.
+
+On the **Family** page (see Quick Capture, below), task and research results have a **Save as preference** button — it pre-fills a save dialog with a suggested category/topic (editable) so you can turn a result into a standing memory-store fact without retyping it.
 
 **Google Calendar**
 
@@ -859,6 +866,8 @@ The Family page's **Quick capture** box turns a freeform note into a reminder, d
 - **Research asks** ("find swim camps with summer openings under $200", "compare flights to Chicago next weekend") take longer — up to about 45 seconds — while the agent searches the web and checks its findings before answering. A "Working on it…" note appears while this runs, and the response is tagged **Researched · N step(s)**.
 
 If a quick ask should have triggered research (or vice versa), start your note with `research:` to force the deeper research path — for example `research: find a birthday gift for a 7 year old under $40`. Research results are also added to the Alerts panel as a suggestion, so you can find them again later.
+
+Any result — quick ask or research — has a **Save as preference** button. It classifies the result text for you (category and topic, both editable) and opens a save dialog so you can turn it into a standing fact in Settings › Family › **PA Preferences** without retyping it.
 
 ## Year-in-Review
 

@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import {
+  classifyPreferenceText,
   createAvailability,
   createPreference,
   deleteAvailability,
@@ -12,6 +13,7 @@ import {
   listAvailability,
   listHouseholdMembers,
   listPreferences,
+  suggestPreferencesFromNotes,
   updateAvailability,
   updateMemberProfile,
 } from "./family-profiles.service.js";
@@ -143,9 +145,10 @@ familyProfilesRouter.delete(
   }
 );
 
-// ── PA preferences / memory store (#165) ────────────────────────────────────
+// ── PA preferences / memory store (#165, topic_tag + suggest/classify #238) ─────────────────
 
 const paPreferenceCategoryEnum = z.enum(["preference", "discovered_fact", "decision_history"]);
+const paPreferenceTopicTagEnum = z.enum(["travel", "school", "health", "finance", "gifts", "household", "other"]);
 
 familyProfilesRouter.get(
   "/pa-preferences",
@@ -160,11 +163,24 @@ familyProfilesRouter.get(
   }
 );
 
-const createPreferenceSchema = z.object({
-  category: paPreferenceCategoryEnum,
-  factText: z.string().trim().min(1).max(2000),
-  source: z.enum(["manual", "feedback"]).optional(),
-});
+const createPreferenceSchema = z
+  .object({
+    category: paPreferenceCategoryEnum,
+    factText: z.string().trim().min(1).max(2000),
+    source: z.enum(["manual", "feedback", "notes_extraction"]).optional(),
+    topicTag: paPreferenceTopicTagEnum.nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.category === "preference") {
+      if (val.topicTag) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["topicTag"], message: "topicTag must not be set for category=preference" });
+      }
+      return;
+    }
+    if (!val.topicTag) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["topicTag"], message: "topicTag is required for discovered_fact/decision_history" });
+    }
+  });
 
 familyProfilesRouter.post(
   "/pa-preferences",
@@ -195,5 +211,32 @@ familyProfilesRouter.delete(
       return;
     }
     res.status(204).end();
+  }
+);
+
+familyProfilesRouter.post(
+  "/pa-preferences/suggest",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const candidates = await suggestPreferencesFromNotes(req.authUser!.householdId);
+    res.json({ candidates });
+  }
+);
+
+const classifyPreferenceSchema = z.object({
+  factText: z.string().trim().min(1).max(2000),
+});
+
+familyProfilesRouter.post(
+  "/pa-preferences/classify",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = classifyPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+    const classification = await classifyPreferenceText(parsed.data.factText);
+    res.json(classification);
   }
 );

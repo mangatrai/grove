@@ -1,12 +1,17 @@
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { log } from "../../logger.js";
+import { chatModel, getChatAdapter } from "../../llm/index.js";
+import { z } from "zod";
 import {
   type CreateAvailabilityInput,
   type CreatePaPreferenceInput,
   type HelpAvailabilitySlot,
   type HouseholdMember,
   type PaPreference,
+  type PaPreferenceCandidate,
   type PaPreferenceCategory,
   type PaPreferenceRow,
+  type PaPreferenceTopicTag,
   type UpdateAvailabilityInput,
   type UpdateMemberProfileInput,
 } from "./family.types.js";
@@ -303,9 +308,10 @@ export async function deleteAvailability(id: string, householdId: string): Promi
   return true;
 }
 
-// ── PA preferences / memory store (#165) ────────────────────────────────────
-// topic_tag, search_memory, and notes-extraction write paths are deferred to #238.
-// `preference` rows are full-inclusion (see buildCaptureContextHeader in family-agent.service.ts).
+// ── PA preferences / memory store (#165, topic_tag + search_memory + notes-extraction #238) ──
+// `preference` rows are full-inclusion (see buildCaptureContextHeader in family-agent.service.ts)
+// and always have topic_tag = NULL. `discovered_fact`/`decision_history` rows carry a topic_tag
+// so the PA loop can pull them on demand via the search_memory tool (pa-task-runner.ts) instead.
 
 function normalizeFactText(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
@@ -318,6 +324,7 @@ function preferenceFromRow(row: PaPreferenceRow): PaPreference {
     category: row.category,
     factText: row.fact_text,
     source: row.source,
+    topicTag: row.topic_tag,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -353,23 +360,26 @@ export async function createPreference(
     input.category
   );
   const match = existing.find((row) => normalizeFactText(row.fact_text) === normalized);
+  const topicTag = input.category === "preference" ? null : (input.topicTag ?? null);
   if (match) {
     const updated = await qGet<PaPreferenceRow>(
-      `UPDATE household_pa_preferences SET fact_text = ?, updated_at = NOW() WHERE id = ? RETURNING *`,
+      `UPDATE household_pa_preferences SET fact_text = ?, topic_tag = ?, updated_at = NOW() WHERE id = ? RETURNING *`,
       input.factText,
+      topicTag,
       match.id
     );
     return preferenceFromRow(updated!);
   }
 
   const row = await qGet<PaPreferenceRow>(
-    `INSERT INTO household_pa_preferences (household_id, category, fact_text, source)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO household_pa_preferences (household_id, category, fact_text, source, topic_tag)
+     VALUES (?, ?, ?, ?, ?)
      RETURNING *`,
     householdId,
     input.category,
     input.factText,
-    input.source ?? "manual"
+    input.source ?? "manual",
+    topicTag
   );
   return preferenceFromRow(row!);
 }
@@ -381,4 +391,205 @@ export async function deletePreference(id: number, householdId: string): Promise
     householdId
   );
   return row !== undefined;
+}
+
+/**
+ * #238: on-demand lookup for the PA loop's search_memory tool. discovered_fact/decision_history
+ * rows are deliberately NOT full-included in every prompt (unlike preference rows) — the loop
+ * fetches them by topic_tag only when relevant, keeping prompt size bounded as the table grows.
+ */
+export async function searchMemory(
+  householdId: string,
+  topicTag: PaPreferenceTopicTag
+): Promise<PaPreference[]> {
+  const rows = await qAll<PaPreferenceRow>(
+    `SELECT * FROM household_pa_preferences
+     WHERE household_id = ? AND category IN ('discovered_fact', 'decision_history') AND topic_tag = ?
+     ORDER BY created_at DESC
+     LIMIT 10`,
+    householdId,
+    topicTag
+  );
+  return rows.map(preferenceFromRow);
+}
+
+const TOPIC_TAGS = ["travel", "school", "health", "finance", "gifts", "household", "other"] as const;
+const CATEGORIES = ["preference", "discovered_fact", "decision_history"] as const;
+
+const SUGGEST_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          personName: { type: "string" },
+          category: { type: "string", enum: CATEGORIES },
+          factText: { type: "string" },
+          topicTag: { type: "string", enum: TOPIC_TAGS },
+        },
+        required: ["personName", "category", "factText", "topicTag"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["candidates"],
+  additionalProperties: false,
+};
+
+const suggestSchema = z.object({
+  candidates: z.array(
+    z.object({
+      personName: z.string(),
+      category: z.enum(CATEGORIES),
+      factText: z.string().trim().min(1),
+      topicTag: z.enum(TOPIC_TAGS),
+    })
+  ),
+});
+
+const SUGGEST_SYSTEM = `You extract durable household-planning facts from personal notes so they can be
+saved as structured memory for a planning assistant.
+
+For each note, propose zero or more candidate facts:
+- "preference": a hard constraint the assistant must always honor (e.g. visa/citizenship travel
+  restrictions, dietary/medical restrictions, non-negotiable scheduling rules).
+- "discovered_fact": a useful fact learned in passing that isn't a hard rule (e.g. a stated interest,
+  a recurring vendor, a size/preference detail).
+- "decision_history": a past decision worth remembering for consistency (e.g. "chose X over Y
+  because...").
+
+Every candidate needs a topicTag from the fixed set: travel, school, health, finance, gifts,
+household, other. Only propose candidates that are clearly useful to remember — skip vague or
+trivial notes. If a note has nothing worth extracting, propose nothing for that person.
+
+Respond with JSON only: {"candidates": [{"personName": string, "category": "preference"|"discovered_fact"|"decision_history", "factText": string, "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"other"}]}`;
+
+/**
+ * #238: household-wide (not per-person) on-demand notes scan. Returns unpersisted candidates —
+ * nothing is written until the household approves via POST /pa-preferences per accepted row.
+ * Filters out candidates that already match an existing row so approved suggestions never
+ * duplicate what's already stored (createPreference's own dedup is a second backstop).
+ */
+export async function suggestPreferencesFromNotes(householdId: string): Promise<PaPreferenceCandidate[]> {
+  const members = await listHouseholdMembers(householdId);
+  const withNotes = members.filter((m) => m.notes && m.notes.trim().length > 0);
+  if (withNotes.length === 0) return [];
+
+  const notesBlock = withNotes.map((m) => `${m.fullName}: ${m.notes}`).join("\n\n");
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: SUGGEST_SYSTEM },
+      { role: "user", content: notesBlock },
+    ],
+    {
+      model: chatModel(),
+      maxTokens: 1200,
+      temperature: 0,
+      responseFormat: "json",
+      jsonSchema: SUGGEST_JSON_SCHEMA,
+      jsonSchemaName: "pa_preference_candidates",
+    }
+  );
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    raw = undefined;
+  }
+  const parsed = suggestSchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn("family-profiles: suggestPreferencesFromNotes failed validation", {
+      householdId,
+      issues: parsed.error.issues,
+      rawContent: content.slice(0, 300),
+    });
+    return [];
+  }
+
+  const existing = await qAll<PaPreferenceRow>(
+    `SELECT * FROM household_pa_preferences WHERE household_id = ?`,
+    householdId
+  );
+  const existingNormalized = new Set(existing.map((row) => normalizeFactText(row.fact_text)));
+
+  return parsed.data.candidates
+    .filter((c) => !existingNormalized.has(normalizeFactText(c.factText)))
+    .map((c) => ({
+      personName: c.personName,
+      category: c.category,
+      factText: c.factText,
+      topicTag: c.category === "preference" ? null : c.topicTag,
+    }));
+}
+
+const CLASSIFY_PREFERENCE_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    category: { type: "string", enum: CATEGORIES },
+    topicTag: { type: "string", enum: TOPIC_TAGS },
+  },
+  required: ["category", "topicTag"],
+  additionalProperties: false,
+};
+
+const classifyPreferenceSchema = z.object({
+  category: z.enum(CATEGORIES),
+  topicTag: z.enum(TOPIC_TAGS),
+});
+
+const CLASSIFY_PREFERENCE_SYSTEM = `Classify a single household-planning fact for storage:
+
+- "preference": a hard constraint that must always be honored.
+- "discovered_fact": a useful fact learned in passing, not a hard rule.
+- "decision_history": a past decision worth remembering for consistency.
+
+Also assign a topicTag from the fixed set: travel, school, health, finance, gifts, household, other.
+
+Respond with JSON only: {"category": "preference"|"discovered_fact"|"decision_history", "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"other"}`;
+
+/**
+ * #238: used by the "Save as preference" button — classifies one ad-hoc string (e.g. a PA task
+ * result) so the user has a sensible starting category/tag instead of picking from scratch. The
+ * frontend always shows the suggestion as editable before persisting.
+ */
+export async function classifyPreferenceText(
+  factText: string
+): Promise<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null }> {
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: CLASSIFY_PREFERENCE_SYSTEM },
+      { role: "user", content: factText },
+    ],
+    {
+      model: chatModel(),
+      maxTokens: 60,
+      temperature: 0,
+      responseFormat: "json",
+      jsonSchema: CLASSIFY_PREFERENCE_JSON_SCHEMA,
+      jsonSchemaName: "pa_preference_classification",
+    }
+  );
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    raw = undefined;
+  }
+  const parsed = classifyPreferenceSchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn("family-profiles: classifyPreferenceText failed validation, defaulting to discovered_fact/other", {
+      issues: parsed.error.issues,
+      rawContent: content.slice(0, 300),
+    });
+    return { category: "discovered_fact", topicTag: "other" };
+  }
+  return {
+    category: parsed.data.category,
+    topicTag: parsed.data.category === "preference" ? null : parsed.data.topicTag,
+  };
 }
