@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — Anthropic payslip vision extraction failed with non-JSON content error (2026-07-14)
+
+**What changed:** `anthropicVision()` (`backend/src/llm/providers/anthropic.ts`), used only by payslip PDF extraction, never received the schema-enforced structured-output fix that `anthropicChat()` got in FIX #228 — it only appended "Return ONLY valid JSON. No prose outside the JSON." to the system prompt and did a plain-text `JSON.parse()` on the response. Ported the same forced-tool-use pattern `anthropicChat()` already uses: when `responseFormat: "json"` + `jsonSchema` + `jsonSchemaName` are present, force a synthetic tool call (`tools: [{ name, input_schema }]`, `tool_choice: { type: "tool", name }`) and read the already-parsed `tool_use.input` back out instead of parsing free text. Also added a normalization step in `extract-payslip-llm.ts` that backfills any missing `line_items` array keys (earnings, pre_tax_deductions, post_tax_deductions, tax_deductions, other_deductions, other_information, taxable_earnings) with `[]` before zod validation.
+
+**Why:** Found immediately after the poller fix above unblocked a stuck IBM payslip import (`LLM_PROVIDER=anthropic`) — the request finally ran, and Anthropic's vision call threw `Vision LLM returned non-JSON message content.` at `extract-payslip-llm.ts:136`. OpenAI's vision path already used `response_format.json_schema` correctly; this gap was Anthropic-vision-specific. `payslip.schema.json` uses `$ref: "#/$defs/LineItem"` in 7 places, which the code's own comment flagged as an OpenAI-strict-mode risk — confirmed live against the real Anthropic API that `$ref`/`$defs` is handled fine by Anthropic's tool `input_schema` (it isn't strictly validated the way OpenAI's `strict: true` is, so refs are a non-issue there). That same non-strict validation is exactly why the model omitted a whole required array key (`line_items.taxable_earnings`) instead of returning `[]` on a payslip section with no rows — the second fix above.
+
+**Verification:** `npm run test -w backend` 741/741 passing (one unrelated `ECONNRESET` flake in `category-rules-api.test.ts`, reran in isolation and it passed clean), `npx tsc --noEmit` clean. Live-API smoke test against a real IBM payslip PDF fixture (`data/imports/payslips/ibm/Payslip_15thApr26.pdf`) with the real `ANTHROPIC_API_KEY`: full zod-validated extraction succeeded (`net_pay_current: 4342.45`, `gross_pay_current: 9588.75`, `currency: USD`). No new unit test added — this path requires a live LLM call to meaningfully exercise, and the existing mocked test suite doesn't hit the real API; verified via the manual live-API script instead (see Verification above).
+
+**Files:** `backend/src/llm/providers/anthropic.ts`, `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`.
+
+**GitHub:** closes [#236](https://github.com/mangatrai/grove/issues/236).
+
+---
+
 ## FIX — ImportWorkspacePage: client-side payslip poller missed IBM profile (2026-07-14)
 
 **What changed:** `ImportWorkspacePage.tsx`'s auto-poll `useEffect` (fires `runReconcilePayslipAsync` at 2.5s then every 120s while a payslip is mid-extraction) checked `f.parser_profile_id === "deloitte_payslip_pdf"` — a hardcoded single-profile string that silently excluded `ibm_pay_contributions_pdf`. Added a `LLM_PAYSLIP_PROFILE_IDS` set (mirroring the backend's, `payslip.types.ts`) and switched the check to `LLM_PAYSLIP_PROFILE_IDS.has(f.parser_profile_id)`.

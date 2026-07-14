@@ -34,7 +34,8 @@ export type ExtractPayslipLlmOptions = {
 
 /**
  * Vision LLM extraction of payslip PDF pages. Supports any configured LLM_PROVIDER.
- * Uses structured JSON schema output where available (OpenAI); falls back to prompt-based JSON for Anthropic.
+ * Both providers use real structured-output enforcement: OpenAI via `response_format.json_schema`,
+ * Anthropic via forced tool-use (`anthropicVision`, mirrors `anthropicChat`'s pattern).
  */
 export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): Promise<{
   extract: PayslipLlmExtract;
@@ -134,6 +135,29 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     raw = JSON.parse(content) as unknown;
   } catch {
     throw new Error("Vision LLM returned non-JSON message content.");
+  }
+
+  // Anthropic's tool-use schema isn't strictly validated the way OpenAI's `strict: true` is — the
+  // model can omit a `required` array key entirely instead of returning `[]` when a section has no
+  // rows on this payslip. Backfill missing line_items arrays before zod validation rather than
+  // failing the whole extraction over an absent-but-legitimately-empty section.
+  if (raw && typeof raw === "object" && "line_items" in raw) {
+    const lineItems = (raw as { line_items?: unknown }).line_items;
+    if (lineItems && typeof lineItems === "object") {
+      for (const key of [
+        "earnings",
+        "pre_tax_deductions",
+        "post_tax_deductions",
+        "tax_deductions",
+        "other_deductions",
+        "other_information",
+        "taxable_earnings",
+      ] as const) {
+        if (!(key in lineItems)) {
+          (lineItems as Record<string, unknown>)[key] = [];
+        }
+      }
+    }
   }
 
   const parsed = payslipLlmApiResponseSchema.parse(raw);

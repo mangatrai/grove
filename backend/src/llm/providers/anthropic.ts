@@ -209,12 +209,6 @@ export async function anthropicVision(
     .filter(Boolean);
   const systemPrompt = systemParts.join("\n\n") || undefined;
 
-  // Append JSON instruction when JSON output is requested
-  const systemFull =
-    options.responseFormat === "json"
-      ? [systemPrompt, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
-      : systemPrompt;
-
   const anthropicMessages: Anthropic.Messages.MessageParam[] = messages
     .filter((m) => m.role === "user")
     .map((m) => ({
@@ -235,6 +229,43 @@ export async function anthropicVision(
                   }
             ),
     }));
+
+  // Real structured-output enforcement (same mechanism as anthropicChat above): force a synthetic
+  // tool call whose input_schema is the desired shape, read the already-parsed tool_use input back
+  // out. Replaces the old "Return ONLY valid JSON" prompt coercion, which broke whenever Claude added
+  // markdown fences or any prose around the JSON.
+  if (options.responseFormat === "json" && options.jsonSchema && options.jsonSchemaName) {
+    const res = await client.messages.create({
+      model: options.model,
+      max_tokens: options.maxTokens ?? 2048,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: anthropicMessages,
+      tools: [
+        {
+          name: options.jsonSchemaName,
+          description: "Return the structured result for this request.",
+          input_schema: options.jsonSchema as Anthropic.Messages.Tool["input_schema"],
+        },
+      ],
+      tool_choice: { type: "tool", name: options.jsonSchemaName },
+    });
+    const toolUse = res.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+    );
+    return {
+      content: toolUse ? JSON.stringify(toolUse.input) : "",
+      usage: {
+        promptTokens: res.usage.input_tokens,
+        completionTokens: res.usage.output_tokens,
+        totalTokens: res.usage.input_tokens + res.usage.output_tokens,
+      },
+    };
+  }
+
+  const systemFull =
+    options.responseFormat === "json"
+      ? [systemPrompt, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
+      : systemPrompt;
 
   const res = await client.messages.create({
     model: options.model,
