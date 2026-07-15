@@ -46,6 +46,34 @@ const emailExtractionSchema = z.object({
   items: z.array(emailItemSchema).max(10)
 });
 
+// #229: hand-written JSON Schema mirror of emailItemSchema for OpenAI strict json_schema mode /
+// Anthropic forced tool-use — objects fully closed, all fields required (optional/default Zod
+// fields become nullable), matching the convention in pa-task-runner.ts / family-agent.service.ts.
+const EMAIL_ITEM_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["deadline", "event", "info", "payment_due", "delivery", "appointment", "rsvp"] },
+    title: { type: "string" },
+    date: { type: ["string", "null"] },
+    time: { type: ["string", "null"] },
+    who: { type: ["string", "null"] },
+    actionRequired: { type: "string" },
+    sourceQuote: { type: "string" },
+    urgency: { type: ["string", "null"], enum: ["high", "normal", null] }
+  },
+  required: ["kind", "title", "date", "time", "who", "actionRequired", "sourceQuote", "urgency"],
+  additionalProperties: false
+};
+
+const EMAIL_EXTRACTION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    items: { type: "array", items: EMAIL_ITEM_JSON_SCHEMA, maxItems: 10 }
+  },
+  required: ["items"],
+  additionalProperties: false
+};
+
 type EmailItem = z.infer<typeof emailItemSchema>;
 
 type ParsedInboxMessage = {
@@ -151,7 +179,13 @@ async function extractItems(householdId: string, message: ParsedInboxMessage): P
       { role: "system", content: system },
       { role: "user", content: userContent }
     ],
-    { model: chatModel(), maxTokens: 1200 }
+    {
+      model: chatModel(),
+      maxTokens: 1200,
+      responseFormat: "json",
+      jsonSchema: EMAIL_EXTRACTION_JSON_SCHEMA,
+      jsonSchemaName: "email_extraction"
+    }
   );
 
   let raw: unknown;

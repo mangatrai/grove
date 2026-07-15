@@ -183,6 +183,38 @@ describe("FIX #215 — household inbox email ingestion", () => {
     expect(alerts.length).toBe(0);
   });
 
+  // #229: extractItems() now also sends responseFormat/jsonSchema on the LLM call, but that's a
+  // request-shaping change only — the response-side guard is still emailExtractionSchema.safeParse()
+  // (unchanged). This asserts a well-formed-but-wrong-shape response (invalid "kind" enum value)
+  // still degrades to zero items rather than throwing or inserting a malformed alert.
+  it("degrades gracefully (email ignored, no alert) on a well-formed but schema-invalid extraction response", async () => {
+    primeOneMessage({ messageId: "<msg-badshape@school.example>" });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "not_a_real_kind",
+          title: "Field trip permission form due",
+          date: "2026-07-10",
+          time: null,
+          who: null,
+          actionRequired: "Sign and return the field trip permission form.",
+          sourceQuote: "the field trip permission form is due this Friday, July 10."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const logRow = await qGet<{ status: string }>(
+      `SELECT status FROM email_ingest_log WHERE household_id = ? AND message_id = ?`,
+      HOUSEHOLD_ID, "<msg-badshape@school.example>"
+    );
+    expect(logRow?.status).toBe("ignored");
+
+    const alerts = await qAll(`SELECT id FROM family_agent_alerts WHERE household_id = ?`, HOUSEHOLD_ID);
+    expect(alerts.length).toBe(0);
+  });
+
   it("dedups on message_id: a second poll of the same message does not create a second alert", async () => {
     primeOneMessage({ messageId: "<msg-dup@school.example>" });
     mockComplete.mockResolvedValue(

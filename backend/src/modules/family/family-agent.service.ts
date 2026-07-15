@@ -617,6 +617,220 @@ function parseJsonResponse<T>(raw: string): T {
   return JSON.parse(cleaned) as T;
 }
 
+// ---------------------------------------------------------------------------
+// #229: LLM call schemas — hand-written JSON Schema mirrors of each site's expected shape,
+// enforced via responseFormat:"json"+jsonSchema (OpenAI json_schema strict mode / Anthropic
+// forced tool-use, see llm/providers/{openai,anthropic}.ts) so malformed output is caught before
+// parsing instead of silently degrading a Promise.all fan-out branch to an empty result. Same
+// additionalProperties:false / all-fields-required-and-nullable convention as pa-task-runner.ts's
+// #228 schemas (strict mode requires objects fully closed).
+// ---------------------------------------------------------------------------
+
+const ALERT_ITEM_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    alertType: { type: "string", enum: ["conflict", "travel", "coverage_gap", "deadline_approaching", "suggestion"] },
+    reason: { type: "string" },
+    affectedDate: { type: ["string", "null"] },
+    copyPasteText: { type: "string" },
+    recipientHint: { type: "string", enum: ["Nanny", "Spouse", "Both", "Self"] },
+    calendarEventPayload: {
+      type: ["object", "null"],
+      properties: {
+        title: { type: "string" },
+        date: { type: "string" },
+        description: { type: "string" },
+        time: { type: ["string", "null"] },
+      },
+      required: ["title", "date", "description", "time"],
+      additionalProperties: false,
+    },
+  },
+  required: ["alertType", "reason", "affectedDate", "copyPasteText", "recipientHint", "calendarEventPayload"],
+  additionalProperties: false,
+};
+
+const COVERAGE_COORDINATION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    gaps: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+    coordinationNeeds: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+  },
+  required: ["gaps", "coordinationNeeds"],
+  additionalProperties: false,
+};
+
+const RESEARCH_QUERY_GEN_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    queries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          intent: { type: "string" },
+          freshness: { type: "string", enum: ["new", "seasonal"] },
+        },
+        required: ["query", "intent", "freshness"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["queries"],
+  additionalProperties: false,
+};
+
+const researchQueryGenSchema = z.object({
+  queries: z.array(z.object({
+    query: z.string(),
+    intent: z.string(),
+    freshness: z.enum(["new", "seasonal"]),
+  })).default([]),
+});
+
+const RESEARCH_FALLBACK_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          category: { type: "string", enum: ["activity", "suggestion"] },
+        },
+        required: ["title", "summary", "category"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+};
+
+const researchFallbackSchema = z.object({
+  items: z.array(z.object({
+    title: z.string(),
+    summary: z.string(),
+    category: z.enum(["activity", "suggestion"]),
+  })).default([]),
+});
+
+const RESEARCH_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          category: { type: "string", enum: ["event", "deadline", "restaurant", "weather", "activity", "entertainment"] },
+          grade: { type: "string", enum: ["verified", "lead"] },
+        },
+        required: ["title", "summary", "category", "grade"],
+        additionalProperties: false,
+      },
+    },
+    discarded: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          reason: { type: "string", enum: ["age", "geo", "duplicate", "date", "feedback"] },
+        },
+        required: ["title", "reason"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items", "discarded"],
+  additionalProperties: false,
+};
+
+const researchSynthesisSchema = z.object({
+  items: z.array(z.object({
+    title: z.string(),
+    summary: z.string(),
+    category: z.enum(["event", "deadline", "restaurant", "weather", "activity", "entertainment"]),
+    grade: z.enum(["verified", "lead"]),
+  })).default([]),
+  discarded: z.array(z.object({
+    title: z.string(),
+    reason: z.enum(["age", "geo", "duplicate", "date", "feedback"]),
+  })).default([]),
+});
+
+const DEADLINE_QUERY_GEN_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    queries: { type: "array", items: { type: "string" } },
+  },
+  required: ["queries"],
+  additionalProperties: false,
+};
+
+const deadlineQueryGenSchema = z.object({ queries: z.array(z.string()).default([]) });
+
+const DEADLINE_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    alerts: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+  },
+  required: ["alerts"],
+  additionalProperties: false,
+};
+
+const DIGEST_SECTION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    subjectHighlight: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          heading: { type: "string" },
+          items: { type: "array", items: { type: "string" } },
+        },
+        required: ["heading", "items"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["subjectHighlight", "sections"],
+  additionalProperties: false,
+};
+
+const DIGEST_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    summaryText: { type: "string" },
+    parentADigest: DIGEST_SECTION_JSON_SCHEMA,
+    parentBDigest: DIGEST_SECTION_JSON_SCHEMA,
+  },
+  required: ["summaryText", "parentADigest", "parentBDigest"],
+  additionalProperties: false,
+};
+
+const digestSectionSchema = z.object({
+  subjectHighlight: z.string(),
+  sections: z.array(z.object({
+    heading: z.string(),
+    items: z.array(z.string()),
+  })).default([]),
+});
+
+const digestSynthesisSchema = z.object({
+  summaryText: z.string(),
+  parentADigest: digestSectionSchema,
+  parentBDigest: digestSectionSchema,
+});
+
 // FIX #215: exported for reuse by email-ingest.service.ts's extraction prompt.
 export function buildMemberProfile(members: HouseholdMember[]): string {
   if (members.length === 0) return "No household members configured.";
@@ -733,7 +947,13 @@ If nothing in either category, return { "gaps": [], "coordinationNeeds": [] }.`;
       { role: "system", content: "You are a careful childcare coverage and caregiver coordination analyst for a household PA. Identify genuine coverage gaps (no adult present) and genuine caregiver coordination needs (action beyond the confirmed schedule) — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at a confirmed activity during a gap window is not at risk. Err strongly toward empty results in both categories, and never double-flag the same window. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
-    { model: strongModel(), maxTokens: 1400 }
+    {
+      model: strongModel(),
+      maxTokens: 1400,
+      responseFormat: "json",
+      jsonSchema: COVERAGE_COORDINATION_JSON_SCHEMA,
+      jsonSchemaName: "coverage_coordination",
+    }
   );
 
   try {
@@ -807,14 +1027,25 @@ Generate exactly ${queryCount} targeted web search queries to surface things thi
 Return ONLY valid JSON: { "queries": [ { "query": "...", "intent": "short phrase", "freshness": "new" | "seasonal" } ] }` },
     ],
     // FIX #211: brainstorm/format task, not judgment — cheap model tier.
-    { model: chatModel(), maxTokens: 500 }
+    {
+      model: chatModel(),
+      maxTokens: 500,
+      responseFormat: "json",
+      jsonSchema: RESEARCH_QUERY_GEN_JSON_SCHEMA,
+      jsonSchemaName: "research_query_gen",
+    }
   );
 
   type QueryPlan = { query: string; intent: string; freshness: "new" | "seasonal" };
   let queries: QueryPlan[] = [];
   try {
-    const parsedQueries = parseJsonResponse<{ queries: QueryPlan[] }>(queryJson);
-    queries = parsedQueries.queries;
+    const parsedRaw = parseJsonResponse<unknown>(queryJson);
+    const parsedQueries = researchQueryGenSchema.safeParse(parsedRaw);
+    if (!parsedQueries.success) {
+      log.warn("family-agent: Domain 3 query gen response failed schema validation", { issues: parsedQueries.error.issues, raw: queryJson.slice(0, 500) });
+      return { hasOutput: false, items: [] };
+    }
+    queries = parsedQueries.data.queries;
     log.debug("family-agent: Domain 3 LLM query gen response", { raw: queryJson.slice(0, 500), queries });
   } catch {
     log.warn("family-agent: proactive research query parse failed");
@@ -866,12 +1097,23 @@ Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": 
 If nothing useful to say, return { "items": [] }.` },
       ],
       // FIX #211: generic seasonal suggestions with no live grounding — cheap model tier.
-      { model: chatModel(), maxTokens: 400 }
+      {
+        model: chatModel(),
+        maxTokens: 400,
+        responseFormat: "json",
+        jsonSchema: RESEARCH_FALLBACK_JSON_SCHEMA,
+        jsonSchemaName: "research_fallback",
+      }
     );
     try {
-      const fb = parseJsonResponse<{ items: Array<Omit<ResearchItem, "grade">> }>(fallbackJson);
+      const fbRaw = parseJsonResponse<unknown>(fallbackJson);
+      const fb = researchFallbackSchema.safeParse(fbRaw);
+      if (!fb.success) {
+        log.warn("family-agent: Domain 3 LLM fallback response failed schema validation", { issues: fb.error.issues });
+        return { hasOutput: false, items: [] };
+      }
       // FIX #210: no live search happened here, so nothing can be "verified" — always grade as "lead".
-      const items: ResearchItem[] = fb.items.map(i => ({ ...i, grade: "lead" as const }));
+      const items: ResearchItem[] = fb.data.items.map(i => ({ ...i, grade: "lead" as const }));
       log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: items.length });
       return { hasOutput: items.length > 0, items };
     } catch {
@@ -929,16 +1171,27 @@ Respond with ONLY valid JSON:
   "discarded": [ { "title": "≤60 chars", "reason": "age"|"geo"|"duplicate"|"date"|"feedback" } ] }
 If nothing specific enough found, return { "items": [], "discarded": [] }.` },
     ],
-    { model: strongModel(), maxTokens: 900 }
+    {
+      model: strongModel(),
+      maxTokens: 900,
+      responseFormat: "json",
+      jsonSchema: RESEARCH_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "research_synthesis",
+    }
   );
 
   log.debug("family-agent: Domain 3 LLM synthesis response", { raw: synthJson.slice(0, 1000) });
   try {
-    const parsed = parseJsonResponse<{ items: ResearchItem[]; discarded?: { title: string; reason: string }[] }>(synthJson);
-    if (parsed.discarded?.length) {
-      log.debug("family-agent: Domain 3 discarded items (relevance gate)", { discarded: parsed.discarded });
+    const parsedRaw = parseJsonResponse<unknown>(synthJson);
+    const parsed = researchSynthesisSchema.safeParse(parsedRaw);
+    if (!parsed.success) {
+      log.warn("family-agent: Domain 3 synthesis response failed schema validation", { issues: parsed.error.issues, raw: synthJson.slice(0, 200) });
+      return { hasOutput: false, items: [] };
     }
-    return { hasOutput: parsed.items.length > 0, items: parsed.items };
+    if (parsed.data.discarded.length) {
+      log.debug("family-agent: Domain 3 discarded items (relevance gate)", { discarded: parsed.data.discarded });
+    }
+    return { hasOutput: parsed.data.items.length > 0, items: parsed.data.items };
   } catch {
     log.warn("family-agent: Domain 3 synthesis parse failed", { raw: synthJson.slice(0, 200) });
     return { hasOutput: false, items: [] };
@@ -1002,13 +1255,25 @@ Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this hou
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
       // FIX #211: brainstorm/format task, same as D3 query-gen — cheap model tier.
-      { model: chatModel(), maxTokens: 400 }
+      {
+        model: chatModel(),
+        maxTokens: 400,
+        responseFormat: "json",
+        jsonSchema: DEADLINE_QUERY_GEN_JSON_SCHEMA,
+        jsonSchemaName: "deadline_query_gen",
+      }
     );
 
     let deadlineQueries: string[] = [];
     try {
-      deadlineQueries = parseJsonResponse<{ queries: string[] }>(queryJson).queries ?? [];
-      log.debug("family-agent: Domain 4 LLM query gen response", { raw: queryJson.slice(0, 500), queries: deadlineQueries });
+      const parsedRaw = parseJsonResponse<unknown>(queryJson);
+      const parsed = deadlineQueryGenSchema.safeParse(parsedRaw);
+      if (!parsed.success) {
+        log.warn("family-agent: Domain 4 query gen response failed schema validation", { issues: parsed.error.issues, raw: queryJson.slice(0, 500) });
+      } else {
+        deadlineQueries = parsed.data.queries;
+        log.debug("family-agent: Domain 4 LLM query gen response", { raw: queryJson.slice(0, 500), queries: deadlineQueries });
+      }
     } catch {
       log.warn("family-agent: Domain 4 query generation parse failed");
     }
@@ -1071,7 +1336,13 @@ Respond with ONLY valid JSON:
 Include calendarEventPayload for any deadline that benefits from being on the calendar. Set to null only for vague or unactionable items.
 If nothing new, return { "alerts": [] }.` },
     ],
-    { model: strongModel(), maxTokens: 1500 }
+    {
+      model: strongModel(),
+      maxTokens: 1500,
+      responseFormat: "json",
+      jsonSchema: DEADLINE_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "deadline_synthesis",
+    }
   );
 
   log.debug("family-agent: Domain 4 LLM synthesis response", { raw: content.slice(0, 1000) });
@@ -1363,15 +1634,18 @@ Respond with ONLY valid JSON:
 For "sections", use ONLY these headings, in this order, and only include a heading if that parent has content for it: "Coverage & Nanny" (childcare/scheduling + nanny coordination combined), "Deadlines", "Occasions", "Research finds". Do not invent other headings. Each item is one short bullet string — mobile-readable, specific, no filler.` },
     ],
     // FIX #211: formatting/summarization of already-vetted upstream content — cheap model tier.
-    { model: chatModel(), maxTokens: 3500 }
+    {
+      model: chatModel(),
+      maxTokens: 3500,
+      responseFormat: "json",
+      jsonSchema: DIGEST_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "digest_synthesis",
+    }
   );
 
   try {
-    const parsed = parseJsonResponse<{
-      summaryText: string;
-      parentADigest: { subjectHighlight: string; sections: { heading: string; items: string[] }[] };
-      parentBDigest: { subjectHighlight: string; sections: { heading: string; items: string[] }[] };
-    }>(content);
+    const parsedRaw = parseJsonResponse<unknown>(content);
+    const parsed = digestSynthesisSchema.parse(parsedRaw);
 
     return {
       conflicts: allAlerts,

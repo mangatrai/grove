@@ -737,6 +737,126 @@ describe("parseJsonResponse robustness (via sweepDeadlines triage, #214)", () =>
   });
 });
 
+// #229: each LLM-JSON call site below now also sends responseFormat/jsonSchema on the request
+// (request-shaping only), but the response-side guard that matters for correctness is the new
+// Zod .safeParse() added at each site. These assert a well-formed-but-wrong-shape response (an
+// invalid enum value, a wrong type, or a missing required field) still degrades to the site's
+// existing fail-closed default instead of throwing or propagating a malformed value — mirroring
+// the fail-closed pattern already covered above for unparseable JSON.
+describe("#229 — schema validation guards against well-formed-but-wrong-shape LLM responses", () => {
+  beforeEach(() => {
+    mockComplete.mockReset();
+    mockTavilySearch.mockReset();
+  });
+
+  const childCtx = () => baseCtx({
+    members: [
+      { profileId: "m1", fullName: "Kid One", relationship: "child", age: 7, linkedUserId: null, interestsJson: [], notes: null },
+    ],
+  });
+
+  it("analyzeCoverageAndCoordination: degrades gracefully on an invalid alertType enum value", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        gaps: [{ alertType: "not_a_real_type", reason: "r1", affectedDate: "2026-06-16", copyPasteText: "cp1", recipientHint: "Nanny" }],
+        coordinationNeeds: [],
+      }),
+      usage: {},
+    });
+
+    const result = await analyzeCoverageAndCoordination(childCtx(), "manual");
+
+    expect(result.coverageGaps.hasOutput).toBe(false);
+    expect(result.coverageGaps.gaps).toEqual([]);
+    expect(result.nannyCoord.hasOutput).toBe(false);
+    expect(result.nannyCoord.items).toEqual([]);
+  });
+
+  it("runProactiveResearch: query-gen degrades gracefully (early return, fallback never called) on an invalid freshness enum value", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "not configured" });
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "stale" }] }),
+      usage: {},
+    });
+
+    const result = await runProactiveResearch(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(result.hasOutput).toBe(false);
+    expect(result.items).toEqual([]);
+  });
+
+  it("runProactiveResearch: LLM-only fallback degrades gracefully on an invalid category enum value", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "not configured" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "new" }] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ items: [{ title: "t", summary: "s", category: "not_a_category" }] }), usage: {} });
+
+    const result = await runProactiveResearch(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(result.hasOutput).toBe(false);
+    expect(result.items).toEqual([]);
+  });
+
+  it("runProactiveResearch: synthesis degrades gracefully on an invalid grade enum value", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: true, text: "some search text" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "new" }] }), usage: {} })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ items: [{ title: "t", summary: "s", category: "activity", grade: "maybe" }], discarded: [] }),
+        usage: {},
+      });
+
+    const result = await runProactiveResearch(childCtx(), "manual");
+
+    expect(result.hasOutput).toBe(false);
+    expect(result.items).toEqual([]);
+  });
+
+  it("sweepDeadlines: query-gen degrades gracefully (continues with empty queries, still reaches synthesis) when 'queries' isn't an array of strings", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "x" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [123, 456] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ alerts: [] }), usage: {} });
+
+    const result = await sweepDeadlines(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(result.hasOutput).toBe(false);
+    expect(result.alerts).toEqual([]);
+  });
+
+  it("synthesizeDigest: degrades gracefully (digest synthesis failed message, no throw) when a section is missing its 'heading'", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summaryText: "summary",
+        parentADigest: { subjectHighlight: "highlight A", sections: [{ items: ["item"] }] },
+        parentBDigest: { subjectHighlight: "", sections: [] },
+      }),
+      usage: {},
+    });
+
+    const emptyDomain: PipelineOutputs = {
+      coverageGaps: { hasOutput: false, gaps: [] },
+      nannyCoord: { hasOutput: false, items: [] },
+      research: { hasOutput: false, items: [] },
+      deadlines: { hasOutput: false, alerts: [] },
+      occasions: { hasOutput: false, alerts: [] },
+    };
+    const parents: ConnectedParent[] = [
+      { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
+    ];
+
+    const result: AgentAnalysis = await synthesizeDigest(childCtx(), emptyDomain, "manual", parents, "no finance context", "Test");
+
+    expect(result.hasOutput).toBe(false);
+    expect(result.parentADigest).toBeNull();
+    expect(result.parentBDigest).toBeNull();
+    expect(result.summaryText).toBe("Digest synthesis failed — alerts were still generated.");
+  });
+});
+
 // #214: todayIso was previously computed inline at two call sites via
 // now.toLocaleDateString("en-CA", { timeZone }) with no injected clock — the same bug class
 // (UTC date drift) a prior review already caught once. Extracted to computeTodayIso() so it can
