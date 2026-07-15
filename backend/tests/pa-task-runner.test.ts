@@ -143,6 +143,25 @@ describe("pa-task-runner (#164, #166)", () => {
     expect(mockComplete).toHaveBeenCalledTimes(2); // 1 loop decision + 1 synthesis, no tool/compression calls
   });
 
+  // #232: the synthesis prompt previously only forbade live-fare claims; it let a thin ledger
+  // collapse into one wide, unattributed price range closed with a generic "go check yourself"
+  // — technically compliant but useless. Asserts the sharpened rule text is present so a future
+  // edit to SYNTHESIS_SYSTEM can't silently regress it.
+  it("synthesis system prompt instructs naming specific options over a blended price range (#232)", async () => {
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));
+
+    await runPATask("trivial goal", HOUSEHOLD_ID);
+
+    const synthesisCall = mockComplete.mock.calls[1];
+    const messages = synthesisCall[0] as { role: string; content: string }[];
+    const systemPrompt = messages.find(m => m.role === "system")?.content ?? "";
+
+    expect(systemPrompt).toContain("never collapse the findings into one wide price range");
+    expect(systemPrompt).toContain("name the");
+    expect(systemPrompt).toContain("never close with a generic");
+  });
+
   it("defaults to origin='user' when the caller omits it", async () => {
     mockComplete.mockResolvedValueOnce(loopSynthesize());
     mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));

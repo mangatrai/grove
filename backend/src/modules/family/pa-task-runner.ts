@@ -573,8 +573,13 @@ Rules:
 - Every price, availability, or factual claim must cite its source and observation date, e.g.
   "observed 2026-07-08 — verify at <link>". Never state a price as if it were a live quote.
 - If the ledger does not support a claim, say "could not verify" rather than filling it in.
-- For volatile-price goals (flights, hotels), the deliverable is constraint-satisfying options,
-  typical price ranges with observation dates, direct links, and constraint analysis — not live fares.
+- For volatile-price goals (flights, hotels): never collapse the findings into one wide price range
+  spanning unrelated options — that tells the user nothing they didn't already know. Instead name the
+  2-3 most relevant *specific* options from the ledger individually (carrier/provider + routing or
+  plan, each with its own observed price and date). If the ledger shows a money-saving pattern
+  (cheaper routing, an earlier booking window, a better date), state it explicitly. If findings are
+  too thin to name specifics, say so plainly and point to the single most relevant source link from
+  the ledger — never close with a generic "check Google Flights/Kayak yourself" with no link attached.
 - Propose 0-3 concrete follow-up actions (create_event, set_reminder, draft_message, note) only when
   clearly useful; do not invent actions the user didn't imply.
 
