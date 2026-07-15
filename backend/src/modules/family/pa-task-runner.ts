@@ -668,7 +668,11 @@ async function checkDailyBudget(householdId: string): Promise<boolean> {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export async function runPATask(goal: string, householdId: string): Promise<RunPATaskResult> {
+export async function runPATask(
+  goal: string,
+  householdId: string,
+  origin: "user" | "scheduler" = "user"
+): Promise<RunPATaskResult> {
   const normalizedGoal = normalizeGoal(goal);
   const existingRunId = await findExistingRunningTask(householdId, normalizedGoal);
   if (existingRunId) {
@@ -687,8 +691,8 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
   if (!withinMonthlyBudget || !withinDailyBudget) {
     await qExec(
       `INSERT INTO pa_task_run (household_id, goal, origin, capture_mode, status, loop_model, synthesis_model, finished_at)
-       VALUES (?, ?, 'user', 'research_loop', 'refused_budget', ?, ?, NOW())`,
-      householdId, goal, chatModel(), strongModel()
+       VALUES (?, ?, ?, 'research_loop', 'refused_budget', ?, ?, NOW())`,
+      householdId, goal, origin, chatModel(), strongModel()
     );
     const message = !withinMonthlyBudget
       ? `This household has reached its PA task limit for the month (${env.PA_TASK_MAX_RUNS_PER_MONTH} runs). Resets on the 1st.`
@@ -698,8 +702,8 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
 
   const runRow = await qGet<{ id: string }>(
     `INSERT INTO pa_task_run (household_id, goal, origin, capture_mode, status, loop_model, synthesis_model)
-     VALUES (?, ?, 'user', 'research_loop', 'running', ?, ?) RETURNING id`,
-    householdId, goal, chatModel(), strongModel()
+     VALUES (?, ?, ?, 'research_loop', 'running', ?, ?) RETURNING id`,
+    householdId, goal, origin, chatModel(), strongModel()
   );
   if (!runRow?.id) {
     log.warn("pa-task-runner: failed to create pa_task_run row", { householdId, goal });
@@ -822,6 +826,7 @@ export type PaTaskRunEntry = {
   id: string;
   householdId: string;
   goal: string;
+  origin: "user" | "scheduler";
   captureMode: "one_shot" | "research_loop" | null;
   status: string;
   iterationsUsed: number | null;
@@ -834,6 +839,7 @@ type PaTaskRunRow = {
   id: string;
   household_id: string;
   goal: string;
+  origin: "user" | "scheduler";
   capture_mode: "one_shot" | "research_loop" | null;
   status: string;
   iterations_used: number | null;
@@ -845,7 +851,7 @@ type PaTaskRunRow = {
 /** Last 30 pa_task_run rows for a household, newest first — feeds the Run History UI (GH #230). */
 export async function listTaskRunHistory(householdId: string): Promise<PaTaskRunEntry[]> {
   const rows = await qAll<PaTaskRunRow>(
-    `SELECT id, household_id, goal, capture_mode, status, iterations_used, result_summary, created_at, finished_at
+    `SELECT id, household_id, goal, origin, capture_mode, status, iterations_used, result_summary, created_at, finished_at
      FROM pa_task_run WHERE household_id = ? ORDER BY created_at DESC LIMIT 30`,
     householdId
   );
@@ -853,6 +859,7 @@ export async function listTaskRunHistory(householdId: string): Promise<PaTaskRun
     id: r.id,
     householdId: r.household_id,
     goal: r.goal,
+    origin: r.origin,
     captureMode: r.capture_mode,
     status: r.status,
     iterationsUsed: r.iterations_used,

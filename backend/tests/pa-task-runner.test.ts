@@ -72,6 +72,7 @@ function synthesisResult(summary = "Test synthesis summary.", actions: unknown[]
 async function getRun(householdId: string) {
   const row = await qGet<{
     status: string;
+    origin: string;
     iterations_used: number;
     hit_iteration_cap: boolean;
     prompt_tokens: number;
@@ -80,7 +81,7 @@ async function getRun(householdId: string) {
     findings_json: unknown;
     compressed_history_json: unknown;
   }>(
-    `SELECT status, iterations_used, hit_iteration_cap, prompt_tokens, completion_tokens, tavily_calls, findings_json, compressed_history_json
+    `SELECT status, origin, iterations_used, hit_iteration_cap, prompt_tokens, completion_tokens, tavily_calls, findings_json, compressed_history_json
      FROM pa_task_run WHERE household_id = ? ORDER BY created_at DESC LIMIT 1`,
     householdId
   );
@@ -140,6 +141,26 @@ describe("pa-task-runner (#164, #166)", () => {
       expect(result.data.summary).toBe("Nothing to research.");
     }
     expect(mockComplete).toHaveBeenCalledTimes(2); // 1 loop decision + 1 synthesis, no tool/compression calls
+  });
+
+  it("defaults to origin='user' when the caller omits it", async () => {
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));
+
+    await runPATask("trivial goal", HOUSEHOLD_ID);
+
+    const run = await getRun(HOUSEHOLD_ID);
+    expect(run?.origin).toBe("user");
+  });
+
+  it("persists a passed origin='scheduler' (#223 gift-research bridge)", async () => {
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));
+
+    await runPATask("trivial goal", HOUSEHOLD_ID, "scheduler");
+
+    const run = await getRun(HOUSEHOLD_ID);
+    expect(run?.origin).toBe("scheduler");
   });
 
   it("forces synthesis when the iteration cap is hit without a synthesize signal", async () => {

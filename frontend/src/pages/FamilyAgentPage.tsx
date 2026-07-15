@@ -77,6 +77,7 @@ type DigestEntry = {
 type TaskRunEntry = {
   id: string;
   goal: string;
+  origin: "user" | "scheduler";
   captureMode: "one_shot" | "research_loop" | null;
   status: string;
   iterationsUsed: number | null;
@@ -610,7 +611,7 @@ export function FamilyAgentPage() {
       key: `ask:${t.id}`,
       when: t.createdAt,
       source: "ask",
-      typeLabel: t.captureMode === "research_loop" ? "Research" : "One-shot",
+      typeLabel: t.origin === "scheduler" ? "Gift research" : t.captureMode === "research_loop" ? "Research" : "One-shot",
       status: t.status,
       countLabel: t.captureMode === "research_loop" ? String(t.iterationsUsed ?? 0) : "—",
       recipients: null,

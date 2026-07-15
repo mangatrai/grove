@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { qExec, qGet } from "../src/db/query.js";
 import * as dbQuery from "../src/db/query.js";
+import { env } from "../src/config/env.js";
 
 // FIX #211: mock the LLM adapter layer so Domain 1-5 functions can be unit-tested for
 // (a) correctness of the merged D1+2 split and (b) which model tier each call actually uses,
@@ -25,13 +26,16 @@ type RunToolLoopFn = (
   options: { model: string; maxTokens: number; maxIterations?: number }
 ) => Promise<{ finalResponse: string }>;
 
-const { mockComplete, mockTavilySearch, mockRunToolLoop, mockIsLlmConfigured } = vi.hoisted(() => ({
+const { mockComplete, mockTavilySearch, mockRunToolLoop, mockIsLlmConfigured, mockRunPATask } = vi.hoisted(() => ({
   mockComplete: vi.fn<CompleteFn>(),
   mockTavilySearch: vi.fn<TavilySearchFn>(),
   mockRunToolLoop: vi.fn<RunToolLoopFn>(),
   // Defaults to true so every existing test (which never touches this gate) is unaffected;
   // only the runFamilyAgent skip-path tests override it.
   mockIsLlmConfigured: vi.fn<() => boolean>(() => true),
+  // #223 Phase 2: detectOccasions statically imports pa-task-runner.js for the gift-research
+  // bridge — mock it wholesale (no other export from that module is used in this test file).
+  mockRunPATask: vi.fn(),
 }));
 
 vi.mock("../src/llm/index.js", async (importOriginal) => {
@@ -51,6 +55,8 @@ vi.mock("../src/llm/tools/tavily.js", async (importOriginal) => {
   return { ...actual, tavilySearch: mockTavilySearch };
 });
 
+vi.mock("../src/modules/family/pa-task-runner.js", () => ({ runPATask: mockRunPATask }));
+
 import {
   alertDedupKey,
   analyzeCoverageAndCoordination,
@@ -59,6 +65,8 @@ import {
   buildCaptureContextHeader,
   buildDayGrid,
   detectOccasions,
+  digestPlainText,
+  digestSubject,
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
@@ -70,6 +78,7 @@ import {
   startDateForFreshness,
   sweepDeadlines,
   synthesizeDigest,
+  wrapDigestHtml,
   type AgentAlert,
   type AgentAnalysis,
   type CalendarEvent,
@@ -417,6 +426,64 @@ describe("escapeHtml (FIX #217 digest HTML injection guard)", () => {
   });
 });
 
+describe("digestSubject (#231 code-composed subject line)", () => {
+  it("uses 'Today' scope for daily_delta runs", () => {
+    expect(digestSubject("Example", "daily_delta", "school form due")).toBe("Today in the Example household — school form due");
+  });
+
+  it("uses 'This week' scope for non-daily_delta runs", () => {
+    expect(digestSubject("Example", "manual", "school form due")).toBe("This week in the Example household — school form due");
+    expect(digestSubject("Example", "sunday_preview", "school form due")).toBe("This week in the Example household — school form due");
+    expect(digestSubject("Example", "monday_digest", "school form due")).toBe("This week in the Example household — school form due");
+  });
+
+  it("omits the dash suffix when the highlight is empty", () => {
+    expect(digestSubject("Example", "daily_delta", "")).toBe("Today in the Example household");
+  });
+});
+
+describe("wrapDigestHtml / digestPlainText (#231 digest email body)", () => {
+  const sections = [
+    { heading: "Coverage & Nanny", items: ["Nanny out Friday"] },
+    { heading: "Deadlines", items: ["<script>alert(1)</script> due Monday", "Camp payment due"] },
+  ];
+
+  it("renders one <h3> per non-empty section, in the given order", () => {
+    const html = wrapDigestHtml("Today in the Example household", sections, "parent@example.com", "Example");
+    const h3Matches = [...html.matchAll(/<h3[^>]*>([^<]*)<\/h3>/g)].map(m => m[1]);
+    expect(h3Matches).toEqual(["Coverage &amp; Nanny", "Deadlines"]);
+  });
+
+  it("omits <h3> for sections not present in the input", () => {
+    const html = wrapDigestHtml("Subject", [{ heading: "Deadlines", items: ["item"] }], "parent@example.com", "Example");
+    expect(html).not.toContain(">Coverage & Nanny<");
+    expect(html).not.toContain(">Occasions<");
+    expect(html).not.toContain(">Research finds<");
+  });
+
+  it("HTML-escapes item text (FIX #217 XSS regression, extended to the new section format)", () => {
+    const html = wrapDigestHtml("Subject", sections, "parent@example.com", "Example");
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+
+  it("includes the household name in the masthead and the parent email in the footer", () => {
+    const html = wrapDigestHtml("Subject", sections, "parent@example.com", "Example");
+    expect(html).toContain("Example household");
+    expect(html).toContain("parent@example.com");
+  });
+
+  it("digestPlainText renders 'heading:\\n- item' blocks separated by a blank line", () => {
+    expect(digestPlainText(sections)).toBe(
+      "Coverage & Nanny:\n- Nanny out Friday\n\nDeadlines:\n- <script>alert(1)</script> due Monday\n- Camp payment due"
+    );
+  });
+
+  it("digestPlainText returns an empty string for no sections", () => {
+    expect(digestPlainText([])).toBe("");
+  });
+});
+
 describe("getConnectedParents ordering (FIX #217 deterministic Parent A/B)", () => {
   const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
   const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
@@ -576,8 +643,8 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
     mockComplete.mockResolvedValueOnce({
       content: JSON.stringify({
         summaryText: "summary",
-        parentADigest: { subject: "s", body: "b" },
-        parentBDigest: { subject: "s2", body: "b2" },
+        parentADigest: { subjectHighlight: "highlight A", sections: [{ heading: "Deadlines", items: ["item"] }] },
+        parentBDigest: { subjectHighlight: "", sections: [] },
       }),
       usage: {},
     });
@@ -593,11 +660,14 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
       { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
     ];
 
-    const result: AgentAnalysis = await synthesizeDigest(childCtx(), emptyDomain, "manual", parents, "no finance context");
+    const result: AgentAnalysis = await synthesizeDigest(childCtx(), emptyDomain, "manual", parents, "no finance context", "Test");
 
     expect(mockComplete).toHaveBeenCalledTimes(1);
     expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
     expect(result.hasOutput).toBe(true);
+    // #231: subject is composed in code via digestSubject, not passed through from the LLM.
+    expect(result.parentADigest?.subject).toBe("This week in the Test household — highlight A");
+    expect(result.parentBDigest?.subject).toBe("This week in the Test household");
   });
 });
 
@@ -951,8 +1021,8 @@ describe("FIX #208 — alert feedback loop (disposition capture + calibration)",
     mockComplete.mockResolvedValueOnce({
       content: JSON.stringify({
         summaryText: "summary",
-        parentADigest: { subject: "s", body: "b" },
-        parentBDigest: { subject: "s2", body: "b2" },
+        parentADigest: { subjectHighlight: "highlight A", sections: [{ heading: "Deadlines", items: ["item"] }] },
+        parentBDigest: { subjectHighlight: "", sections: [] },
       }),
       usage: {},
     });
@@ -969,7 +1039,7 @@ describe("FIX #208 — alert feedback loop (disposition capture + calibration)",
     ];
     const ctx = baseCtx({ calibrationBlock: "Deprioritize/avoid: restaurant (3x not relevant)." });
 
-    await synthesizeDigest(ctx, emptyDomain, "manual", parents, "no finance context");
+    await synthesizeDigest(ctx, emptyDomain, "manual", parents, "no finance context", "Test");
 
     const [messages] = mockComplete.mock.calls[0];
     const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user")!;
@@ -1193,5 +1263,103 @@ describe("detectOccasions (#223 occasion nudge tiers)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  describe("gift-research bridge (#223 Phase 2)", () => {
+    beforeEach(() => {
+      mockRunPATask.mockReset();
+      mockRunPATask.mockResolvedValue({ ok: true, data: { runId: "mock-run-id", iterationsUsed: 1 } });
+    });
+
+    afterAll(() => {
+      env.PA_OCCASION_RESEARCH_ENABLED = false;
+    });
+
+    it("does not call runPATask when the flag is off (default)", async () => {
+      env.PA_OCCASION_RESEARCH_ENABLED = false;
+
+      await detectOccasions(dbCtx(), "manual");
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(mockRunPATask).not.toHaveBeenCalled();
+    });
+
+    it("fires runPATask with origin='scheduler' for a new GIFT-IDEAS (21-day) alert when the flag is on", async () => {
+      env.PA_OCCASION_RESEARCH_ENABLED = true;
+
+      const result = await detectOccasions(dbCtx(), "manual");
+      expect(result.alerts.some(a => a.reason.startsWith("[GIFT-IDEAS]") && a.reason.includes("Tier21Kid"))).toBe(true);
+      await new Promise(r => setTimeout(r, 50));
+
+      const call = mockRunPATask.mock.calls.find((c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("Tier21Kid"));
+      expect(call).toBeTruthy();
+      expect(call?.[1]).toBe(OCCASION_HOUSEHOLD_ID);
+      expect(call?.[2]).toBe("scheduler");
+    });
+
+    it("does not fire for a LAST-CALL (5-day) or SEND-WISHES (3-day) alert, only GIFT-IDEAS", async () => {
+      env.PA_OCCASION_RESEARCH_ENABLED = true;
+
+      // Suppress both GIFT-IDEAS candidates as already-open so only the LAST-CALL tier (which
+      // Tier5Kid also crosses in this fixture, per the tiering test above) is genuinely new.
+      const alreadyOpen = (reason: string, affectedDate: string): AgentAlert => ({
+        id: `existing-${reason}`,
+        householdId: OCCASION_HOUSEHOLD_ID,
+        detectedAt: "2026-06-15T00:00:00.000Z",
+        alertType: "suggestion",
+        reason,
+        affectedDate,
+        copyPasteText: reason,
+        recipientHint: "Both",
+        isResolved: false,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        resolutionKind: null,
+        sourceDigestId: null,
+        actionType: null,
+        actionPayload: null,
+      } as AgentAlert);
+      const openAlerts: AgentAlert[] = [
+        alreadyOpen("[GIFT-IDEAS] Tier21Kid's birthday is on 2026-07-06.", "2026-07-06"),
+        alreadyOpen("[GIFT-IDEAS] Tier5Kid's birthday is on 2026-06-20.", "2026-06-20"),
+      ];
+
+      const result = await detectOccasions(dbCtx({ openAlerts }), "manual");
+      expect(result.alerts.some(a => a.reason.startsWith("[LAST-CALL]"))).toBe(true);
+      expect(result.alerts.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(false);
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(mockRunPATask).not.toHaveBeenCalled();
+    });
+
+    it("does not re-fire for a GIFT-IDEAS alert that's already open (anti-spam dedup applies to the bridge too)", async () => {
+      env.PA_OCCASION_RESEARCH_ENABLED = true;
+      const alreadyOpenReason = "[GIFT-IDEAS] Tier21Kid's birthday is on 2026-07-06.";
+      const openAlerts: AgentAlert[] = [
+        {
+          id: "existing-1",
+          householdId: OCCASION_HOUSEHOLD_ID,
+          detectedAt: "2026-06-15T00:00:00.000Z",
+          alertType: "suggestion",
+          reason: alreadyOpenReason,
+          affectedDate: "2026-07-06",
+          copyPasteText: alreadyOpenReason,
+          recipientHint: "Both",
+          isResolved: false,
+          resolvedAt: null,
+          resolvedByUserId: null,
+          resolutionKind: null,
+          sourceDigestId: null,
+          actionType: null,
+          actionPayload: null,
+        } as AgentAlert,
+      ];
+
+      await detectOccasions(dbCtx({ openAlerts }), "manual");
+      await new Promise(r => setTimeout(r, 50));
+
+      const tier21Calls = mockRunPATask.mock.calls.filter((c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("Tier21Kid"));
+      expect(tier21Calls).toHaveLength(0);
+    });
   });
 });

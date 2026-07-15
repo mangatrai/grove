@@ -858,6 +858,8 @@ Nudges arrive in tiers, tagged in the alert text:
 
 Each nudge only fires once per tier — you won't get a repeat reminder every day of the lead-time window. Resolve them with the same Resolve dropdown as any other alert. Turn the whole feature off in Settings → Family → **Occasion Nudges**.
 
+If your admin has turned on background gift research, a fresh `[GIFT-IDEAS]` nudge also kicks off a short research task automatically — no need to type `research: find a gift for...` yourself. Its result shows up in the Run history table below (Type: **Gift research**) once it finishes, same as a manually-asked research question. This is off by default; ask your admin if you're not seeing it.
+
 ### Quick Capture
 
 The Family page's **Quick capture** box turns a freeform note into a reminder, drafted message, calendar event, or saved fact — type it and click **Ask**. Behind the scenes the agent decides how to handle it:
@@ -870,6 +872,8 @@ If a quick ask should have triggered research (or vice versa), start your note w
 Any result — quick ask or research — has a **Save as preference** button. It classifies the result text for you (category and topic, both editable) and opens a save dialog so you can turn it into a standing fact in Settings › Family › **PA Preferences** without retyping it.
 
 The Family page's **Run history** table shows the last 30 agent runs, newest first — both Quick Capture asks (Source: **Quick capture**) and the scheduled daily digest (Source: **Digest**) in one combined timeline. Click a row to expand its full summary; use the refresh icon to pull in a run submitted moments ago.
+
+The digest email itself (sent to both parents on the schedule set in Settings → Family) is organized into a handful of named sections — **Coverage & Nanny**, **Deadlines**, **Occasions**, **Research finds** — each shown only when it has something to report, rather than one flat list of bullets. The subject line follows a fixed pattern ("Today/This week in the &lt;household&gt; household — &lt;highlight&gt;") so digest emails are easy to scan and search in your inbox.
 
 ## Year-in-Review
 

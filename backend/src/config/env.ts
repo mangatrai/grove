@@ -159,6 +159,12 @@ const envSchema = z.object({
    */
   PA_TASK_MAX_RUNS_PER_DAY: optionalIntEnv(20, 1, 10000),
   /**
+   * #223 Phase 2: auto-enqueue a gift-research PA task when a GIFT-IDEAS (21-day) occasion
+   * nudge fires. Off by default — opt-in, since it silently spends PA budget on the household's
+   * behalf without a direct ask.
+   */
+  PA_OCCASION_RESEARCH_ENABLED: optionalBoolEnv(false),
+  /**
    * OpenAI embedding model for pgvector RAG (protest document store).
    * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
    * Defaults to text-embedding-3-small (1536 dims).

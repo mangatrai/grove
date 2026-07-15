@@ -4402,6 +4402,7 @@ Last 30 Quick Capture asks for the caller's household — both `one_shot` (synch
       "householdId": "uuid",
       "goal": "draft an absence note for Emma's field trip",
       "captureMode": "one_shot" | "research_loop" | null,
+      "origin": "user" | "scheduler",
       "status": "running" | "succeeded" | "failed" | "refused_budget",
       "iterationsUsed": 4,
       "resultSummary": "string | null",
@@ -4411,4 +4412,4 @@ Last 30 Quick Capture asks for the caller's household — both `one_shot` (synch
   ]
 }
 ```
-`captureMode` is nullable in the type for schema-evolution safety, but every row is populated in practice — migration `0087` backfilled all pre-existing rows to `research_loop`. `iterationsUsed` is always `null` for `one_shot` rows (no loop iterations to count). `resultSummary` is `null` for a failed run.
+`captureMode` is nullable in the type for schema-evolution safety, but every row is populated in practice — migration `0087` backfilled all pre-existing rows to `research_loop`. `iterationsUsed` is always `null` for `one_shot` rows (no loop iterations to count). `resultSummary` is `null` for a failed run. `origin` (#223) is `"scheduler"` for rows auto-enqueued by the GIFT-IDEAS occasion nudge bridge, `"user"` for every directly-triggered ask; the frontend labels `scheduler` rows "Gift research" in the Type column instead of "Research"/"One-shot".

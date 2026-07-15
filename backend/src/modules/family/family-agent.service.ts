@@ -18,6 +18,10 @@ import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, 
 import { listAvailability, listHouseholdMembers, listPreferences } from "./family-profiles.service.js";
 import { getOccasionSettings } from "./family-occasion-settings.service.js";
 import { decryptDob } from "../household/dob-crypto.js";
+// Circular with pa-task-runner.ts (which imports getConnectedParents/fetchCalendarEvents/
+// buildCaptureContextHeader from this file) is safe: both sides only touch the other's
+// exports inside function bodies, never at module-evaluation time.
+import { runPATask } from "./pa-task-runner.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,10 +81,14 @@ export function parseAlertItems(items: unknown): AlertItem[] {
 
 export type AlertItem = z.infer<typeof alertItemSchema>;
 
+// #231: subject is composed in code (digestSubject), not by the LLM — the LLM only supplies
+// the highlight phrase and the structured per-domain sections.
+export type DigestPayload = { subject: string; sections: { heading: string; items: string[] }[] };
+
 export type AgentAnalysis = {
   conflicts: AlertItem[];
-  parentADigest: { subject: string; body: string } | null;
-  parentBDigest: { subject: string; body: string } | null;
+  parentADigest: DigestPayload | null;
+  parentBDigest: DigestPayload | null;
   summaryText: string;
   hasOutput: boolean;
 };
@@ -589,6 +597,12 @@ async function getHouseholdLocation(householdId: string): Promise<string> {
   );
   if (!row?.city && !row?.state) return "";
   return [row.city, row.state].filter(Boolean).join(", ");
+}
+
+/** #231: household display name for the digest subject line and email masthead. */
+async function getHouseholdName(householdId: string): Promise<string> {
+  const row = await qGet<{ name: string | null }>(`SELECT name FROM household WHERE id = ?`, householdId);
+  return row?.name ?? "Household";
 }
 
 function getSeason(month: number): string {
@@ -1228,6 +1242,18 @@ export async function detectOccasions(ctx: FamilyContext, _runType: AgentRunType
     const openKeys = new Set(ctx.openAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
     const alerts = candidates.filter(c => !openKeys.has(alertDedupKey(c.alertType, c.affectedDate, c.reason)));
 
+    // #223 Phase 2: bridge from the 21-day GIFT-IDEAS nudge into a background gift-research PA
+    // task. Only genuinely new alerts (survived the openKeys filter above) fire, so this can
+    // never re-trigger daily for the same still-open occasion. Opt-in — off by default.
+    const giftIdeasTag = `[${OCCASION_TIER_TAGS[21]}]`;
+    if (env.PA_OCCASION_RESEARCH_ENABLED) {
+      for (const alert of alerts) {
+        if (alert.reason.startsWith(giftIdeasTag) && alert.affectedDate) {
+          void triggerGiftResearch(ctx.householdId, alert.reason, alert.affectedDate);
+        }
+      }
+    }
+
     return { hasOutput: alerts.length > 0, alerts };
   } catch (err) {
     // No LLM call here (unlike D1-D5) so failure means a DB problem (decryptDob already fails
@@ -1239,16 +1265,43 @@ export async function detectOccasions(ctx: FamilyContext, _runType: AgentRunType
   }
 }
 
+/**
+ * #223 Phase 2: fire-and-forget bridge from a GIFT-IDEAS occasion nudge into a background
+ * gift-research PA task. Not awaited by the caller — runPATask's BabyAGI loop can take many LLM
+ * round-trips, and awaiting it here would stall detectOccasions inside runFamilyAgent's
+ * Promise.all fan-out, delaying digest email delivery for unrelated domains.
+ */
+async function triggerGiftResearch(householdId: string, occasionReason: string, occasionIso: string): Promise<void> {
+  try {
+    const context = occasionReason.replace(/^\[GIFT-IDEAS\]\s*/, "");
+    const goal = `Research gift ideas. ${context} Suggest 3-5 specific, budget-conscious gift ideas with rough price ranges.`;
+    const result = await runPATask(goal, householdId, "scheduler");
+    if (!result.ok) {
+      log.info("family-agent: occasion gift-research bridge skipped", { householdId, occasionIso, code: result.code });
+    }
+  } catch (err) {
+    log.warn("family-agent: occasion gift-research bridge failed", { householdId, occasionIso, err: String(err) });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Domain 5 — Synthesis (per-parent digest)
 // ---------------------------------------------------------------------------
+
+/** #231: subject line composed in code, not by the LLM — a predictable convention across runs. */
+export function digestSubject(householdName: string, runType: AgentRunType, highlight: string): string {
+  const scope = runType === "daily_delta" ? "Today" : "This week";
+  const base = `${scope} in the ${householdName} household`;
+  return highlight ? `${base} — ${highlight}` : base;
+}
 
 export async function synthesizeDigest(
   ctx: FamilyContext,
   domain: PipelineOutputs,
   runType: AgentRunType,
   parents: ConnectedParent[],
-  financeContext: string
+  financeContext: string,
+  householdName: string
 ): Promise<AgentAnalysis> {
   // Research items stored as suggestion alerts so they appear in the UI, not just in email
   const researchSuggestions: AlertItem[] = domain.research.items.map(item => ({
@@ -1301,9 +1354,13 @@ Write digest emails per parent. Parent A = primary household manager (FIX #217: 
 Respond with ONLY valid JSON:
 {
   "summaryText": "3-5 sentence summary covering ALL domains in order: (1) childcare/scheduling status this week, (2) nanny coordination needs if any, (3) deadline alerts if any, (4) proactive research findings if any. If a domain has nothing to report, say so in one clause (e.g. 'No coverage issues this week.'). Be specific — name actual events, dates, or findings where available.",
-  "parentADigest": { "subject": "...", "body": "..." },
-  "parentBDigest": { "subject": "...", "body": "..." }
-}` },
+  "parentADigest": {
+    "subjectHighlight": "3-6 word phrase naming the single most important item this parent should notice, or \"\" if nothing stands out",
+    "sections": [ { "heading": "Coverage & Nanny", "items": ["short bullet string", "..."] } ]
+  },
+  "parentBDigest": { "subjectHighlight": "...", "sections": [ ... ] }
+}
+For "sections", use ONLY these headings, in this order, and only include a heading if that parent has content for it: "Coverage & Nanny" (childcare/scheduling + nanny coordination combined), "Deadlines", "Occasions", "Research finds". Do not invent other headings. Each item is one short bullet string — mobile-readable, specific, no filler.` },
     ],
     // FIX #211: formatting/summarization of already-vetted upstream content — cheap model tier.
     { model: chatModel(), maxTokens: 3500 }
@@ -1312,14 +1369,20 @@ Respond with ONLY valid JSON:
   try {
     const parsed = parseJsonResponse<{
       summaryText: string;
-      parentADigest: { subject: string; body: string };
-      parentBDigest: { subject: string; body: string };
+      parentADigest: { subjectHighlight: string; sections: { heading: string; items: string[] }[] };
+      parentBDigest: { subjectHighlight: string; sections: { heading: string; items: string[] }[] };
     }>(content);
 
     return {
       conflicts: allAlerts,
-      parentADigest: parsed.parentADigest,
-      parentBDigest: parsed.parentBDigest,
+      parentADigest: {
+        subject: digestSubject(householdName, runType, parsed.parentADigest.subjectHighlight),
+        sections: parsed.parentADigest.sections,
+      },
+      parentBDigest: {
+        subject: digestSubject(householdName, runType, parsed.parentBDigest.subjectHighlight),
+        sections: parsed.parentBDigest.sections,
+      },
       summaryText: parsed.summaryText,
       hasOutput: true,
     };
@@ -1345,17 +1408,38 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function wrapDigestHtml(subject: string, body: string, parentEmail: string): string {
-  const lines = body
-    .split("\n")
-    .map(l => l.startsWith("- ") ? `<li>${escapeHtml(l.slice(2))}</li>` : `<p>${escapeHtml(l)}</p>`)
-    .join("\n");
-  return `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:16px">
-<h2 style="color:#2d6a4f">${escapeHtml(subject)}</h2>
-${lines}
-<hr style="margin-top:32px;border:none;border-top:1px solid #eee"/>
-<p style="font-size:11px;color:#999">Sent by Grove household assistant to ${escapeHtml(parentEmail)}</p>
+// #231: table-based layout with inline styles only — Gmail strips <head>/<style>, so a <style>
+// block silently does nothing in the client most parents actually read this in.
+export function wrapDigestHtml(subject: string, sections: { heading: string; items: string[] }[], parentEmail: string, householdName: string): string {
+  const sectionsHtml = sections.map(s => `
+<h3 style="margin:24px 0 8px;font-family:sans-serif;font-size:16px;color:#2D6A4F">${escapeHtml(s.heading)}</h3>
+<ul style="margin:0;padding-left:20px;font-family:sans-serif;font-size:14px;line-height:1.5;color:#333333">
+${s.items.map(i => `<li style="margin-bottom:6px">${escapeHtml(i)}</li>`).join("\n")}
+</ul>`).join("\n");
+
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:24px 0">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden">
+<tr><td style="background:#2D6A4F;padding:18px 24px">
+<span style="font-family:sans-serif;color:#ffffff;font-size:12px;letter-spacing:0.5px;text-transform:uppercase">${escapeHtml(householdName)} household</span>
+</td></tr>
+<tr><td style="background:#C8860A;height:4px;line-height:4px;font-size:0">&nbsp;</td></tr>
+<tr><td style="padding:24px">
+<h2 style="margin:0 0 16px;font-family:sans-serif;color:#153828;font-size:20px">${escapeHtml(subject)}</h2>
+${sectionsHtml}
+<hr style="margin-top:32px;border:none;border-top:1px solid #eeeeee"/>
+<p style="font-family:sans-serif;font-size:11px;color:#999999;margin:12px 0 0">Sent by Grove household assistant to ${escapeHtml(parentEmail)}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
 </body></html>`;
+}
+
+/** #231: plain-text fallback for the digest email, built from the same structured sections. */
+export function digestPlainText(sections: { heading: string; items: string[] }[]): string {
+  return sections.map(s => `${s.heading}:\n${s.items.map(i => `- ${i}`).join("\n")}`).join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1399,12 +1483,13 @@ export async function runFamilyAgent(
     // full week regardless of what's in openAlerts.
     const openAlerts = await listAlerts(householdId, false);
 
-    const [members, caregiverSlots, financeContext, location, calibrationBlock] = await Promise.all([
+    const [members, caregiverSlots, financeContext, location, calibrationBlock, householdName] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
       buildFinanceContext(householdId),
       getHouseholdLocation(householdId),
       buildCalibrationBlock(householdId),
+      getHouseholdName(householdId),
     ]);
 
     const now = new Date();
@@ -1427,7 +1512,8 @@ export async function runFamilyAgent(
       { coverageGaps, nannyCoord, research, deadlines, occasions },
       runType,
       parents,
-      financeContext
+      financeContext,
+      householdName
     );
 
     // Daily delta: skip if no domain produced actionable output
@@ -1456,7 +1542,7 @@ export async function runFamilyAgent(
     // Send digest emails
     let emailsSent = 0;
     const recipientEmails: string[] = [];
-    const digests: Array<{ parent: ConnectedParent; digest: { subject: string; body: string } }> = [];
+    const digests: Array<{ parent: ConnectedParent; digest: DigestPayload }> = [];
 
     if (analysis.parentADigest && parentEvents[0]) {
       digests.push({ parent: parents[0], digest: analysis.parentADigest });
@@ -1469,8 +1555,8 @@ export async function runFamilyAgent(
       const result = await sendMail({
         to: parent.email,
         subject: digest.subject,
-        text: digest.body,
-        html: wrapDigestHtml(digest.subject, digest.body, parent.email),
+        text: digestPlainText(digest.sections),
+        html: wrapDigestHtml(digest.subject, digest.sections, parent.email, householdName),
       });
       if (result.ok) {
         emailsSent++;

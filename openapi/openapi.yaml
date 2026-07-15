@@ -5055,6 +5055,7 @@ paths:
                         householdId: { type: string, format: uuid }
                         goal: { type: string }
                         captureMode: { type: string, enum: [one_shot, research_loop], nullable: true }
+                        origin: { type: string, enum: [user, scheduler] }
                         status: { type: string, enum: [running, succeeded, failed, refused_budget] }
                         iterationsUsed: { type: integer, nullable: true }
                         resultSummary: { type: string, nullable: true }
