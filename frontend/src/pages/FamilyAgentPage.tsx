@@ -851,7 +851,7 @@ export function FamilyAgentPage() {
                   Researched · {captureResult.result.iterationsUsed} step{captureResult.result.iterationsUsed === 1 ? "" : "s"}
                 </Badge>
               ) : null}
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
                 {captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary}
               </Text>
               <Button

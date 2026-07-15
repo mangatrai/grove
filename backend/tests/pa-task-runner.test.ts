@@ -162,6 +162,23 @@ describe("pa-task-runner (#164, #166)", () => {
     expect(systemPrompt).toContain("never close with a generic");
   });
 
+  // #242: research-loop answers rendered as one unbroken paragraph even when the ledger had
+  // 2-3 distinct options — unreadable "wall of text". Asserts the prompt now requires a
+  // lead-in sentence followed by newline-separated "- " bullets so the shape stays structured.
+  it("synthesis system prompt requires a lead-in plus newline-separated bullets, not one paragraph (#242)", async () => {
+    mockComplete.mockResolvedValueOnce(loopSynthesize());
+    mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));
+
+    await runPATask("trivial goal", HOUSEHOLD_ID);
+
+    const synthesisCall = mockComplete.mock.calls[1];
+    const messages = synthesisCall[0] as { role: string; content: string }[];
+    const systemPrompt = messages.find(m => m.role === "system")?.content ?? "";
+
+    expect(systemPrompt).toContain("not one flowing paragraph");
+    expect(systemPrompt).toContain("line prefixed \"- \"");
+  });
+
   it("defaults to origin='user' when the caller omits it", async () => {
     mockComplete.mockResolvedValueOnce(loopSynthesize());
     mockComplete.mockResolvedValueOnce(synthesisResult("Nothing to research."));

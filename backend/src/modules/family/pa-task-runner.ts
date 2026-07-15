@@ -583,9 +583,19 @@ Rules:
 - Propose 0-3 concrete follow-up actions (create_event, set_reminder, draft_message, note) only when
   clearly useful; do not invent actions the user didn't imply.
 
+Format the summary as structured text, not one flowing paragraph — a wall of text is hard to
+scan. Write a single one-sentence lead-in, then put each specific option or finding on its own
+line prefixed "- ", ending with its source/date citation. Separate the lead-in and each bullet
+with a newline character. Example shape (content illustrative only):
+"Found 3 nonstop options for the dates you asked about.
+- Delta DL123, $412 — observed 2026-07-08, verify at <link>
+- United UA456, $389 — observed 2026-07-08, verify at <link>
+- Booking 3 weeks out is typically $60-80 cheaper than booking this week, per historical pattern in the ledger"
+If findings are too thin to name specifics, the lead-in sentence alone (no bullets) is fine.
+
 Return JSON only:
 {
-  "summary": "2-5 sentence answer to the goal, citing sources/dates per the rules above",
+  "summary": "lead-in sentence, then newline-separated \"- \" bullets per the formatting rule above, citing sources/dates per the rules above",
   "actions": [ { "type": "create_event"|"set_reminder"|"draft_message"|"note", "title": "...", "summary": "...", "details": {} } ]
 }`;
 

@@ -14,6 +14,32 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #242: structure research-loop answers instead of one paragraph (2026-07-15)
+
+**What changed:** Manual QA reported research-loop answers (e.g. flight price lookups) rendering
+as one unreadable "wall of text" even when the findings ledger held 2-3 distinct, citable
+options. `SYNTHESIS_SYSTEM` in `pa-task-runner.ts` asked for a "2-5 sentence answer" with no
+structural guidance, so the model's easiest-compliance path was a single flowing paragraph.
+Rewrote the guidance to require a one-sentence lead-in followed by newline-separated `"- "`
+bullets, one per named option/finding, each still carrying its source/date citation per the
+existing #232 sourcing rules. Frontend (`FamilyAgentPage.tsx`) Quick Capture answer `<Text>`
+gained `whiteSpace: "pre-wrap"` (matching the pattern already used for Run History's expanded
+row) so the newline/bullet structure actually renders instead of collapsing.
+
+**Why:** Same-shaped ledger data already exists (#232 requires naming 2-3 specific options) —
+the summary just wasn't being asked to preserve that structure visually.
+
+**Verification:** `npm run test -w backend` (813/813) — new prompt-content assertion in
+`pa-task-runner.test.ts` checking for the bullet-formatting instruction; `npm run build -w frontend`
+clean.
+
+**Files:** `backend/src/modules/family/pa-task-runner.ts`, `backend/tests/pa-task-runner.test.ts`,
+`frontend/src/pages/FamilyAgentPage.tsx`.
+
+**GitHub:** closes [#242](https://github.com/mangatrai/grove/issues/242).
+
+---
+
 ## FIX — #241: don't tag non-gift-giving holidays with GIFT-IDEAS (2026-07-15)
 
 **What changed:** Manual QA found the Family Agent firing a `[GIFT-IDEAS]` alert (and the #223
