@@ -619,7 +619,10 @@ export function FamilyAgentPage() {
       status: t.status,
       countLabel: t.captureMode === "research_loop" ? String(t.iterationsUsed ?? 0) : "—",
       recipients: null,
-      summary: t.resultSummary ?? t.goal,
+      // #246: summary is the real answer only (nullable) — never fall back to the goal here, or
+      // a pending/failed run with no result would render its own question as if it were the
+      // answer. The goal is still shown for context via `goal` below.
+      summary: t.resultSummary,
       goal: t.goal,
     }));
     return [...digestRows, ...askRows]
@@ -975,10 +978,15 @@ export function FamilyAgentPage() {
               <Table.Tbody>
                 {runHistoryRows.map(row => {
                   const isExpanded = expandedRunKey === row.key;
-                  const summaryFull = row.summary;
+                  // #246: hasResult gates expand/click affordance and the expanded answer panel —
+                  // only a real result_summary counts. previewText is display-only, for the
+                  // collapsed row when no result exists yet (e.g. still running), so the row
+                  // isn't blank while it's in flight.
+                  const hasResult = Boolean(row.summary);
+                  const previewText = row.summary ?? row.goal ?? null;
                   return (
                     <Fragment key={row.key}>
-                      <Table.Tr style={{ cursor: summaryFull ? "pointer" : "default" }} onClick={() => summaryFull && setExpandedRunKey(isExpanded ? null : row.key)}>
+                      <Table.Tr style={{ cursor: hasResult ? "pointer" : "default" }} onClick={() => hasResult && setExpandedRunKey(isExpanded ? null : row.key)}>
                         <Table.Td>
                           <Text size="xs">
                             {new Date(row.when).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
@@ -1012,9 +1020,9 @@ export function FamilyAgentPage() {
                         <Table.Td>
                           <Group gap={4} wrap="nowrap">
                             <Text size="xs" c="dimmed" lineClamp={isExpanded ? undefined : 1} style={{ flex: 1 }}>
-                              {summaryFull ?? "—"}
+                              {previewText ?? "—"}
                             </Text>
-                            {summaryFull && summaryFull.length > 60 ? (
+                            {hasResult && previewText && previewText.length > 60 ? (
                               <ActionIcon size="xs" variant="subtle" color="gray" aria-label={isExpanded ? "Collapse" : "Expand"}>
                                 {isExpanded ? <IconCheck size={12} /> : <IconChevronDown size={12} />}
                               </ActionIcon>
@@ -1022,14 +1030,14 @@ export function FamilyAgentPage() {
                           </Group>
                         </Table.Td>
                       </Table.Tr>
-                      {isExpanded && summaryFull ? (
+                      {isExpanded && hasResult ? (
                         <Table.Tr>
                           <Table.Td colSpan={7}>
                             <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
                               {row.goal ? (
                                 <Text size="xs" fw={600} c="var(--mantine-color-gray-3)" mb={4}>Asked: {row.goal}</Text>
                               ) : null}
-                              <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
+                              <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{row.summary}</Text>
                             </Paper>
                           </Table.Td>
                         </Table.Tr>

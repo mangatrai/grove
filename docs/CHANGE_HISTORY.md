@@ -44,6 +44,32 @@ restart, and logged `pa-task-runner: reconciled orphaned running task(s) on star
 
 ---
 
+## FIX — #246: Run History no longer shows the question as its own answer (2026-07-15)
+
+**What changed:** Manual QA found a Run History row still in `running` status (no result yet)
+expanding to show "Asked: `<question>`" (from #243) immediately followed by the *same question
+text again*, as if it were the answer. Root cause: `askRows` mapped `summary: t.resultSummary ??
+t.goal`, and that same value fed both the collapsed-row preview text and the expanded panel's
+answer body — so a pending/failed run with no real result rendered its own goal twice. Decoupled
+the two uses in `FamilyAgentPage.tsx`: `row.summary` is now strictly `t.resultSummary` (nullable,
+real answer only); a separate `hasResult` flag gates the expand affordance and the expanded
+answer panel, while the collapsed-row cell still falls back to `row.goal` for context on rows
+with no result yet (without ever feeding that into the "answer" position).
+
+**Why:** Discovered during the same manual QA pass that hit #245 — the two run rows created by
+the stuck task made the pre-existing goal-fallback bug visible for the first time.
+
+**Verification:** Manual (dev server, Podman-hosted Postgres, Playwright script): confirmed a
+`running` row with no result renders non-expandable with the goal as muted preview text only;
+confirmed a `succeeded` row expands to show "Asked: `<goal>`" followed by a distinct real answer,
+never duplicated. `npx tsc --noEmit` and `npm run build -w frontend` clean.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`.
+
+**GitHub:** closes [#246](https://github.com/mangatrai/grove/issues/246).
+
+---
+
 ## FIX — #242: structure research-loop answers instead of one paragraph (2026-07-15)
 
 **What changed:** Manual QA reported research-loop answers (e.g. flight price lookups) rendering
