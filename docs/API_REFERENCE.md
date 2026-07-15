@@ -4180,16 +4180,16 @@ Scans every household member's `notes` field and asks the LLM (`chatModel()` tie
 
 ### `POST /api/family/pa-preferences/classify`
 
-Classifies a single ad-hoc string into `{ category, topicTag }` (`chatModel()` tier, forced JSON schema). Used by the Family Agent page's "Save as preference" button so the caller starts from a suggested category/tag instead of picking from scratch — the result is not persisted by this endpoint. Requires `owner | admin`.
+Classifies a single ad-hoc string into `{ category, topicTag, factText }` (`chatModel()` tier, forced JSON schema). Used by the Family Agent page's "Save as preference" button so the caller starts from a suggested category/tag/text instead of picking from scratch or saving the raw input verbatim — `factText` is the LLM's synthesized short standalone sentence (≤~140 chars), not a copy of the input. The result is not persisted by this endpoint. Requires `owner | admin`.
 
 **Body**
 ```json
-{ "factText": "Kids loved the LEGO set last Christmas" }
+{ "factText": "Kids loved the LEGO set last Christmas, especially the new Star Wars one — would be great to build on that for birthdays." }
 ```
 
 **Response `200`**
 ```json
-{ "category": "discovered_fact", "topicTag": "gifts" }
+{ "category": "discovered_fact", "topicTag": "gifts", "factText": "Loved the LEGO Star Wars set." }
 ```
 **Error `400`** — `factText` empty or missing.
 

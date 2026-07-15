@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #240: synthesize fact_text instead of storing raw text on PA preferences (2026-07-15)
+
+**What changed:** Manual QA on the Family Agent's PA Preferences screen found that both "Suggest from notes" (`suggestPreferencesFromNotes`) and the "Save as preference" button (`classifyPreferenceText`, used when saving a research-loop response as a fact) stored the entire source text verbatim as `factText` — a run-on note sentence or an entire multi-paragraph agent response, instead of a short synthesized fact. Fixed both: `SUGGEST_SYSTEM`'s JSON-schema field description and prompt body now explicitly require `factText` to be a short, standalone sentence (~140 chars) rather than a copy-paste of the note. `classifyPreferenceText` (and its JSON Schema/Zod schema/route response shape) now also returns a synthesized `factText` alongside `category`/`topicTag` in the same LLM call, and the "Save as preference" modal on the frontend now pre-fills with that synthesized text once the classify call resolves (still a hand-editable `Textarea`, so the manual-edit safety valve is unchanged — only the default improved).
+
+**Why:** Raw-text facts defeat the point of a curated preference memory: they bloat the context/token size fed into every PA agent run as facts accumulate, and they're not the kind of concise, scannable fact a household member would want to browse. Synthesizing at write time (once, cheaply, in the same LLM call already being made) is cheaper than re-synthesizing on every read.
+
+**Verification:** `npm run test -w backend` full suite passing (extended `classifyPreferenceText` tests in `family-pa-preferences.test.ts` asserting the synthesized `factText` is returned, is shorter than a long verbatim input, and that the system prompt requires "short standalone sentence"/"~140" chars; fail-closed test updated to assert the original text is used as `factText` on schema-validation failure).
+
+**Files:** `backend/src/modules/family/family-profiles.service.ts`, `backend/src/modules/family/family-profiles.routes.ts` (response shape only, no route logic change), `frontend/src/pages/FamilyAgentPage.tsx`, `backend/tests/family-pa-preferences.test.ts`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`.
+
+**GitHub:** closes [#240](https://github.com/mangatrai/grove/issues/240).
+
+---
+
 ## FIX — #232: sharpen research-loop synthesis for price/availability queries (2026-07-15)
 
 **What changed:** `pa-task-runner.ts`'s `SYNTHESIS_SYSTEM` prompt had a rule forbidding live-fare claims and requiring source/date citation on every price claim, but nothing steering the LLM toward a *useful* answer shape. A live flight-price research run (DFW→Delhi) produced a technically-compliant but low-value response: one wide, unattributed price range spanning unrelated options, closed with a generic "go check Google Flights yourself." Replaced the volatile-price bullet with a more specific rule: never collapse findings into one wide range spanning unrelated options; instead name the 2-3 most relevant *specific* options from the findings ledger individually (carrier/provider + routing or plan, each with its own observed price and date); state explicitly any money-saving pattern the ledger shows (cheaper routing, earlier booking window, better date); and if findings are too thin to be specific, say so plainly and point to the single most relevant source link — never close with an unlinked "check it yourself."

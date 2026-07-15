@@ -360,36 +360,57 @@ describe("suggestPreferencesFromNotes (#238)", () => {
 describe("classifyPreferenceText (#238)", () => {
   it("pins the travel-tag pass-through regression (#239): an explicit travel mention isn't stripped to other", async () => {
     mockComplete.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "discovered_fact", topicTag: "travel" }),
+      content: JSON.stringify({ category: "discovered_fact", topicTag: "travel", factText: "Enjoys travel." }),
       usage: {},
     });
     const result = await classifyPreferenceText("Likes music, movies, and travel");
-    expect(result).toEqual({ category: "discovered_fact", topicTag: "travel" });
+    expect(result).toEqual({ category: "discovered_fact", topicTag: "travel", factText: "Enjoys travel." });
   });
 
-  it("returns the LLM's category/topicTag classification", async () => {
+  it("returns the LLM's category/topicTag classification and synthesized factText", async () => {
     mockComplete.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "discovered_fact", topicTag: "gifts" }),
+      content: JSON.stringify({ category: "discovered_fact", topicTag: "gifts", factText: "Loved the LEGO set." }),
       usage: {},
     });
     const result = await classifyPreferenceText("Kids loved the LEGO set last Christmas");
-    expect(result).toEqual({ category: "discovered_fact", topicTag: "gifts" });
+    expect(result).toEqual({ category: "discovered_fact", topicTag: "gifts", factText: "Loved the LEGO set." });
     expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
   });
 
   it("keeps topicTag when the LLM classifies as preference (#239: optional, not forbidden)", async () => {
     mockComplete.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "preference", topicTag: "travel" }),
+      content: JSON.stringify({ category: "preference", topicTag: "travel", factText: "No connecting flights under 60 minutes." }),
       usage: {},
     });
     const result = await classifyPreferenceText("Never book connecting flights under 60 minutes");
-    expect(result).toEqual({ category: "preference", topicTag: "travel" });
+    expect(result).toEqual({ category: "preference", topicTag: "travel", factText: "No connecting flights under 60 minutes." });
   });
 
-  it("defaults to discovered_fact/other on malformed LLM output", async () => {
+  it("#240: synthesizes a short standalone factText instead of copying a long verbatim note", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        category: "discovered_fact",
+        topicTag: "school",
+        factText: "Starting 1st grade at Northfield Academy in August 2026.",
+      }),
+      usage: {},
+    });
+    const longNote =
+      "5 years old, attending Northfield Academy in Frisco, TX; transitioning to 1st Grade in August 2026.";
+    const result = await classifyPreferenceText(longNote);
+    expect(result.factText).toBe("Starting 1st grade at Northfield Academy in August 2026.");
+    expect(result.factText.length).toBeLessThan(longNote.length);
+
+    const [messages] = mockComplete.mock.calls[0];
+    const systemMessage = (messages as { role: string; content: string }[]).find(m => m.role === "system");
+    expect(systemMessage?.content).toContain("short standalone sentence");
+    expect(systemMessage?.content).toContain("~140");
+  });
+
+  it("defaults to discovered_fact/other and the original text as factText on malformed LLM output", async () => {
     mockComplete.mockResolvedValueOnce({ content: "not json", usage: {} });
     const result = await classifyPreferenceText("Some ad-hoc note");
-    expect(result).toEqual({ category: "discovered_fact", topicTag: "other" });
+    expect(result).toEqual({ category: "discovered_fact", topicTag: "other", factText: "Some ad-hoc note" });
   });
 });
 
@@ -430,7 +451,7 @@ describe("POST /api/family/pa-preferences/classify (#238)", () => {
   it("returns a classification for the given factText", async () => {
     const token = await ownerToken();
     mockComplete.mockResolvedValueOnce({
-      content: JSON.stringify({ category: "decision_history", topicTag: "finance" }),
+      content: JSON.stringify({ category: "decision_history", topicTag: "finance", factText: "Chose the 15-year mortgage." }),
       usage: {},
     });
     const res = await request(app)
@@ -438,7 +459,7 @@ describe("POST /api/family/pa-preferences/classify (#238)", () => {
       .set("authorization", `Bearer ${token}`)
       .send({ factText: "Chose the 15-year mortgage over the 30-year" });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ category: "decision_history", topicTag: "finance" });
+    expect(res.body).toEqual({ category: "decision_history", topicTag: "finance", factText: "Chose the 15-year mortgage." });
   });
 
   it("rejects empty factText", async () => {

@@ -4717,10 +4717,11 @@ paths:
   /api/family/pa-preferences/classify:
     post:
       tags: [family]
-      summary: Classify an ad-hoc fact string into category + topicTag (GH #238)
+      summary: Classify an ad-hoc fact string into category + topicTag + synthesized factText (GH #238, #240)
       description: |
-        Used by the Family Agent page's "Save as preference" button to suggest a starting category/tag.
-        Does not persist anything.
+        Used by the Family Agent page's "Save as preference" button to suggest a starting category/tag,
+        and to synthesize the raw input into a short standalone factText (≤~140 chars) instead of the
+        caller persisting the raw input verbatim. Does not persist anything itself.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -4744,6 +4745,9 @@ paths:
                     type: string
                     nullable: true
                     enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  factText:
+                    type: string
+                    description: Synthesized short standalone sentence (≤~140 chars), not a copy of the request's factText.
         "400": { description: Validation error }
         "401": { description: Unauthorized }
 

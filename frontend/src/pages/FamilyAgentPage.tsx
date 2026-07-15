@@ -685,11 +685,11 @@ export function FamilyAgentPage() {
     setSaveAsPrefDraft({ category: "discovered_fact", topicTag: "other", factText: text });
     setSaveAsPrefClassifying(true);
     try {
-      const res = await apiJson<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null }>(
+      const res = await apiJson<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null; factText: string }>(
         "/api/family/pa-preferences/classify",
         { method: "POST", body: JSON.stringify({ factText: text }) }
       );
-      setSaveAsPrefDraft({ category: res.category, topicTag: res.topicTag, factText: text });
+      setSaveAsPrefDraft({ category: res.category, topicTag: res.topicTag, factText: res.factText });
     } catch {
       // classification is a convenience suggestion; keep the fallback draft and let the user pick manually
     } finally {

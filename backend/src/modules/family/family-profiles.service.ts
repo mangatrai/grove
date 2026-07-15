@@ -454,7 +454,7 @@ const SUGGEST_JSON_SCHEMA: Record<string, unknown> = {
             enum: CATEGORIES,
             description: "The RECORD TYPE, not the subject matter — always one of the three literal enum values. Never a topic word like 'school' or 'travel'.",
           },
-          factText: { type: "string", description: "The durable fact itself, consolidated across any duplicate or overlapping notes." },
+          factText: { type: "string", description: "A short, standalone sentence stating the fact — not a copy-paste of the source note. Consolidated across any duplicate or overlapping notes. Roughly one clause, no more than ~140 characters." },
           topicTag: {
             type: "string",
             enum: TOPIC_TAGS,
@@ -521,6 +521,11 @@ Before finalizing, consolidate:
 
 Only propose candidates that are clearly useful to remember — skip vague or trivial notes. If a
 note has nothing worth extracting, propose nothing for that person.
+
+factText must be a short, standalone sentence stating the fact or preference itself — never a
+copy-paste of the source note. Roughly one clause, no more than ~140 characters. Distill; don't
+transcribe (e.g. a note rambling about a child's school, grade transition, and start date becomes
+"Starting 1st grade at Northfield Academy in August 2026.", not the full sentence it came from).
 
 Respond with JSON only: {"candidates": [{"personName": string, "category": "preference"|"discovered_fact"|"decision_history", "factText": string, "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"food"|"interests"|"other"}]}`;
 
@@ -614,18 +619,25 @@ const CLASSIFY_PREFERENCE_JSON_SCHEMA: Record<string, unknown> = {
       enum: TOPIC_TAGS,
       description: "The topic bucket this fact belongs to — separate from and unrelated to the category field above.",
     },
+    factText: {
+      type: "string",
+      description: "A short, standalone sentence stating the fact — not a copy-paste of the input text. Roughly one clause, no more than ~140 characters.",
+    },
   },
-  required: ["category", "topicTag"],
+  required: ["category", "topicTag", "factText"],
   additionalProperties: false,
 };
 
 const classifyPreferenceSchema = z.object({
   category: z.enum(CATEGORIES),
   topicTag: z.enum(TOPIC_TAGS),
+  factText: z.string().min(1),
 });
 
-const CLASSIFY_PREFERENCE_SYSTEM = `Classify a single household-planning fact for storage:
+const CLASSIFY_PREFERENCE_SYSTEM = `Classify a single household-planning fact for storage, and
+synthesize it into a short standalone sentence.
 
+Category — one of:
 - "preference": an ABSOLUTE, always-relevant constraint — allergies/medical restrictions, dietary
   restrictions, visa/citizenship travel restrictions, or a rule explicitly stated as non-negotiable
   ("never", "always", "must"). This is a high bar — use it sparingly.
@@ -637,16 +649,21 @@ const CLASSIFY_PREFERENCE_SYSTEM = `Classify a single household-planning fact fo
 Also assign a topicTag from the fixed set (used for browsability even on "preference" rows):
 ${TOPIC_TAG_GUIDE}
 
-Respond with JSON only: {"category": "preference"|"discovered_fact"|"decision_history", "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"food"|"interests"|"other"}`;
+Also produce factText: a short, standalone sentence stating the fact or preference itself — never
+a copy-paste or trimmed excerpt of the input text. Roughly one clause, no more than ~140
+characters. Distill the core fact; drop hedging, source framing, and any surrounding narration.
+
+Respond with JSON only: {"category": "preference"|"discovered_fact"|"decision_history", "topicTag": "travel"|"school"|"health"|"finance"|"gifts"|"household"|"food"|"interests"|"other", "factText": string}`;
 
 /**
  * #238: used by the "Save as preference" button — classifies one ad-hoc string (e.g. a PA task
- * result) so the user has a sensible starting category/tag instead of picking from scratch. The
- * frontend always shows the suggestion as editable before persisting.
+ * result) and synthesizes it into a short fact, so the user has a sensible starting
+ * category/tag/text instead of picking from scratch or saving a raw blob. The frontend always
+ * shows the suggestion as editable before persisting.
  */
 export async function classifyPreferenceText(
   factText: string
-): Promise<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null }> {
+): Promise<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null; factText: string }> {
   const { content } = await getChatAdapter().complete(
     [
       { role: "system", content: CLASSIFY_PREFERENCE_SYSTEM },
@@ -654,7 +671,7 @@ export async function classifyPreferenceText(
     ],
     {
       model: chatModel(),
-      maxTokens: 60,
+      maxTokens: 200,
       temperature: 0,
       responseFormat: "json",
       jsonSchema: CLASSIFY_PREFERENCE_JSON_SCHEMA,
@@ -674,10 +691,11 @@ export async function classifyPreferenceText(
       issues: parsed.error.issues,
       rawContent: content.slice(0, 300),
     });
-    return { category: "discovered_fact", topicTag: "other" };
+    return { category: "discovered_fact", topicTag: "other", factText };
   }
   return {
     category: parsed.data.category,
     topicTag: parsed.data.topicTag,
+    factText: parsed.data.factText,
   };
 }
