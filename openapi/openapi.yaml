@@ -5027,6 +5027,42 @@ paths:
                   error: { type: string, enum: [CAPTURE_FAILED, PA_TASK_FAILED] }
                   message: { type: string }
 
+  /api/family/agent/task/history:
+    get:
+      tags: [family]
+      summary: List recent Quick Capture asks for Run History (#230)
+      description: |
+        Last 30 `pa_task_run` rows for the caller's household, newest first — both `one_shot`
+        (synchronous) and `research_loop` (BabyAGI-style) capture modes. Feeds the merged
+        "Run history" table on the Family Agent page alongside `GET /family/digests`. Requires
+        `owner | admin`. Registered before `/agent/task/{runId}` so Express doesn't match
+        `history` as a literal runId.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Recent task runs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        householdId: { type: string, format: uuid }
+                        goal: { type: string }
+                        captureMode: { type: string, enum: [one_shot, research_loop], nullable: true }
+                        status: { type: string, enum: [running, succeeded, failed, refused_budget] }
+                        iterationsUsed: { type: integer, nullable: true }
+                        resultSummary: { type: string, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                        finishedAt: { type: string, format: date-time, nullable: true }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+
   /api/family/agent/task/{runId}:
     get:
       tags: [family]

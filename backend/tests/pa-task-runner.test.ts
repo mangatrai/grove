@@ -51,6 +51,8 @@ import {
   executeSearchCalendar,
   executeSearchFinanceContext,
   executeSearchMemory,
+  listTaskRunHistory,
+  recordOneShotCapture,
   runPATask,
 } from "../src/modules/family/pa-task-runner.js";
 
@@ -461,6 +463,99 @@ describe("pa-task-runner (#164, #166)", () => {
 
       await qExec(`DELETE FROM pa_task_run WHERE id = ?`, runningRow?.id);
       await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND goal = ?`, EMPTY_HOUSEHOLD_ID, "cross household goal");
+    });
+  });
+
+  describe("recordOneShotCapture (#230)", () => {
+    afterAll(async () => {
+      await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND capture_mode = 'one_shot'`, HOUSEHOLD_ID);
+    });
+
+    it("writes a one_shot row with the given status and summary", async () => {
+      await recordOneShotCapture(HOUSEHOLD_ID, "draft an absence note", "succeeded", "Drafted the note.");
+
+      const row = await qGet<{
+        capture_mode: string;
+        status: string;
+        result_summary: string | null;
+        finished_at: string | null;
+      }>(
+        `SELECT capture_mode, status, result_summary, finished_at FROM pa_task_run
+         WHERE household_id = ? AND capture_mode = 'one_shot' ORDER BY created_at DESC LIMIT 1`,
+        HOUSEHOLD_ID
+      );
+
+      expect(row?.capture_mode).toBe("one_shot");
+      expect(row?.status).toBe("succeeded");
+      expect(row?.result_summary).toBe("Drafted the note.");
+      expect(row?.finished_at).toBeTruthy();
+    });
+
+    it("records a failed one-shot ask with a null summary", async () => {
+      await recordOneShotCapture(HOUSEHOLD_ID, "goal that failed", "failed", null);
+
+      const row = await qGet<{ status: string; result_summary: string | null }>(
+        `SELECT status, result_summary FROM pa_task_run
+         WHERE household_id = ? AND capture_mode = 'one_shot' AND goal = ? ORDER BY created_at DESC LIMIT 1`,
+        HOUSEHOLD_ID, "goal that failed"
+      );
+
+      expect(row?.status).toBe("failed");
+      expect(row?.result_summary).toBeNull();
+    });
+
+    it("swallows a write failure instead of throwing (fail-closed logging)", async () => {
+      await expect(
+        recordOneShotCapture("not-a-real-household-id", "goal", "succeeded", null)
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("listTaskRunHistory (#230)", () => {
+    afterAll(async () => {
+      await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND capture_mode = 'one_shot'`, HOUSEHOLD_ID);
+    });
+
+    it("returns household-scoped rows newest first, including one-shot and research-loop entries", async () => {
+      await qExec(
+        `INSERT INTO pa_task_run (household_id, goal, status, capture_mode, finished_at)
+         VALUES (?, ?, 'succeeded', 'research_loop', now())`,
+        HOUSEHOLD_ID, "history research goal"
+      );
+      await recordOneShotCapture(HOUSEHOLD_ID, "history one-shot goal", "succeeded", "one-shot result");
+
+      const entries = await listTaskRunHistory(HOUSEHOLD_ID);
+
+      expect(entries.length).toBeGreaterThanOrEqual(2);
+      for (let i = 1; i < entries.length; i++) {
+        expect(new Date(entries[i - 1].createdAt).getTime()).toBeGreaterThanOrEqual(new Date(entries[i].createdAt).getTime());
+      }
+      const goals = entries.map((e) => e.goal);
+      expect(goals).toContain("history research goal");
+      expect(goals).toContain("history one-shot goal");
+      const oneShotEntry = entries.find((e) => e.goal === "history one-shot goal");
+      expect(oneShotEntry?.captureMode).toBe("one_shot");
+      const researchEntry = entries.find((e) => e.goal === "history research goal");
+      expect(researchEntry?.captureMode).toBe("research_loop");
+
+      await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND goal = ?`, HOUSEHOLD_ID, "history research goal");
+    });
+
+    it("returns an empty array for a household with no runs", async () => {
+      const entries = await listTaskRunHistory(EMPTY_HOUSEHOLD_ID);
+      expect(entries).toEqual([]);
+    });
+
+    it("caps results at 30 rows", async () => {
+      for (let i = 0; i < 32; i++) {
+        await recordOneShotCapture(HOUSEHOLD_ID, `cap test goal ${i}`, "succeeded", null);
+      }
+
+      const entries = await listTaskRunHistory(HOUSEHOLD_ID);
+
+      expect(entries.length).toBeLessThanOrEqual(30);
+
+      await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND goal LIKE 'cap test goal %'`, HOUSEHOLD_ID);
     });
   });
 });

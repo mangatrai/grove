@@ -175,6 +175,39 @@ describe("POST /api/family/agent/task (#167)", () => {
     expect(res.body.type).toBe("one_shot");
     expect(res.body.result.responseText).toContain(TEST_MARKER);
     expect(mockRunToolLoop).toHaveBeenCalledTimes(1);
+
+    // recordOneShotCapture is fire-and-forget (not awaited by the route) so the row may
+    // not be committed the instant the HTTP response returns — give it a beat.
+    await new Promise((r) => setTimeout(r, 100));
+    const householdId = await ownerHouseholdId();
+    const run = await qGet<{ capture_mode: string; status: string }>(
+      `SELECT capture_mode, status FROM pa_task_run WHERE household_id = ? AND goal LIKE ? ORDER BY created_at DESC LIMIT 1`,
+      householdId, `%${TEST_MARKER}%`
+    );
+    expect(run?.capture_mode).toBe("one_shot");
+    expect(run?.status).toBe("succeeded");
+  });
+
+  it("one_shot: still records a failed pa_task_run row when processCaptureNote throws (#230)", async () => {
+    const token = await loginOwner();
+    mockComplete.mockResolvedValueOnce(classifyResult("one_shot"));
+    mockRunToolLoop.mockRejectedValueOnce(new Error(`boom ${TEST_MARKER}`));
+
+    const res = await request(app)
+      .post("/api/family/agent/task")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ note: `remind me to call the vet, failing case ${TEST_MARKER}` });
+
+    expect(res.status).toBe(502);
+
+    await new Promise((r) => setTimeout(r, 100));
+    const householdId = await ownerHouseholdId();
+    const run = await qGet<{ capture_mode: string; status: string }>(
+      `SELECT capture_mode, status FROM pa_task_run WHERE household_id = ? AND goal LIKE ? ORDER BY created_at DESC LIMIT 1`,
+      householdId, `%failing case ${TEST_MARKER}%`
+    );
+    expect(run?.capture_mode).toBe("one_shot");
+    expect(run?.status).toBe("failed");
   });
 
   it("research_loop: classifies then dispatches to runPATask, returns runId and persists a suggestion alert", async () => {
@@ -270,5 +303,61 @@ describe("GET /api/family/agent/task/:runId (#167 D4)", () => {
       .get(`/api/family/agent/task/00000000-0000-0000-0000-000000000000`)
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/family/agent/task/history (#230)", () => {
+  const OTHER_HOUSEHOLD_ID = "99990000-test-0000-0000-fr230other01";
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM pa_task_run WHERE household_id = ?`, OTHER_HOUSEHOLD_ID);
+    await qExec(`DELETE FROM household WHERE id = ?`, OTHER_HOUSEHOLD_ID);
+  });
+
+  it("returns entries for the caller's household, newest first", async () => {
+    const token = await loginOwner();
+    const householdId = await ownerHouseholdId();
+    const row = await qGet<{ id: string }>(
+      `INSERT INTO pa_task_run (household_id, goal, origin, status, capture_mode, result_summary, finished_at)
+       VALUES (?, ?, 'user', 'succeeded', 'one_shot', ?, NOW()) RETURNING id`,
+      householdId, `history route goal ${TEST_MARKER}`, `history route summary ${TEST_MARKER}`
+    );
+
+    const res = await request(app)
+      .get("/api/family/agent/task/history")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.entries)).toBe(true);
+    const entry = res.body.entries.find((e: { id: string }) => e.id === row?.id);
+    expect(entry).toBeTruthy();
+    expect(entry.captureMode).toBe("one_shot");
+    expect(entry.status).toBe("succeeded");
+    expect(entry.resultSummary).toContain(TEST_MARKER);
+
+    await qExec(`DELETE FROM pa_task_run WHERE id = ?`, row?.id);
+  });
+
+  it("does not return another household's runs", async () => {
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, OTHER_HOUSEHOLD_ID, "FR-230 other household");
+    await qExec(
+      `INSERT INTO pa_task_run (household_id, goal, origin, status, capture_mode, finished_at)
+       VALUES (?, ?, 'user', 'succeeded', 'one_shot', NOW())`,
+      OTHER_HOUSEHOLD_ID, `other household goal ${TEST_MARKER}`
+    );
+
+    const token = await loginOwner();
+    const res = await request(app)
+      .get("/api/family/agent/task/history")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const goals = (res.body.entries as { goal: string }[]).map((e) => e.goal);
+    expect(goals).not.toContain(`other household goal ${TEST_MARKER}`);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/family/agent/task/history");
+    expect(res.status).toBe(401);
   });
 });

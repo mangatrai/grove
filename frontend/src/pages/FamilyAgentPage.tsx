@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ActionIcon,
@@ -71,6 +71,29 @@ type DigestEntry = {
   subjectLine: string | null;
   summaryText: string | null;
   recipients: string[] | null;
+};
+
+// #230: Quick Capture ask history (pa_task_run), merged into the same Run History table as digests.
+type TaskRunEntry = {
+  id: string;
+  goal: string;
+  captureMode: "one_shot" | "research_loop" | null;
+  status: string;
+  iterationsUsed: number | null;
+  resultSummary: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+type RunHistoryRow = {
+  key: string;
+  when: string;
+  source: "digest" | "ask";
+  typeLabel: string;
+  status: string;
+  countLabel: string;
+  recipients: string[] | null;
+  summary: string | null;
 };
 
 type CaptureActionType = "create_event" | "set_reminder" | "draft_message" | "note";
@@ -148,6 +171,10 @@ const STATUS_COLORS: Record<string, string> = {
   sent: "green",
   skipped: "gray",
   error: "red",
+  succeeded: "green",
+  failed: "red",
+  running: "blue",
+  refused_budget: "orange",
 };
 
 const ACTION_ICONS: Record<CaptureActionType, React.ReactNode> = {
@@ -497,11 +524,13 @@ export function FamilyAgentPage() {
   const [digests, setDigests] = useState<DigestEntry[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
   const [digestsLoading, setDigestsLoading] = useState(true);
+  const [taskRuns, setTaskRuns] = useState<TaskRunEntry[]>([]);
+  const [taskRunsLoading, setTaskRunsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
-  const [expandedDigest, setExpandedDigest] = useState<string | null>(null);
+  const [expandedRunKey, setExpandedRunKey] = useState<string | null>(null);
 
   // Quick capture
   const [captureNote, setCaptureNote] = useState("");
@@ -550,8 +579,47 @@ export function FamilyAgentPage() {
     }
   }, []);
 
+  const loadTaskRuns = useCallback(async () => {
+    setTaskRunsLoading(true);
+    try {
+      const res = await apiJson<{ entries: TaskRunEntry[] }>("/api/family/agent/task/history");
+      setTaskRuns(res.entries);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load ask history.");
+    } finally {
+      setTaskRunsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { void loadAlerts(); }, [loadAlerts]);
   useEffect(() => { void loadDigests(); }, [loadDigests]);
+  useEffect(() => { void loadTaskRuns(); }, [loadTaskRuns]);
+
+  const runHistoryRows = useMemo<RunHistoryRow[]>(() => {
+    const digestRows: RunHistoryRow[] = digests.map(d => ({
+      key: `digest:${d.id}`,
+      when: d.runAt,
+      source: "digest",
+      typeLabel: RUN_TYPE_LABELS[d.runType] ?? d.runType,
+      status: d.status,
+      countLabel: String(d.alertsCreated),
+      recipients: d.recipients,
+      summary: d.summaryText ?? d.skipReason ?? d.errorMessage ?? null,
+    }));
+    const askRows: RunHistoryRow[] = taskRuns.map(t => ({
+      key: `ask:${t.id}`,
+      when: t.createdAt,
+      source: "ask",
+      typeLabel: t.captureMode === "research_loop" ? "Research" : "One-shot",
+      status: t.status,
+      countLabel: t.captureMode === "research_loop" ? String(t.iterationsUsed ?? 0) : "—",
+      recipients: null,
+      summary: t.resultSummary ?? t.goal,
+    }));
+    return [...digestRows, ...askRows]
+      .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
+      .slice(0, 30);
+  }, [digests, taskRuns]);
 
   async function handleRun(runType: string) {
     setRunning(true);
@@ -572,7 +640,7 @@ export function FamilyAgentPage() {
           ? `Skipped — ${res.message ?? "no action needed"}.`
           : `Error: ${res.message ?? "unknown"}.`
       );
-      await Promise.all([loadAlerts(), loadDigests()]);
+      await Promise.all([loadAlerts(), loadDigests(), loadTaskRuns()]);
     } catch (e) {
       setRunResult(e instanceof Error ? e.message : "Run failed.");
     } finally {
@@ -601,8 +669,10 @@ export function FamilyAgentPage() {
       });
       setCaptureResult(res);
       setCaptureNote("");
+      void loadTaskRuns();
     } catch (e) {
       setCaptureError(e instanceof Error ? e.message : "Capture failed.");
+      void loadTaskRuns();
     } finally {
       setCaptureLoading(false);
     }
@@ -720,8 +790,8 @@ export function FamilyAgentPage() {
         <Group gap="xs">
           <ActionIcon
             variant="subtle"
-            onClick={() => { void loadAlerts(); void loadDigests(); }}
-            disabled={alertsLoading || digestsLoading}
+            onClick={() => { void loadAlerts(); void loadDigests(); void loadTaskRuns(); }}
+            disabled={alertsLoading || digestsLoading || taskRunsLoading}
             aria-label="Refresh"
           >
             <IconRefresh size={18} stroke={1.5} />
@@ -871,16 +941,17 @@ export function FamilyAgentPage() {
           <Text size="xs" c="dimmed">(last 30)</Text>
         </Group>
 
-        {digestsLoading ? (
+        {digestsLoading || taskRunsLoading ? (
           <Group><Loader size="sm" /><Text size="sm" c="dimmed">Loading…</Text></Group>
-        ) : digests.length === 0 ? (
-          <Text c="dimmed" size="sm">No runs yet. Connect Google Calendar in Settings → Family, then trigger a manual run.</Text>
+        ) : runHistoryRows.length === 0 ? (
+          <Text c="dimmed" size="sm">No runs yet. Connect Google Calendar in Settings → Family, then trigger a manual run, or try Quick Capture below.</Text>
         ) : (
           <Paper withBorder radius="md" style={{ overflow: "hidden" }}>
             <Table striped highlightOnHover withRowBorders={false}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>When</Table.Th>
+                  <Table.Th>Source</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Alerts</Table.Th>
@@ -889,30 +960,35 @@ export function FamilyAgentPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {digests.map(d => {
-                  const isExpanded = expandedDigest === d.id;
-                  const summaryFull = d.summaryText ?? d.skipReason ?? d.errorMessage ?? null;
+                {runHistoryRows.map(row => {
+                  const isExpanded = expandedRunKey === row.key;
+                  const summaryFull = row.summary;
                   return (
-                    <Fragment key={d.id}>
-                      <Table.Tr style={{ cursor: summaryFull ? "pointer" : "default" }} onClick={() => summaryFull && setExpandedDigest(isExpanded ? null : d.id)}>
+                    <Fragment key={row.key}>
+                      <Table.Tr style={{ cursor: summaryFull ? "pointer" : "default" }} onClick={() => summaryFull && setExpandedRunKey(isExpanded ? null : row.key)}>
                         <Table.Td>
                           <Text size="xs">
-                            {new Date(d.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+                            {new Date(row.when).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs">{RUN_TYPE_LABELS[d.runType] ?? d.runType}</Text>
+                          <Badge size="xs" color={row.source === "digest" ? "grape" : "cyan"} variant="light">
+                            {row.source === "digest" ? "Digest" : "Quick capture"}
+                          </Badge>
                         </Table.Td>
                         <Table.Td>
-                          <Badge size="xs" color={STATUS_COLORS[d.status]} variant="light">{d.status}</Badge>
+                          <Text size="xs">{row.typeLabel}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs" c={d.alertsCreated > 0 ? "red" : "dimmed"}>{d.alertsCreated}</Text>
+                          <Badge size="xs" color={STATUS_COLORS[row.status] ?? "gray"} variant="light">{row.status}</Badge>
                         </Table.Td>
                         <Table.Td>
-                          {d.recipients && d.recipients.length > 0 ? (
+                          <Text size="xs" c={row.source === "digest" && Number(row.countLabel) > 0 ? "red" : "dimmed"}>{row.countLabel}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {row.recipients && row.recipients.length > 0 ? (
                             <Stack gap={2}>
-                              {d.recipients.map(r => (
+                              {row.recipients.map(r => (
                                 <Text key={r} size="xs" c="dimmed">{r}</Text>
                               ))}
                             </Stack>
@@ -935,7 +1011,7 @@ export function FamilyAgentPage() {
                       </Table.Tr>
                       {isExpanded && summaryFull ? (
                         <Table.Tr>
-                          <Table.Td colSpan={6}>
+                          <Table.Td colSpan={7}>
                             <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
                               <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
                             </Paper>

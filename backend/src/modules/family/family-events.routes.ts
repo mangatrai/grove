@@ -19,7 +19,7 @@ import {
   resolveAlert,
   runFamilyAgent,
 } from "./family-agent.service.js";
-import { runPATask } from "./pa-task-runner.js";
+import { listTaskRunHistory, recordOneShotCapture, runPATask } from "./pa-task-runner.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
 import { getOccasionSettings, setOccasionSettings } from "./family-occasion-settings.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
@@ -255,8 +255,10 @@ familyEventsRouter.post(
       try {
         const result = await processCaptureNote(note, householdId);
         log.info("family-events: agent/task completed", { householdId, type: "one_shot" });
+        void recordOneShotCapture(householdId, note, "succeeded", result.responseText);
         res.json({ type: "one_shot", result });
       } catch (err) {
+        void recordOneShotCapture(householdId, note, "failed", null);
         res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
       }
       return;
@@ -284,6 +286,17 @@ familyEventsRouter.post(
 
     log.info("family-events: agent/task completed", { householdId, type: "research_loop", runId: runResult.runId });
     res.json({ type: "research_loop", result: runResult.data, runId: runResult.runId });
+  }
+);
+
+/** GET /family/agent/task/history (#230) — last 30 Quick Capture asks (one-shot + research-loop), for Run History.
+ *  Must be registered before the /:runId route below, or Express matches "history" as a runId. */
+familyEventsRouter.get(
+  "/agent/task/history",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const entries = await listTaskRunHistory(req.authUser!.householdId);
+    res.json({ entries });
   }
 );
 

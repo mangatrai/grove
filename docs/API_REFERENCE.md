@@ -4388,3 +4388,27 @@ Polls a `research_loop` run's status by id, scoped to the caller's household. Ad
 `summary`/`iterationsUsed`/`hitIterationCap`/`finishedAt` are `null` while `status = 'running'`.
 
 **Response `404`:** `{ "error": "NOT_FOUND", "message": "No task run found with that id." }` — unknown id, or belongs to a different household.
+
+#### `GET /api/family/agent/task/history`
+
+Last 30 Quick Capture asks for the caller's household — both `one_shot` (synchronous, e.g. "draft an absence note") and `research_loop` (BabyAGI-style, e.g. "research swim camps under $200") — newest first. Feeds the merged "Run history" table in the Family Agent page alongside scheduled digest runs (`GET /family/digests`). Requires `owner | admin`. Registered before `GET /agent/task/:runId` — otherwise Express would match `history` as a literal `:runId`.
+
+**Response `200`:**
+```json
+{
+  "entries": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "goal": "draft an absence note for Emma's field trip",
+      "captureMode": "one_shot" | "research_loop" | null,
+      "status": "running" | "succeeded" | "failed" | "refused_budget",
+      "iterationsUsed": 4,
+      "resultSummary": "string | null",
+      "createdAt": "2026-07-15T00:00:00.000Z",
+      "finishedAt": "2026-07-15T00:00:03.000Z"
+    }
+  ]
+}
+```
+`captureMode` is nullable in the type for schema-evolution safety, but every row is populated in practice — migration `0087` backfilled all pre-existing rows to `research_loop`. `iterationsUsed` is always `null` for `one_shot` rows (no loop iterations to count). `resultSummary` is `null` for a failed run.

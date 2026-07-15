@@ -686,8 +686,8 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
   ]);
   if (!withinMonthlyBudget || !withinDailyBudget) {
     await qExec(
-      `INSERT INTO pa_task_run (household_id, goal, origin, status, loop_model, synthesis_model, finished_at)
-       VALUES (?, ?, 'user', 'refused_budget', ?, ?, NOW())`,
+      `INSERT INTO pa_task_run (household_id, goal, origin, capture_mode, status, loop_model, synthesis_model, finished_at)
+       VALUES (?, ?, 'user', 'research_loop', 'refused_budget', ?, ?, NOW())`,
       householdId, goal, chatModel(), strongModel()
     );
     const message = !withinMonthlyBudget
@@ -697,8 +697,8 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
   }
 
   const runRow = await qGet<{ id: string }>(
-    `INSERT INTO pa_task_run (household_id, goal, origin, status, loop_model, synthesis_model)
-     VALUES (?, ?, 'user', 'running', ?, ?) RETURNING id`,
+    `INSERT INTO pa_task_run (household_id, goal, origin, capture_mode, status, loop_model, synthesis_model)
+     VALUES (?, ?, 'user', 'research_loop', 'running', ?, ?) RETURNING id`,
     householdId, goal, chatModel(), strongModel()
   );
   if (!runRow?.id) {
@@ -793,4 +793,71 @@ export async function runPATask(goal: string, householdId: string): Promise<RunP
     await qExec(`UPDATE pa_task_run SET status = 'failed', finished_at = NOW() WHERE id = ?`, runId).catch(() => {});
     return { ok: false, code: "PA_TASK_FAILED", message: "The task could not be completed due to an internal error." };
   }
+}
+
+/**
+ * Records a one-shot Quick Capture ask into pa_task_run (GH #230) so it shows up in Run
+ * History alongside research-loop runs and digest runs. One-shot asks complete synchronously
+ * within the request, so this writes a single terminal row rather than a running→succeeded
+ * transition. Best-effort — a logging failure must never break the user-facing capture response.
+ */
+export async function recordOneShotCapture(
+  householdId: string,
+  goal: string,
+  status: "succeeded" | "failed",
+  resultSummary: string | null
+): Promise<void> {
+  try {
+    await qExec(
+      `INSERT INTO pa_task_run (household_id, goal, origin, capture_mode, status, result_summary, finished_at)
+       VALUES (?, ?, 'user', 'one_shot', ?, ?, NOW())`,
+      householdId, goal, status, resultSummary
+    );
+  } catch (err) {
+    log.warn("pa-task-runner: failed to record one-shot capture", { householdId, err: String(err) });
+  }
+}
+
+export type PaTaskRunEntry = {
+  id: string;
+  householdId: string;
+  goal: string;
+  captureMode: "one_shot" | "research_loop" | null;
+  status: string;
+  iterationsUsed: number | null;
+  resultSummary: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+type PaTaskRunRow = {
+  id: string;
+  household_id: string;
+  goal: string;
+  capture_mode: "one_shot" | "research_loop" | null;
+  status: string;
+  iterations_used: number | null;
+  result_summary: string | null;
+  created_at: string;
+  finished_at: string | null;
+};
+
+/** Last 30 pa_task_run rows for a household, newest first — feeds the Run History UI (GH #230). */
+export async function listTaskRunHistory(householdId: string): Promise<PaTaskRunEntry[]> {
+  const rows = await qAll<PaTaskRunRow>(
+    `SELECT id, household_id, goal, capture_mode, status, iterations_used, result_summary, created_at, finished_at
+     FROM pa_task_run WHERE household_id = ? ORDER BY created_at DESC LIMIT 30`,
+    householdId
+  );
+  return rows.map(r => ({
+    id: r.id,
+    householdId: r.household_id,
+    goal: r.goal,
+    captureMode: r.capture_mode,
+    status: r.status,
+    iterationsUsed: r.iterations_used,
+    resultSummary: r.result_summary,
+    createdAt: r.created_at,
+    finishedAt: r.finished_at,
+  }));
 }

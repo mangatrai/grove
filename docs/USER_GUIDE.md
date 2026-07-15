@@ -869,6 +869,8 @@ If a quick ask should have triggered research (or vice versa), start your note w
 
 Any result — quick ask or research — has a **Save as preference** button. It classifies the result text for you (category and topic, both editable) and opens a save dialog so you can turn it into a standing fact in Settings › Family › **PA Preferences** without retyping it.
 
+The Family page's **Run history** table shows the last 30 agent runs, newest first — both Quick Capture asks (Source: **Quick capture**) and the scheduled daily digest (Source: **Digest**) in one combined timeline. Click a row to expand its full summary; use the refresh icon to pull in a run submitted moments ago.
+
 ## Year-in-Review
 
 In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:
