@@ -488,7 +488,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
   return (
     <Paper withBorder p="md" radius="md">
       <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="xs" align="flex-start">
+        <Group gap="xs" align="flex-start" style={{ flex: 1, minWidth: 0 }}>
           <Box mt={2} c="dimmed">{ACTION_ICONS[action.type]}</Box>
           <Stack gap={4}>
             <Group gap="xs">
@@ -500,7 +500,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
           </Stack>
         </Group>
         {approved ? (
-          <Badge size="sm" color="green" variant="filled" leftSection={<IconCheck size={11} />}>Done</Badge>
+          <Badge size="sm" color="green" variant="filled" leftSection={<IconCheck size={11} />} style={{ flexShrink: 0 }}>Done</Badge>
         ) : (
           <Button
             size="xs"
@@ -509,6 +509,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
             loading={approving}
             leftSection={action.type === "draft_message" ? <IconMail size={13} /> : <IconCheck size={13} />}
             onClick={() => void handleApprove()}
+            style={{ flexShrink: 0 }}
           >
             {action.type === "draft_message" ? "Compose" : "Approve"}
           </Button>

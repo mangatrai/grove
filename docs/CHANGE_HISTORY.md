@@ -64,6 +64,28 @@ per the user's own suggested fix.
 
 ---
 
+## FIX — #244: fix clipped Approve/Done button text on action cards (2026-07-15)
+
+**What changed:** Manual QA reported the Approve/Done buttons on Quick Capture action cards
+rendering with clipped labels ("Approv", "DON"). `CaptureActionCard`'s outer
+`<Group wrap="nowrap">` had no flex-basis control on either child — the left icon/title/summary
+group and the right button both shrank proportionally by content size under standard flexbox
+rules whenever the left content was wide, squeezing the button below its label's natural width.
+Added `style={{ flex: 1, minWidth: 0 }}` to the left content group (so it's the one that wraps/
+shrinks) and `style={{ flexShrink: 0 }}` to the Approve/Compose button and the Done badge (so
+they always render at natural content width).
+
+**Why:** CSS-only fix, no new component — the flex layout just needed an explicit basis so the
+button stopped competing with the text column for shrink priority.
+
+**Verification:** `npm run build -w frontend` clean.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`.
+
+**GitHub:** closes [#244](https://github.com/mangatrai/grove/issues/244).
+
+---
+
 ## FIX — #241: don't tag non-gift-giving holidays with GIFT-IDEAS (2026-07-15)
 
 **What changed:** Manual QA found the Family Agent firing a `[GIFT-IDEAS]` alert (and the #223
