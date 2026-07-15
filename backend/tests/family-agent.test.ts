@@ -1362,6 +1362,23 @@ describe("detectOccasions (#223 occasion nudge tiers)", () => {
     expect(diwali).toHaveLength(1);
   });
 
+  it("#241: does not tag a non-gift-giving holiday (e.g. Rath Yatra) with GIFT-IDEAS, but LAST-CALL still fires", async () => {
+    const ctx = baseCtx({
+      todayIso: TODAY_ISO,
+      parentEvents: [
+        {
+          email: "parentA@example.com",
+          events: [calEvent({ summary: "Rath Yatra", start: "2026-06-20", allDay: true, isHolidayCalendar: true })],
+        },
+      ],
+    });
+
+    const result = await detectOccasions(ctx, "manual");
+    const rathYatra = result.alerts.filter(a => a.reason.includes("Rath Yatra"));
+    expect(rathYatra.some(a => a.reason.startsWith("[GIFT-IDEAS]"))).toBe(false);
+    expect(rathYatra.some(a => a.reason.startsWith("[LAST-CALL]"))).toBe(true);
+  });
+
   it("source 3 (holiday calendars): dedups an identical holiday across both parents' subscriptions", async () => {
     const ctx = baseCtx({
       todayIso: TODAY_ISO,

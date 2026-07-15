@@ -1377,6 +1377,13 @@ const OCCASION_TIER_TAGS: Record<number, string> = {
 const OCCASION_BIRTHDAY_RE = /\b(birthday|bday)\b/i;
 const OCCASION_ANNIVERSARY_RE = /\banniversary\b/i;
 
+// #241: only holidays with an established gift-giving tradition warrant the 21-day GIFT-IDEAS
+// nudge (and the #223 Phase 2 gift-research bridge it triggers) — every holiday still gets the
+// 5-day LAST-CALL tier below. Curated, not exhaustive; deliberately conservative (miss a gift
+// holiday → user still gets LAST-CALL; over-tag a non-gift holiday → wasted alert + research run).
+const GIFT_GIVING_HOLIDAY_RE =
+  /\b(christmas|hanukkah|chanukah|diwali|deepavali|eid([\s-]?al[\s-]?(fitr|adha))?|raksha\s?bandhan|rakhi|valentine|mother'?s\s?day|father'?s\s?day|easter|new\s?year)\b/i;
+
 /** UTC-day diff between two YYYY-MM-DD strings — avoids the server-local `new Date()` TZ
  *  ambiguity that deadline-reminder.service.ts's daysUntil helper has. */
 function daysUntilIso(targetIso: string, todayIso: string): number {
@@ -1491,7 +1498,8 @@ function detectHolidayOccasions(ctx: FamilyContext): AlertItem[] {
       const dedupKey = `${ev.summary.trim().toLowerCase()}|${occasionIso}`;
       if (seen.has(dedupKey)) continue;
       seen.add(dedupKey);
-      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, OCCASION_GIFT_TIERS, "holiday", ctx.todayIso));
+      const tiers = GIFT_GIVING_HOLIDAY_RE.test(ev.summary) ? OCCASION_GIFT_TIERS : [5];
+      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, tiers, "holiday", ctx.todayIso));
     }
   }
   return alerts;

@@ -14,6 +14,35 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #241: don't tag non-gift-giving holidays with GIFT-IDEAS (2026-07-15)
+
+**What changed:** Manual QA found the Family Agent firing a `[GIFT-IDEAS]` alert (and the #223
+Phase 2 gift-research bridge it triggers) for Rath Yatra, a Hindu festival with no gift-giving
+tradition. `detectHolidayOccasions` in `family-agent.service.ts` applied the full
+`OCCASION_GIFT_TIERS` ([21, 5] → `GIFT-IDEAS` + `LAST-CALL`) to every event tagged
+`isHolidayCalendar`, with no check for whether the holiday is actually associated with gift
+traditions. Added a curated `GIFT_GIVING_HOLIDAY_RE` allowlist (Christmas, Hanukkah, Diwali,
+Eid, Raksha Bandhan, Valentine's Day, Mother's/Father's Day, Easter, New Year) and branch the
+tier list per event: gift-giving holidays keep both tiers; everything else only gets the 5-day
+`LAST-CALL` tier (still useful per the user's own feedback — they only objected to the
+21-day gift-ideas nudge, not the reminder itself).
+
+**Why:** Consistent with this module's existing deterministic, no-LLM design for occasion
+detection — a fixed regex allowlist is the same "avoid guesswork" philosophy already applied to
+date parsing, just one level down at tiering. Over-tagging non-gift holidays also wastes a
+Tavily/LLM research run every time the gift-research bridge fires on a false positive.
+
+**Verification:** `npm run test -w backend` full suite passing (812/812) — new test in
+`family-agent.test.ts` asserting a non-gift holiday (Rath Yatra) at the 5-day mark produces
+`[LAST-CALL]` but never `[GIFT-IDEAS]`; existing Diwali-based tests (`GIFT-IDEAS` fires, dedup
+across parents) pass unchanged since Diwali matches the allowlist.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/tests/family-agent.test.ts`.
+
+**GitHub:** closes [#241](https://github.com/mangatrai/grove/issues/241).
+
+---
+
 ## FIX — #240: synthesize fact_text instead of storing raw text on PA preferences (2026-07-15)
 
 **What changed:** Manual QA on the Family Agent's PA Preferences screen found that both "Suggest from notes" (`suggestPreferencesFromNotes`) and the "Save as preference" button (`classifyPreferenceText`, used when saving a research-loop response as a fact) stored the entire source text verbatim as `factText` — a run-on note sentence or an entire multi-paragraph agent response, instead of a short synthesized fact. Fixed both: `SUGGEST_SYSTEM`'s JSON-schema field description and prompt body now explicitly require `factText` to be a short, standalone sentence (~140 chars) rather than a copy-paste of the note. `classifyPreferenceText` (and its JSON Schema/Zod schema/route response shape) now also returns a synthesized `factText` alongside `category`/`topicTag` in the same LLM call, and the "Save as preference" modal on the frontend now pre-fills with that synthesized text once the classify call resolves (still a hand-editable `Textarea`, so the manual-edit safety valve is unchanged — only the default improved).
