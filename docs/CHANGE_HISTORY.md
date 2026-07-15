@@ -14,6 +14,36 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #245: reconcile orphaned 'running' pa_task_run rows on server restart (2026-07-15)
+
+**What changed:** Manual QA hit a stuck Quick Capture research task: the dev server restarted
+(tsx watch reload) while `runPATask()` was awaiting inside the `POST /agent/task` handler, killing
+the process before its try/catch could mark the `pa_task_run` row `succeeded`/`failed`. The row
+stayed `status='running'` forever, and `findExistingRunningTask()`'s dedup (#167 D5) then
+permanently blocked re-asking the same question — by design for a legitimately in-flight task,
+but with no way out once orphaned, since this app has no resumable worker process. Added
+`reconcileOrphanedPaTaskRuns()`, called once at backend boot (`server.ts`, after `getSql()`),
+which marks any `pa_task_run` rows still `status='running'` as `failed` with an explanatory
+`result_summary` — any such row found at startup is guaranteed orphaned, since a `running` row
+can only be legitimate for the lifetime of one in-flight HTTP request.
+
+**Why:** No crash-recovery/resumption exists for the research loop (state lives entirely
+in-process), so a restart mid-run is unrecoverable — the correct behavior is to fail the row
+cleanly, not leave it stuck.
+
+**Verification:** `npm run test -w backend` (815/815) — new `reconcileOrphanedPaTaskRuns` describe
+block in `pa-task-runner.test.ts` (marks orphaned rows failed, leaves terminal rows untouched,
+confirms a re-ask is no longer blocked after reconciliation). Also verified live against the
+actual stuck row from manual QA: `tsx watch` picked up the new code, ran reconciliation on
+restart, and logged `pa-task-runner: reconciled orphaned running task(s) on startup { count: 1 }`.
+
+**Files:** `backend/src/modules/family/pa-task-runner.ts`, `backend/src/server.ts`,
+`backend/tests/pa-task-runner.test.ts`.
+
+**GitHub:** closes [#245](https://github.com/mangatrai/grove/issues/245).
+
+---
+
 ## FIX — #242: structure research-loop answers instead of one paragraph (2026-07-15)
 
 **What changed:** Manual QA reported research-loop answers (e.g. flight price lookups) rendering

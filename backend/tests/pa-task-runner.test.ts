@@ -52,6 +52,7 @@ import {
   executeSearchFinanceContext,
   executeSearchMemory,
   listTaskRunHistory,
+  reconcileOrphanedPaTaskRuns,
   recordOneShotCapture,
   runPATask,
 } from "../src/modules/family/pa-task-runner.js";
@@ -520,6 +521,53 @@ describe("pa-task-runner (#164, #166)", () => {
 
       await qExec(`DELETE FROM pa_task_run WHERE id = ?`, runningRow?.id);
       await qExec(`DELETE FROM pa_task_run WHERE household_id = ? AND goal = ?`, EMPTY_HOUSEHOLD_ID, "cross household goal");
+    });
+  });
+
+  describe("reconcileOrphanedPaTaskRuns (#245)", () => {
+    it("marks orphaned 'running' rows as 'failed' and leaves terminal rows untouched", async () => {
+      const orphaned = await qGet<{ id: string }>(
+        `INSERT INTO pa_task_run (household_id, goal, status) VALUES (?, ?, 'running') RETURNING id`,
+        DEDUP_HOUSEHOLD_ID, "orphaned from a killed server"
+      );
+      const succeeded = await qGet<{ id: string }>(
+        `INSERT INTO pa_task_run (household_id, goal, status, result_summary, finished_at) VALUES (?, ?, 'succeeded', 'already done', NOW()) RETURNING id`,
+        DEDUP_HOUSEHOLD_ID, "already finished goal"
+      );
+
+      await reconcileOrphanedPaTaskRuns();
+
+      const orphanedRow = await qGet<{ status: string; result_summary: string | null }>(
+        `SELECT status, result_summary FROM pa_task_run WHERE id = ?`, orphaned?.id
+      );
+      expect(orphanedRow?.status).toBe("failed");
+      expect(orphanedRow?.result_summary).toContain("Interrupted");
+
+      const succeededRow = await qGet<{ status: string; result_summary: string | null }>(
+        `SELECT status, result_summary FROM pa_task_run WHERE id = ?`, succeeded?.id
+      );
+      expect(succeededRow?.status).toBe("succeeded");
+      expect(succeededRow?.result_summary).toBe("already done");
+
+      await qExec(`DELETE FROM pa_task_run WHERE id IN (?, ?)`, orphaned?.id, succeeded?.id);
+    });
+
+    it("no longer blocks a re-ask of the same goal once reconciled", async () => {
+      const orphaned = await qGet<{ id: string }>(
+        `INSERT INTO pa_task_run (household_id, goal, status) VALUES (?, ?, 'running') RETURNING id`,
+        DEDUP_HOUSEHOLD_ID, "stuck goal blocking a retry"
+      );
+
+      await reconcileOrphanedPaTaskRuns();
+
+      mockComplete.mockResolvedValueOnce(loopSynthesize());
+      mockComplete.mockResolvedValueOnce(synthesisResult("Retried successfully."));
+      const result = await runPATask("stuck goal blocking a retry", DEDUP_HOUSEHOLD_ID);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.data.summary).toBe("Retried successfully.");
+
+      await qExec(`DELETE FROM pa_task_run WHERE id = ? OR (household_id = ? AND goal = ?)`, orphaned?.id, DEDUP_HOUSEHOLD_ID, "stuck goal blocking a retry");
     });
   });
 

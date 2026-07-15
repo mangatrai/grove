@@ -815,6 +815,30 @@ export async function runPATask(
 }
 
 /**
+ * #245: mark any pa_task_run rows still 'running' as 'failed' on server boot. There is no
+ * resumable worker process — runPATask()'s status-finalizing code lives entirely inside its own
+ * try/catch, which never runs if the process is killed (e.g. a restart) mid-request. A 'running'
+ * row can only be legitimate for the lifetime of one in-flight HTTP request, so any such row
+ * still present at startup is guaranteed orphaned and would otherwise permanently block
+ * findExistingRunningTask()'s dedup for that household/goal. Best-effort — a failure here must
+ * never prevent the server from starting.
+ */
+export async function reconcileOrphanedPaTaskRuns(): Promise<void> {
+  try {
+    const rows = await qAll<{ id: string }>(
+      `UPDATE pa_task_run SET status = 'failed', finished_at = NOW(),
+         result_summary = 'Interrupted by a server restart before finishing.'
+       WHERE status = 'running' RETURNING id`
+    );
+    if (rows.length > 0) {
+      log.warn("pa-task-runner: reconciled orphaned running task(s) on startup", { count: rows.length, runIds: rows.map(r => r.id) });
+    }
+  } catch (err) {
+    log.error("pa-task-runner: failed to reconcile orphaned running tasks", { err: String(err) });
+  }
+}
+
+/**
  * Records a one-shot Quick Capture ask into pa_task_run (GH #230) so it shows up in Run
  * History alongside research-loop runs and digest runs. One-shot asks complete synchronously
  * within the request, so this writes a single terminal row rather than a running→succeeded
