@@ -95,6 +95,7 @@ type RunHistoryRow = {
   countLabel: string;
   recipients: string[] | null;
   summary: string | null;
+  goal: string | null;
 };
 
 type CaptureActionType = "create_event" | "set_reminder" | "draft_message" | "note";
@@ -535,6 +536,7 @@ export function FamilyAgentPage() {
 
   // Quick capture
   const [captureNote, setCaptureNote] = useState("");
+  const [lastCaptureNote, setLastCaptureNote] = useState("");
   const [captureLoading, setCaptureLoading] = useState(false);
   const [captureResult, setCaptureResult] = useState<PATaskResponse | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
@@ -606,6 +608,7 @@ export function FamilyAgentPage() {
       countLabel: String(d.alertsCreated),
       recipients: d.recipients,
       summary: d.summaryText ?? d.skipReason ?? d.errorMessage ?? null,
+      goal: null,
     }));
     const askRows: RunHistoryRow[] = taskRuns.map(t => ({
       key: `ask:${t.id}`,
@@ -616,6 +619,7 @@ export function FamilyAgentPage() {
       countLabel: t.captureMode === "research_loop" ? String(t.iterationsUsed ?? 0) : "—",
       recipients: null,
       summary: t.resultSummary ?? t.goal,
+      goal: t.goal,
     }));
     return [...digestRows, ...askRows]
       .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
@@ -662,6 +666,7 @@ export function FamilyAgentPage() {
     setCaptureLoading(true);
     setCaptureResult(null);
     setCaptureError(null);
+    setLastCaptureNote(captureNote);
     try {
       const res = await apiJson<PATaskResponse>("/api/family/agent/task", {
         method: "POST",
@@ -846,6 +851,12 @@ export function FamilyAgentPage() {
 
           {captureResult ? (
             <Stack gap="sm" mt="xs">
+              {lastCaptureNote ? (
+                <Stack gap={2}>
+                  <Text size="xs" fw={600}>You asked:</Text>
+                  <Text size="sm" c="dimmed">{lastCaptureNote}</Text>
+                </Stack>
+              ) : null}
               {captureResult.type === "research_loop" ? (
                 <Badge size="sm" variant="light" color="grape" style={{ alignSelf: "flex-start" }}>
                   Researched · {captureResult.result.iterationsUsed} step{captureResult.result.iterationsUsed === 1 ? "" : "s"}
@@ -1014,6 +1025,9 @@ export function FamilyAgentPage() {
                         <Table.Tr>
                           <Table.Td colSpan={7}>
                             <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
+                              {row.goal ? (
+                                <Text size="xs" fw={600} c="var(--mantine-color-gray-3)" mb={4}>Asked: {row.goal}</Text>
+                              ) : null}
                               <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
                             </Paper>
                           </Table.Td>

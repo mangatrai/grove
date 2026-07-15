@@ -40,6 +40,30 @@ clean.
 
 ---
 
+## FIX — #243: show original question alongside Quick Capture / Run History answers (2026-07-15)
+
+**What changed:** Manual QA reported that once a Quick Capture request completed, the question
+that was asked disappeared from the screen — `handleCapture` cleared `captureNote` right after
+firing the request, so by the time the answer rendered the input was already empty. Run History's
+expanded rows had the same gap: `TaskRunEntry.goal` was already fetched but only used as a
+summary fallback when `resultSummary` was null, never shown alongside a populated summary. Added
+a `lastCaptureNote` state var (snapshotted from `captureNote` before it's cleared) rendered as
+"You asked: ..." above the Quick Capture answer, and a `goal: string | null` field on
+`RunHistoryRow` (populated from `TaskRunEntry.goal` for ask rows, `null` for digest rows) rendered
+as "Asked: ..." above the summary text in the expanded Run History panel.
+
+**Why:** No new DB column or endpoint needed — the data was already present, just not surfaced
+per the user's own suggested fix.
+
+**Verification:** `npm run build -w frontend` clean (TypeScript); `npm run test -w frontend`
+(86/86) unaffected (pure-logic suite, no DOM).
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`.
+
+**GitHub:** closes [#243](https://github.com/mangatrai/grove/issues/243).
+
+---
+
 ## FIX — #241: don't tag non-gift-giving holidays with GIFT-IDEAS (2026-07-15)
 
 **What changed:** Manual QA found the Family Agent firing a `[GIFT-IDEAS]` alert (and the #223
