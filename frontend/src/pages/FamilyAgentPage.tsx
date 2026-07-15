@@ -812,7 +812,7 @@ export function FamilyAgentPage() {
 
       {error ? <Text c="red" size="sm">{error}</Text> : null}
       {runResult ? (
-        <Paper withBorder p="sm" radius="sm" bg="var(--mantine-color-dark-6)">
+        <Paper withBorder p="sm" radius="sm">
           <Text size="sm">{runResult}</Text>
         </Paper>
       ) : null}
@@ -1033,11 +1033,11 @@ export function FamilyAgentPage() {
                       {isExpanded && hasResult ? (
                         <Table.Tr>
                           <Table.Td colSpan={7}>
-                            <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
+                            <Paper withBorder p="sm" radius="sm" mb={4}>
                               {row.goal ? (
-                                <Text size="xs" fw={600} c="var(--mantine-color-gray-3)" mb={4}>Asked: {row.goal}</Text>
+                                <Text size="xs" fw={600} c="dimmed" mb={4}>Asked: {row.goal}</Text>
                               ) : null}
-                              <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{row.summary}</Text>
+                              <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>{row.summary}</Text>
                             </Paper>
                           </Table.Td>
                         </Table.Tr>

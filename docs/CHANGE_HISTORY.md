@@ -14,6 +14,32 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #247: hardcoded dark-theme colors on Family Planner page break light theme (2026-07-15)
+
+**What changed:** Manual QA reported the `runResult` banner and the Run History expanded-row
+panel on the Agent page rendering as unreadable "black on black" / jarring "white on black"
+boxes — both `Paper` elements hardcoded `bg="var(--mantine-color-dark-6/7)"` (plus, on the
+expanded panel, hardcoded `gray-3`/`gray-0` text colors), which only reads correctly in dark
+theme. The rest of the page follows the codebase convention of a theme-neutral `Paper
+withBorder` with no forced `bg`, letting Mantine's CSS variables adapt to light/dark
+automatically. Replaced both hardcoded blocks with `Paper withBorder` (no `bg`) and swapped the
+hardcoded text colors for `c="dimmed"`/default text color, matching the rest of the file.
+
+**Why:** The two `Paper` blocks were the only spots on this page with a forced dark background,
+so they broke in light theme (the app's actual default) while looking fine in dark theme,
+which is presumably how they were authored/tested.
+
+**Verification:** `npx tsc --noEmit` and `npm run build -w frontend` clean. Manual (dev server,
+Podman-hosted Postgres, Playwright script, light color scheme): confirmed the Run History
+expanded panel now renders as a light bordered card with normal-contrast text, no black boxes.
+`npm run test -w backend` (815/815, unaffected — frontend-only change).
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`.
+
+**GitHub:** closes [#247](https://github.com/mangatrai/grove/issues/247).
+
+---
+
 ## FIX — #245: reconcile orphaned 'running' pa_task_run rows on server restart (2026-07-15)
 
 **What changed:** Manual QA hit a stuck Quick Capture research task: the dev server restarted
