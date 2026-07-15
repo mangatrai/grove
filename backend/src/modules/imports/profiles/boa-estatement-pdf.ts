@@ -1,6 +1,5 @@
 import type { BoaStatementBalances } from "./boa-checking-savings-csv.js";
 import type { NormalizedRawPayload } from "./types.js";
-import { extractPdfText } from "./pdf-text.js";
 import { parseAmount } from "./tabular-helpers.js";
 
 const MONTH_MAP: Record<string, string> = {

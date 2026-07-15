@@ -319,7 +319,9 @@ docker run --rm -p 4000:4000 \
 
 ### 3.3 OCI (Oracle Cloud Infrastructure)
 
-OCI Always Free Tier is the currently recommended self-hosted deployment path for $0/month recurring cost. It includes:
+> **Capacity caveat (2026):** Always Free Ampere A1 capacity is frequently unavailable in popular regions (confirmed: no free machines in the Chicago region as of mid-2026, and the home region cannot be changed after signup). If you cannot get an A1 instance, use §3.5 (GCP/AWS) instead.
+
+OCI Always Free Tier is the most generous self-hosted path **on paper** for $0/month recurring cost. It includes:
 
 - **Compute:** 1 × Ampere A1 Flex VM (4 OCPU / 24 GB RAM — all resources can be allocated to one VM)
 - **Storage:** 2 × 200 GB block volumes (for OS and data)
@@ -379,6 +381,106 @@ max_connections = 50           # App uses ~5–10
 
 **For production with $0 target,** self-hosted Postgres is the right choice once you have a VM. Managed Postgres is best for **hybrid** setups (home app + managed DB for redundancy) or if you don't have hardware yet.
 
+### 3.5 Hyperscaler Free Tiers (AWS / GCP / Azure) — Comparison and Runbooks
+
+> **Verified 2026-07-06.** Free-tier terms change frequently — re-verify against the official pages before provisioning: [AWS Free Tier](https://aws.amazon.com/free/), [GCP Free Tier](https://cloud.google.com/free), [Azure Free Services](https://azure.microsoft.com/en-us/pricing/free-services). Migration work is tracked in GH issue #219 (epic); this section is the guide (#218).
+
+#### 3.5.1 Hard constraint: the process must run 24/7
+
+All schedulers (family agent digests, nightly backup, realty refresh, import cleanup, payslip poller — see `backend/src/server.ts`) are in-process `node-cron` jobs. **Scale-to-zero and serverless platforms (Cloud Run min-instances=0, Lambda, App Runner idle, Koyeb scale-to-zero) will silently skip cron fires.** Any target must be an always-on VM or a container with min-instances ≥ 1. Also set `TZ` explicitly on any new host — cloud VMs default to UTC and all crons use `env.TZ`.
+
+#### 3.5.2 Free-tier landscape (as of mid-2026)
+
+| Provider | What you actually get | Durable $0 host? |
+|---|---|---|
+| **AWS** (accounts created after 2025-07-15) | Credit-based: $100 at signup + up to $100 earned ($20 each for trying EC2, RDS, Lambda, Bedrock, Budgets). "Free plan" lasts **max 6 months or until credits run out — then the account is CLOSED** (90-day data grace) unless upgraded to a paid plan. The old 12-month free t2/t3.micro EC2 and db.t3.micro RDS are gone for new accounts. ~30 always-free services remain (Lambda, DynamoDB, SNS pub/sub) — but **no always-free EC2 or RDS**. | **No** — ~6 months near-free, then ~$5–25/mo |
+| **GCP** | **e2-micro VM always free** (2 shared vCPU, 1 GB RAM), one per billing account, only in `us-west1`/`us-central1`/`us-east1`; includes 30 GB standard persistent disk + 1 GB/mo North-America egress. Plus $300/90-day new-account credits. No free Cloud SQL. | **Yes** — genuinely always-free, 24/7 |
+| **Azure** | $200/30-day credit + 12 months of 750 h/mo burstable B-series VM (B1s / B2pts-v2 / B2ats-v2) for new accounts, then pay-as-you-go. No always-free VM; no spend cap — resources silently convert to billed after 12 months. | **No** — 12 months, then paid |
+| **OCI** | Most generous on paper (4 ARM OCPU / 24 GB always free) but capacity-starved — see §3.3 caveat. | Only if you can get capacity |
+
+**Bottom line:**
+- **Cheapest durable setup ($0/mo + ~$10–12/yr domain):** GCP e2-micro (app) + Neon free Postgres (DB) + Cloudflare (domain registrar at cost, free DNS, free Email Routing) + S3 or GCS for backups (pennies) + SES or existing Resend SMTP for email.
+- **All-AWS (if you prefer one console):** ~6 months near-free on credits, then steady-state ~$5–9/mo — EC2 `t4g.micro` (~$6–7/mo, ARM) or **Lightsail $5/mo bundle** (1 GB RAM, includes static IP + 2 TB transfer, simplest). Budget for the steady-state number, not the credit period.
+- **Postgres: keep Neon regardless of provider.** RDS `db.t4g.micro` is ~$13+/mo with no free tier for new accounts — it is the single biggest avoidable cost. Postgres-on-the-VM is possible but 1 GB RAM is tight next to the Node process (~150–300 MB) and you forfeit managed backups/PITR. Neon's free tier (~100 compute-hrs/mo) suits this app's access pattern; keep `DATABASE_SSL=1`.
+
+#### 3.5.3 Runbook A — GCP e2-micro (recommended $0 path)
+
+1. **Account/project:** create a GCP project with billing enabled (always-free requires a billing account; you are not charged while inside free limits). Set a budget alert at $1 as a tripwire.
+2. **VM:** Compute Engine → e2-micro, region `us-central1` (or us-west1/us-east1 — **only these three qualify**), 30 GB **standard** persistent disk (not SSD — SSD is not in the free allotment), Debian 12. Under Networking set **Standard network tier** (Premium tier egress bills differently) and reserve the ephemeral external IP as static (an in-use static IP is free).
+3. **Do not install the Ops Agent** — it costs ~200 MB RAM you need. Add 1–2 GB swap instead:
+   ```bash
+   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+   sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+4. **App:** either Docker (`Dockerfile` at repo root is production-ready; on 1 GB RAM prefer plain Node to skip the Docker daemon overhead) or bare Node 20 + systemd:
+   ```bash
+   # Node 20 via nodesource, then:
+   git clone <repo> && cd household-finance-app
+   npm ci && npm run build && npm prune --omit=dev
+   ```
+   systemd unit (`/etc/systemd/system/household-finance.service`):
+   ```ini
+   [Service]
+   WorkingDirectory=/opt/household-finance-app
+   ExecStart=/usr/bin/node backend/dist/server.js
+   Restart=always
+   Environment=MODE=PROD
+   Environment=TZ=America/Chicago
+   EnvironmentFile=/opt/household-finance-app/.env
+   User=hfapp
+   [Install]
+   WantedBy=multi-user.target
+   ```
+5. **TLS + domain:** point an A record (Cloudflare DNS) at the static IP; run [Caddy](https://caddyserver.com) as reverse proxy (`your.domain.example { reverse_proxy localhost:4000 }`) for automatic Let's Encrypt certs, or enable the Cloudflare orange-cloud proxy. Update `PUBLIC_BASE_URL`, `ALLOWED_ORIGIN`, `FRONTEND_APP_URL`, and the Google OAuth redirect URIs (Drive **and** Calendar) in the Google Cloud console.
+6. **Firewall:** GCP firewall rules allow 80/443 only; port 4000 stays internal.
+7. **Memory expectations:** Node app ~150–300 MB + OS leaves headroom on 1 GB with swap. If OOM-kills appear, `NODE_OPTIONS=--max-old-space-size=512`.
+
+#### 3.5.4 Runbook B — AWS (EC2 or Lightsail)
+
+1. **Account plan choice at signup:** pick the **paid plan** if this is meant to live past 6 months (credits still apply automatically, and the account is not closed when the free plan would expire). The "free plan" is only safe for a throwaway evaluation. Complete the five $20 credit activities (launch EC2, configure RDS *(then delete it)*, create a Lambda, call Bedrock once, set a Budget) within 6 months to collect the extra $100.
+2. **Budget alarm first:** AWS Budgets → $5/mo alert. AWS has no spend cap; this is your tripwire.
+3. **Compute — two options:**
+   - **Lightsail $5/mo bundle** (1 GB RAM, 2 vCPU, 40 GB SSD, 2 TB transfer, static IP included) — fixed price, simplest console, same runbook as GCP step 4 onward.
+   - **EC2 `t4g.micro`** (ARM Graviton, 1 GB RAM, ~$6–7/mo on-demand in us-east-2) + 8–16 GB gp3 EBS (~$1/mo) + an Elastic IP (free while attached). More knobs (security groups: 80/443 in, all out), same app setup. ARM note: Node 20 and all app deps are arch-neutral; the repo Dockerfile builds fine on arm64.
+4. **App + TLS + domain:** identical to Runbook A steps 4–6 (systemd or Docker, Caddy or Cloudflare proxy, env URL updates).
+5. **Database:** keep Neon (recommended, $0). If you insist on RDS: `db.t4g.micro`, 20 GB gp3, single-AZ, no Multi-AZ, no Performance Insights ≈ $13–15/mo — document the decision before paying it.
+
+#### 3.5.5 Backups to S3 instead of Google Drive (planned — #219)
+
+Current state: cloud backup is **hardcoded to Google Drive** (`backend/src/modules/export/gdrive-backup.service.ts`, nightly 11 PM scheduler). The migration epic (#219) introduces a storage-adapter interface (`BACKUP_STORAGE=gdrive|s3`) so encrypted `.hfb` files can go to an S3/GCS bucket instead. Cost context: the dumps are a few MB — S3 standard is ~$0.023/GB/mo, so pennies. Until that ships, Google Drive backup keeps working from any host — it only needs the OAuth env vars and outbound HTTPS.
+
+Bucket hygiene when it ships: private bucket, versioning on, lifecycle rule expiring old versions at 90 days, and a dedicated IAM user/role scoped to `s3:PutObject`/`s3:ListBucket`/`s3:GetObject` on that one bucket.
+
+#### 3.5.6 Email via SES (optional, config-only)
+
+The mailer is pure SMTP (`backend/src/modules/mailer/mailer.service.ts`) — SES is a drop-in endpoint, no code change:
+
+```
+SMTP_HOST=email-smtp.us-east-2.amazonaws.com
+SMTP_PORT=587
+SMTP_SECURE=0
+SMTP_USER=<SES SMTP credential name>
+SMTP_PASS=<SES SMTP credential secret>
+SMTP_FROM=Household Finance <no-reply@your.domain.example>
+```
+
+Setup: verify your domain in SES (adds DKIM CNAMEs + SPF to Cloudflare DNS), create SMTP credentials, then **request production access** (new SES accounts are sandboxed to verified recipients only — the request form takes a day). Free allowance: 3,000 message charges/mo for the first 12 months of SES use, then $0.10 per 1,000 sends — effectively $0 at household digest volume. Keeping Resend is equally fine; this is a convenience consolidation, not a cost move.
+
+#### 3.5.7 SMS — evaluated and skipped
+
+AWS SNS / End User Messaging has **no meaningful free SMS tier** in 2026: ~$0.006–0.007 per US message plus carrier fees, plus an origination identity (toll-free number lease ~$2/mo). Email + in-app notifications cover the app's needs; SMS is out of scope unless a concrete requirement appears.
+
+#### 3.5.8 Steady-state cost summary
+
+| Path | After free period (monthly) |
+|---|---|
+| GCP e2-micro + Neon + Cloudflare DNS | **$0** (+ domain ~$10–12/yr) |
+| AWS Lightsail 1 GB + Neon | $5 fixed |
+| AWS EC2 t4g.micro + EBS + Neon | ~$7–9 |
+| AWS EC2 + RDS db.t4g.micro | ~$20–25 |
+| Azure B1s after month 12 | ~$8–10 |
+
 ---
 
 ## 4. Environment Variables Reference
@@ -432,8 +534,8 @@ Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **docum
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | OpenAI API key | _(required)_ |
-| `OPENAI_MODEL` | Fast/cheap model — insights, summarization | `gpt-4.1` |
-| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `gpt-4o` |
+| `OPENAI_MODEL` | Fast/cheap model — insights, summarization, PA agent brainstorm/formatting calls (search-query generation, digest prose) | `gpt-4.1` |
+| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage), year-end summary narrative | `gpt-4o` |
 
 > Recommended `OPENAI_MODEL=gpt-4.1` for payslip extraction. `gpt-4.1-mini`/`gpt-4o-mini` have known issues with column-type disambiguation on Deloitte stubs.
 
@@ -442,8 +544,8 @@ Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **docum
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key | _(required)_ |
-| `ANTHROPIC_MODEL` | Fast/cheap model — insights, summarization | `claude-haiku-4-5-20251001` |
-| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `claude-sonnet-4-6` |
+| `ANTHROPIC_MODEL` | Fast/cheap model — insights, summarization, PA agent brainstorm/formatting calls (search-query generation, digest prose) | `claude-haiku-4-5-20251001` |
+| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops, PA agent judgment calls (coverage/coordination analysis, research synthesis, deadline triage), year-end summary narrative | `claude-sonnet-5` |
 
 ### 4.5 Tax Protest AI (Optional)
 
@@ -527,6 +629,27 @@ No configuration is needed for the stock quote or export cleanup schedulers — 
 | **Bootstrap user** | `backend/db/seeds/0001_bootstrap.sql` | `owner@example.com` / bcrypt hash of `ChangeMe123!` |
 | **Global categories** | `backend/db/seeds/0001_bootstrap.sql` | Taxonomy seed (income, expenses, assets, liabilities, etc.) |
 | **Default global rules** | `backend/db/seeds/0001_bootstrap.sql` | Merchant pattern rules for categorization |
+
+### 4.12 Household Inbox Email Ingestion (Optional)
+
+Reuses the existing `SMTP_USER`/`SMTP_PASS` credentials (§8) as the IMAP login — the dedicated household Gmail account's App Password already configured for SMTP send works for IMAP too. Only the protocol-specific bits below are new.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FAMILY_INBOX_IMAP_HOST` | (unset) | IMAP host, e.g. `imap.gmail.com` |
+| `FAMILY_INBOX_IMAP_PORT` | `993` | IMAP port |
+| `FAMILY_INBOX_IMAP_SECURE` | `true` | TLS on connect |
+| `FAMILY_INBOX_IMAP_FOLDER` | `INBOX` | IMAP folder/label to poll |
+
+**If `FAMILY_INBOX_IMAP_HOST` is unset, or `SMTP_USER`/`SMTP_PASS` are not set, the daily inbox poll no-ops silently.** See §10.4 for full setup steps and the rationale for using a dedicated IMAP mailbox instead of the per-parent Google OAuth integration.
+
+### 4.13 PA Agent Task Loop (Optional)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household monthly ceiling on `runPATask` runs. See §10.6. |
+| `PA_TASK_MAX_RUNS_PER_DAY` | `20` | Per-household daily ceiling on `runPATask` runs (household's `env.TZ`). See §10.6. |
+| `PA_OCCASION_RESEARCH_ENABLED` | `false` | Auto-enqueue a background gift-research `runPATask` when a GIFT-IDEAS (21-day) occasion nudge fires (#223 Phase 2). Off by default — opt-in, since it silently spends the household's PA budget (§10.6) without a direct ask. See §10.7. |
 
 ---
 
@@ -654,11 +777,22 @@ Both tables are registered in the export registry (restoreOrder 21–22) and inc
 3. On confirm: **destructive** — entire household wiped and replaced with bundle contents
 4. All JWTs invalidated (`token_version` bumped for all users); users automatically signed out
 
-**API:** `POST /exports/household/import` (multipart `file`) → `{ jobId }` → poll `GET /exports/import/:jobId`.
+**API (SEC #186, two-phase):**
+1. `POST /exports/household/import/prepare` (multipart `file`) → validates the backup and returns
+   `{ token, ...manifest }`. Nothing is modified yet.
+2. `POST /exports/household/import/execute` (JSON `{ token }`) → `{ jobId }` → poll
+   `GET /exports/import/:jobId`. The token is single-use and expires after 15 minutes.
+
+A direct single-call "restore now" endpoint no longer exists — a script or client can no longer
+skip the preview step and trigger a destructive restore in one shot.
 
 **Backward compatibility:** Supports v1–v4 bundle formats (single `household-bundle.json` → split JSON).
 
 **After restore:** Canonical transactions may reference deleted custom categories. Always use `LEFT JOIN category`, never `INNER JOIN` (see §5.1 and CLAUDE.md).
+
+**Undoing a bad restore:** there is no automatic pre-restore safety snapshot. If a restore turns
+out to be wrong, recover by restoring again from the most recent daily `pg_dump` backup (below) —
+daily backups are the intended recovery path for this scenario, not an in-app undo.
 
 #### Manual pg_dump Backup (OCI / Self-Hosted)
 
@@ -899,6 +1033,7 @@ sudo tail -f /var/log/postgresql/postgresql-17-main.log
 | **Import processing hangs** | Parser or canonicalize taking too long | Check CPU/memory on the server; review logs for errors. For very large imports, consider async canonicalize (backlog item #12) |
 | **Email not sending** | SMTP not configured or credentials wrong | Verify all `SMTP_*` are set correctly; test with `telnet smtp.gmail.com 587` |
 | **Certbot renewal fails (OCI)** | Port 80 not open in firewall or DNS stale | Check OCI Security List and ufw (`sudo ufw status`); verify DuckDNS A record points to correct IP |
+| **A Family Planner research-loop Ask seems stuck or you want to see what it did** | PA task loop now logs each iteration | Tail `.runtime/logs/app.log` for `pa-task-runner: iteration start` / `tool executed` / `run succeeded` lines (needs `LOG_LEVEL=info` or lower) |
 
 **Restore from backup (quick recovery):**
 
@@ -947,6 +1082,14 @@ GOOGLE_CALENDAR_REDIRECT_URI=https://your-koyeb-app.koyeb.app/gcal/oauth/callbac
 ### 10.2 Per-Parent Google Calendar Connect
 
 Each parent connects their personal Google account once via the Grove app (Family → Settings → Connect Google Calendar). The OAuth refresh token is stored per-user in the DB. The agent uses the stored token to query Google Calendar at runtime — no re-auth required after initial connect as long as the Google Cloud project is in Production status.
+
+### 10.2a Calendar Roles (FIX #212 — calendar provenance)
+
+Each connected calendar can be tagged with a **role**: `work` | `school` | `activities` | `other`, saved via `PATCH /gcal/calendar-roles` (per-user, stored as JSON in `oauth_integrations.calendar_roles`, migration `0079_gcal_calendar_roles.sql`). The Family Planner agent (Domains 1/2) treats `school`-role events as informational only — e.g. a school closure never counts as a parent being unavailable, unlike a `work`-role event at the same time. Without an explicit role saved, the agent falls back to a name heuristic (`heuristicCalendarRole` in `gcal.service.ts`): a calendar named "…ISD"/"…School"/"…Class" defaults to `school`; "…Camp"/"…Sport"/"…Activit…" defaults to `activities`; everything else defaults to `work`. Set roles explicitly in Settings → Family → Google Calendar rather than relying on the heuristic for anything ambiguous.
+
+### 10.2b Tavily Search Quality — Credit Usage (FIX #210)
+
+Domain 3 (proactive research) and Domain 4 (deadline sweep) both call `tavilySearch()` (`backend/src/llm/tools/tavily.ts`) with `search_depth: "advanced"` (was `"basic"`) to get richer snippets and an LLM-synthesized answer line. **Advanced depth costs 2 Tavily API credits per query, vs. 1 for basic** — at ~7 queries per agent run, this roughly doubles Tavily credit usage. On the free tier (1,000 credits/month, see `TAVILY_API_KEY` in §5), this is still negligible at the household's run cadence (daily delta + weekly full digest). If `TAVILY_API_KEY` is unset, Domain 3 falls back to LLM-only suggestions (graded `"lead"`, never `"verified"`, since nothing was actually searched); Domain 4 degrades similarly.
 
 ### 10.3 Work Calendar Mirroring — iOS Shortcut Setup
 
@@ -1008,6 +1151,110 @@ The 6am run ensures work events are in Google Calendar before the agent's mornin
 - Each parent has their own `Work — Mirrored` calendar in their own Google account — the Shortcut only writes to the signed-in account, no cross-contamination.
 - The Shortcut clears all future events in `Work — Mirrored` and recreates them on every run. This is intentional — clean dedup without needing API-level upsert logic.
 - The agent reads `Work — Mirrored` as a regular Google Calendar — no special handling needed.
+
+### 10.4 Household Inbox Email Ingestion (FIX #215, broadened CR-224)
+
+The agent polls a **dedicated household Gmail account** daily (6:12am, `env.TZ`) over IMAP and turns actionable emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`, or `[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+
+**What kinds of emails are understood** — the model first identifies the email's genre, then extracts per that genre's rules:
+- **school/activity** — permission slips, fundraisers, activity reminders, field trips.
+- **order/delivery** — delivery dates, return-window deadlines, action needed on a failed delivery.
+- **financial notice** — payment due dates, card expiry; low-balance/fraud alerts are flagged as info-only (never a full account number — last 4 digits only).
+- **appointment/medical** — confirmations, reschedule links, prep instructions that carry a date.
+- **invitation/social** — event date and RSVP deadline, extracted as two separate items when both are present.
+- **utility/service/government** — renewal deadlines, service-interruption dates, registration/inspection windows.
+- **promotional/newsletter** with no actionable item — no items extracted.
+
+**Why IMAP + a dedicated account, not the existing Google OAuth integration:**
+
+`oauth_integrations` (used for Calendar in §10.1–10.2 and Drive backup in §4.8) is scoped **per-parent** — each parent connects their own personal Google account. Routing inbox ingestion through that same table would mean either (a) picking one parent's personal inbox to poll, which is semantically wrong (school emails aren't "owned" by one parent), or (b) adding a household-level entry into a table whose every other row is a per-user OAuth grant — blurring the "whose account is this" semantics the FIX #212/#217 calendar-provenance work depends on staying clean. A **separate dedicated household Gmail account** (e.g. `yourfamily.grove@gmail.com`), authenticated via IMAP + App Password, avoids both problems: it's not tied to any one parent, and it never touches `oauth_integrations` at all. The tradeoff is one more account to provision — a one-time, ~5 minute setup below.
+
+**Credentials are reused from SMTP (§8), not duplicated.** The dedicated household Gmail account's App Password is the same credential for both sending (SMTP) and polling (IMAP) — `SMTP_USER`/`SMTP_PASS` supply the IMAP login. Only the IMAP-specific host/port/folder are separate env vars.
+
+**One-time setup:**
+
+1. Create a new, dedicated Gmail account for the household (do not reuse either parent's personal account) — e.g. `yourfamily.grove@gmail.com`.
+2. Have school/activity newsletters forwarded or directly sent to this address (update sign-up forms, or set up mail forwarding rules from parents' existing inboxes).
+3. Enable IMAP: Gmail Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP.
+4. Enable 2-Step Verification on the account (required for App Passwords): Google Account → Security → 2-Step Verification.
+5. Generate an App Password: Google Account → Security → App passwords → generate one for "Mail". Copy the 16-character password.
+6. Set `SMTP_USER` to this account's address and `SMTP_PASS` to the App Password (§8) — if SMTP is already configured with a different account, either point SMTP at this dedicated account too, or note that today's design ties IMAP credentials to whatever `SMTP_USER`/`SMTP_PASS` are set to.
+7. Set the IMAP-specific environment variables below and redeploy.
+
+**Environment variables:**
+
+| Variable | Default | Example |
+|----------|---------|---------|
+| `FAMILY_INBOX_IMAP_HOST` | (unset) | `imap.gmail.com` |
+| `FAMILY_INBOX_IMAP_PORT` | `993` | `993` |
+| `FAMILY_INBOX_IMAP_SECURE` | `true` | `true` (TLS) |
+| `FAMILY_INBOX_IMAP_FOLDER` | `INBOX` | `INBOX` or a Gmail label mapped as an IMAP folder |
+
+The feature is **optional** — if `FAMILY_INBOX_IMAP_HOST` is unset, or `SMTP_USER`/`SMTP_PASS` (§8) are not set, the daily poll no-ops silently (`isEmailIngestConfigured()` returns false) and no other functionality is affected.
+
+**Cost:** negligible — one IMAP poll/day against a free Gmail account, plus one LLM extraction call per new message per household (same `chatModel()` as the rest of the family-agent module, capped at 10 items/email, 1200 max output tokens).
+
+**Security:**
+- The email body is treated as **untrusted third-party content** — the extraction prompt explicitly instructs the model to extract facts only, never follow instructions embedded in the email. Extraction runs on the tool-less chat completion path (`getChatAdapter().complete()`), never the tool-use/agentic path, so a malicious email cannot trigger tool calls.
+- Extraction output is zod-validated before touching the database; malformed/unparseable responses are logged and dropped (message is marked `error` in `email_ingest_log`, not retried until the next poll re-fetches it — see dedup below).
+- No suggestion auto-creates a calendar event or `family_events` row — every one requires the existing approve flow (`POST /alerts/:alertId/approve`).
+- Only the configured `FAMILY_INBOX_IMAP_FOLDER` (default `INBOX`) is ever queried.
+
+**Data model:** `email_ingest_log` (migration `0081_email_ingest_log.sql`) records one row per `(household_id, message_id)` — the `UNIQUE` constraint is the dedup mechanism (`ON CONFLICT DO NOTHING`), so a message still present in the mailbox on the next poll is skipped per household rather than re-processed. `status` is one of `pending`/`processed`/`ignored`/`error`. Extracted items that would duplicate an existing active `family_events` row (fuzzy title match + exact date) are silently skipped rather than creating a redundant alert. Registered in `EXPORT_REGISTRY` (`restoreOrder: 29`) for backup/restore.
+
+### 10.5 Occasion Awareness — Birthday/Holiday Lead-Time Nudges (#223)
+
+A new agent domain, `detectOccasions`, runs on every agent run alongside coverage/coordination, proactive research, and deadline sweeping, and produces `alert_type = 'suggestion'` rows in `family_agent_alerts` (same table and approve/resolve flow as everything else in Family Planner → Alerts). **Fully deterministic — no LLM call, no Tavily search, no hardcoded holiday list.**
+
+**Three detection sources:**
+1. **Household member birthdays** — `person_profile.date_of_birth_encrypted`, decrypted at read time.
+2. **Calendar-derived birthdays/anniversaries** — event titles on connected Google Calendars matched against a birthday/anniversary regex.
+3. **Seasonal/cultural holidays** — read directly from any Google Calendar the household has subscribed to whose calendar ID ends `#holiday@group.v.calendar.google.com` (Google's own public "Holidays in United States", "Holidays in India", etc. calendars). `fetchCalendarEvents` fetches these with a wider 25-day lookahead window, independent of the household's `selectedCalendarIds`, so narrowing day-to-day sync to specific calendars doesn't lose occasion awareness. **Design note:** an LLM+Tavily-based seasonal-occasion guess was considered and rejected — Tavily results can be stale or wrong, and a fixed Western-holiday list wouldn't know which holidays a specific household actually observes. Reading calendars the household already subscribes to sidesteps both problems with zero extra API cost.
+
+**Tiering:** gift-able occasions (member birthdays, holidays) get a `[GIFT-IDEAS]` nudge at 21 days out and a `[LAST-CALL]` nudge at 5 days out — both can be open at once. Calendar-derived birthdays/anniversaries get a single `[SEND-WISHES]` nudge at 3 days out. Reason text is stable across days so the existing alert dedup (`alertDedupKey`) naturally prevents re-firing once a tier has opened; `detectOccasions` also pre-filters against currently-open alerts before returning, so a 3-week gift-tier window can't retrigger the digest email every day it stays open.
+
+**Settings toggle:** `family_occasion_settings` (migration `0082_family_occasion_settings.sql`, one row per household, `enabled BOOLEAN DEFAULT TRUE`) — Settings → Family → Occasion Nudges. `GET`/`PATCH /api/family/occasion-settings` (owner/admin only). Missing row defaults to enabled. Registered in `EXPORT_REGISTRY` (`restoreOrder: 30`) for backup/restore.
+
+**No new env vars, no new cost for Phase 1** — this reuses the existing Google Calendar OAuth connection from §10.1–10.2; no additional API scopes are required (holiday calendars are read the same way as any other calendar the account has access to).
+
+**Phase 2 — gift-research bridge (`PA_OCCASION_RESEARCH_ENABLED`, off by default):** when a `[GIFT-IDEAS]` (21-day) alert is genuinely new — i.e. it survived `detectOccasions`'s own dedup filter, so this can never re-fire daily while the same alert stays open — `family-agent.service.ts` fire-and-forget-enqueues a background `runPATask()` (§10.6) with a goal built from the alert's reason text ("Research gift ideas. \<name\>'s birthday is on \<date\>. Suggest 3-5 specific, budget-conscious gift ideas with rough price ranges."), `origin='scheduler'`. It is not awaited by the digest-generation `Promise.all` fan-out — `runPATask`'s loop can take many LLM round-trips, and stalling on it would delay email delivery for unrelated domains (coverage, deadlines, etc.). The bridge reuses `runPATask`'s own concurrency-dedup and `PA_TASK_MAX_RUNS_PER_MONTH`/`PA_TASK_MAX_RUNS_PER_DAY` budget checks as-is — no separate budget or dedup logic. `LAST-CALL` (5-day) and `SEND-WISHES` (3-day) tiers never trigger the bridge, only the 21-day `GIFT-IDEAS` tier. Results land as `suggestion` alerts, same as any other `runPATask` output. The Run History table (Family Planner page) labels these rows "Gift research" in the Type column (`origin='scheduler'`) to distinguish them from a parent's own Quick Capture asks.
+
+### 10.6 PA Agent Task Loop — Open-Ended Research (Phase 2a/2c/2d, #164/#166/#167)
+
+`runPATask(goal, householdId)` (`backend/src/modules/family/pa-task-runner.ts`) runs a bounded, BabyAGI-style loop for open-ended goals the fixed 5-domain pipeline above can't handle — e.g. "find cheaper flights DFW→Delhi in December", "find a gift for [member] under $40".
+
+**HTTP-reachable (#167):** `POST /api/family/agent/task` (owner/admin only) is the Quick Capture box's endpoint (see USER_GUIDE → Family Planner → Quick Capture). A schema-enforced classifier call (`chatModel()`) first decides `one_shot` (routes to the existing `processCaptureNote`) vs. `research_loop` (routes to `runPATask`) — see `classifyCaptureNote()` in `family-agent.service.ts`. Classification is skipped when the note is prefixed `research:` (stripped before use) or the request body sets an explicit `mode`. On any classifier-output validation failure, the default is `one_shot` — a wrong `one_shot` only costs a retry with `research:`, while a wrong `research_loop` burns up to 13 LLM calls and several Tavily calls for nothing. `research_loop` results are also persisted to `family_agent_alerts` (`alert_type = 'suggestion'`). `GET /api/family/agent/task/:runId` polls a run's status/summary by id — added as a fallback in case a synchronous research request runs long enough to hit a platform sync-request timeout; **this has not been verified against the Koyeb prod deployment** and is worth a manual smoke test before relying on it there. The old `POST /agent/capture` route (synchronous one-shot only, no classifier) is removed — `processCaptureNote()` itself is unchanged, just called internally by the new route's `one_shot` branch.
+
+Each run: up to 6 iterations of decide-next-step → run one of `search_web` / `fetch_page` / `search_calendar` / `search_finance_context` → compress the result → repeat, then a final synthesis call. Every run — including refused ones — is persisted to `pa_task_run` (migration `0083_pa_task_run.sql`): status, iteration count, the uncompressed findings ledger, compressed history, and accumulated LLM/Tavily usage.
+
+**Concurrency dedup (#167 D5):** before starting a new loop, `runPATask` normalizes the goal (trim, lowercase, collapse whitespace) and checks it against any `status = 'running'` row for the same household. A match returns `PA_TASK_ALREADY_RUNNING` (409 at the route) with the existing run's id, instead of starting a duplicate loop. This check — and the budget checks below — run inside `runPATask` itself, before it inserts the `'running'` row, to avoid a race between two near-simultaneous requests.
+
+**Environment variables:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PA_TASK_MAX_RUNS_PER_MONTH` | `60` | Per-household ceiling on non-failed `pa_task_run` rows in the current calendar month. At cap, `runPATask` writes a `refused_budget` row and returns `PA_BUDGET_EXCEEDED` without making any LLM or Tavily calls. A run-count ceiling was chosen over a dollar ceiling — no per-model price table to keep current, and it's predictable for the user ("60 research tasks a month"). |
+| `PA_TASK_MAX_RUNS_PER_DAY` | `20` | Same mechanism, scoped to the current calendar day in the household's configured `env.TZ` (not the DB server's default timezone) — added per #167 to catch a single household burning its whole monthly budget in one day. Both caps are checked independently; either one being at capacity refuses the run. |
+
+**Cost:** each run makes roughly 8–13 LLM calls (up to 6 loop-decision + 6 compression calls on `chatModel()`, 1 synthesis call on `strongModel()`) plus one Tavily call per `search_web`/`fetch_page` tool use. `pa_task_run.estimated_cost_usd` is left `null` — deliberately not computed from a static per-model price table that would go stale.
+
+**Data handling:** `pa_task_run` is registered in `EXPORT_EPHEMERAL_TABLES` (`export-registry.ts`) — operational run history, same bucket as `import_job`/`export_job`/`insight_job`, not restored from backups.
+
+**Honesty guardrails:** Tavily search snippets can't return live JS-rendered prices (Google Flights, retailer carts). Synthesis is instructed to cite every price/availability claim to its findings-ledger source + observation date ("observed \<date\> — verify at \<link\>"), never assert a live quote, and say "could not verify" rather than fill in a gap — so a flight-research goal returns constraint-satisfying routes/options + typical price ranges + booking links, not fabricated fares.
+
+**Testing:** `backend/tests/pa-task-runner.test.ts` covers loop mechanics only (mocked LLM + Tavily). `backend/tests/tavily.test.ts` covers `tavilySearch()`'s response parsing directly (malformed/partial Tavily results are filtered out, FIX #227). Live-provider quality is checked manually via `npm run pa-task-eval -w backend -- "<goal>" [householdId]` (`backend/scripts/pa-task-eval.ts`) before shipping any change to the loop — not part of `npm test`. That script closes its own DB pool and calls `process.exit()` on completion (FIX #227) — earlier versions left the pool open and hung after finishing.
+
+**Structured output (FIX #228):** all 3 loop LLM calls (`decideNextStep`, compression, `synthesize`) pass a hand-written JSON Schema + `jsonSchemaName` alongside `responseFormat: "json"`. `openaiChat()` uses OpenAI's `json_schema` strict mode (not the weaker `json_object` mode, which only guarantees syntactically valid JSON — not a single top-level value or a shape; a live eval saw it return two concatenated JSON objects in one completion). `anthropicChat()` uses forced tool-use (a synthetic tool whose `input_schema` is the desired shape, `tool_choice` pinned to it) — Anthropic has no native JSON mode, so this is its actual enforcement mechanism, mirroring the existing `PAYSLIP_JSON_SCHEMA_FOR_OPENAI` precedent for payslip vision extraction. `tryParseJson()` additionally recovers the first balanced-brace JSON object from a string as a defense-in-depth fallback (covers call sites not yet migrated to schema mode). Covered by `backend/tests/llm-openai-provider.test.ts` and `backend/tests/llm-anthropic-provider.test.ts` (SDK-mocked, assert the request shape per branch).
+
+**Gotcha when adding a new schema here:** OpenAI `json_schema` strict mode rejects `oneOf`/`anyOf`/`enum`/`const` at the schema's top level (`400 ... schema must have type 'object' and not have 'oneOf'/'anyOf'/.../'const' at the top level`) — discriminated unions (e.g. `loopDecisionSchema`'s `tool_call`/`synthesize` variants) must be flattened into one object with every branch's fields present and nullable, not represented as a root-level `anyOf`. This is safe with Zod's discriminated unions as long as the branch schemas aren't `.strict()` — extra null fields from the inapplicable branch get silently stripped after parsing. Every `const`/`enum` property also needs an explicit `type` alongside it; `const`/`enum` alone isn't sufficient for strict mode. `COMPRESSION_JSON_SCHEMA`'s `maxTokens` is `900`, not the more typical loop-decision-sized `400`/`500` — strict mode requires every finding's `entity`/`sourceUrl`/`kind` explicitly (even as `null`), which is measurably more verbose than loose JSON output and will silently truncate mid-object at lower caps.
+
+### 10.7 Weekly Digest Email — Subject Convention + HTML Redesign (#231)
+
+`synthesizeDigest()` (`family-agent.service.ts`) no longer lets the LLM freehand the subject line and email body. The LLM is asked only for a short `subjectHighlight` phrase (3-6 words naming the single most important item, or `""` if nothing stands out) and structured `sections` — an array of `{ heading, items }`, restricted to a fixed set of headings used in this order and only when that parent has content for it: **Coverage & Nanny**, **Deadlines**, **Occasions**, **Research finds**.
+
+The subject line itself is composed in code by `digestSubject(householdName, runType, highlight)` — `"Today in the {household} household — {highlight}"` for `daily_delta` runs, `"This week in the {household} household — {highlight}"` for everything else, with the em-dash and highlight omitted entirely when the LLM returns `""`. `householdName` comes from a plain `SELECT name FROM household` alongside the existing `getHouseholdLocation` query in `runFamilyAgent`'s startup `Promise.all`.
+
+`wrapDigestHtml()` was rewritten as a table-based layout using the app's Mantine theme colors (forest `#2D6A4F`, gold `#C8860A` — `frontend/src/theme.ts`), with **inline styles only**: Gmail strips `<head>`/`<style>` blocks, so a `<style>` tag would silently do nothing in the client most household members actually read digests in. One `<h3>` per non-empty section; empty sections are omitted entirely rather than rendered with a "nothing here" placeholder. The plain-text fallback (`digestPlainText()`, used for `sendMail`'s `text:` field) renders the same sections as `heading:\n- item` blocks separated by a blank line. No env vars, no cost change — this is purely a formatting change to an already-running LLM call.
 
 ---
 

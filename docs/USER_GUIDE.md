@@ -745,7 +745,7 @@ Configure how and when the app alerts you:
 
 ### Family Tab
 
-Available to owners and admins. Three subsections:
+Available to owners and admins. Five subsections:
 
 **Household Members**
 
@@ -768,9 +768,32 @@ Track regular and one-off care arrangements for any household member:
 - **Label** — optional short description (e.g. "Regular hours").
 - Click **Add entry** to save. Use the pencil icon to edit or the trash icon to delete an entry.
 
+**PA Preferences**
+
+Standing facts and constraints the planning assistant agent should take into account when planning or answering — e.g. dietary restrictions, travel rules, recurring household decisions, or facts worth remembering. How a row is used depends on its category:
+
+- **Fact** — the standing fact or constraint, in plain language (e.g. "No Schengen transit — visa risk").
+- **Category** — Preference, Discovered fact, or Decision history.
+  - **Preference** should be reserved for absolute, always-relevant constraints — allergies, dietary restrictions, visa/citizenship travel rules, or anything explicitly stated as non-negotiable ("never", "always", "must"). Every Preference row is included in full on every agent run, never filtered or summarized, so keep this list short and hard-constraint-only.
+  - **Discovered fact** and **Decision history** rows are stored with a **Topic** tag and pulled on demand by the agent (via a memory-lookup tool) only when relevant to the current task, instead of being included on every run. Recurring schedules and other logistics (e.g. a caregiver's weekly hours) belong here, not under Preference.
+- **Topic** — required for Discovered fact/Decision history (Travel, School, Health, Finance, Gifts, Household, Food, Interests, Other); optional for Preference rows (useful for browsing the list, has no effect on agent behavior since Preference rows are always fully included regardless of tag).
+- **Source** — Manual (added here), From feedback (reserved for a future agent-write path), or From notes (added via **Suggest from notes**, below).
+- Click **Add preference** to save. Use the pencil icon to edit an entry in place (fact text, category, topic) or the trash icon to delete it.
+
+**Suggest from notes** — click this button to have the agent scan every household member's **Notes** field (in the Members section above) and propose candidate facts. Facts shared across multiple household members (e.g. two parents who both enjoy the same cuisine) are consolidated into a single suggestion naming everyone who shares it, rather than one per person. A checklist modal opens with each suggestion pre-checked and editable (fact text, category, topic) — uncheck any you don't want, edit wording as needed, then click **Approve selected** to save them. Suggestions that already match an existing row are filtered out automatically. Nothing is saved until you approve it.
+
+On the **Family** page (see Quick Capture, below), task and research results have a **Save as preference** button — it pre-fills a save dialog with a suggested category/topic (editable) so you can turn a result into a standing memory-store fact without retyping it.
+
 **Google Calendar**
 
-Connect or disconnect your Google Calendar account. See § Google Calendar below for details.
+Connect or disconnect your Google Calendar account. Once connected:
+
+- **Select calendars** — check which of your Google Calendars the family planner agent should read. Leave none checked to include all accessible calendars.
+- **Calendar role** — tag each calendar as *Work / personal*, *School (informational only)*, *Kid activities*, or *Other*. The agent treats *School* events as informational — e.g. a school closure is never treated as a parent being unavailable, unlike a *Work / personal* event at the same time. Role defaults to a name-based guess (a calendar named "…ISD" or "…School" defaults to School) until you set it explicitly. Click **Save selection** to persist both the calendar selection and the roles.
+
+**Occasion Nudges**
+
+A toggle (default on) controlling whether the agent surfaces birthday/holiday lead-time nudge alerts — see [Occasion nudges (birthdays & holidays)](#occasion-nudges-birthdays--holidays) below. Turning it off stops new nudges from being generated; any nudges already showing on the Alerts panel stay until you resolve them.
 
 ### Data Tab
 
@@ -800,6 +823,57 @@ Use restore when:
 Operator details: see [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §5.3; API: [API_REFERENCE.md](API_REFERENCE.md) §Export.
 
 ---
+
+## Family Planner — Alerts
+
+The **Family** page's Alerts panel lists conflicts, coverage gaps, deadlines, and proactive suggestions detected by the household agent. Each alert card has a **Resolve** button — click the dropdown chevron to pick how you're resolving it:
+
+- **Useful** — the alert was worth surfacing; the agent keeps prioritizing this kind of alert.
+- **Not relevant** — the alert wasn't useful. After the same category is marked "Not relevant" 3 times within 60 days, the agent stops generating that category of suggestion going forward.
+- **Already knew** — accurate but not new information.
+- **Dismiss (no feedback)** — resolve without recording a disposition (same as the old single Dismiss button).
+
+This feedback only changes which *categories* of alert the agent produces (e.g. it may stop suggesting restaurants if you've dismissed several as not relevant) — it never turns into spending or lifestyle advice.
+
+### Email suggestions (school, orders, bills, appointments, invitations, and more)
+
+If the household admin has configured a dedicated household Gmail account for inbox ingestion (see `ADMIN_GUIDE.md` §"Household inbox email ingestion"), the agent polls that inbox once a day and turns actionable emails — permission slips, package deliveries, bill due dates, appointment confirmations, party invitations/RSVPs, subscription renewals — into suggestion alerts, tagged `[EMAIL]` in the alert text (`[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Each one shows the verbatim line from the email it was extracted from ("From the email") so you can sanity-check it before acting.
+
+- Alerts with a date resolve to an **Add to Calendar** button, same as other agent suggestions — nothing is added to your calendar until you click it. Low-balance/fraud notices are surfaced info-only, with no calendar action, and never include a full account number.
+- Use the same Resolve dropdown (Useful / Not relevant / Already knew / Dismiss) to give feedback — email-derived alerts feed into the same calibration described above.
+- The agent never acts on anything an email asks it to do — it only extracts facts (dates, titles, who's involved) for you to review.
+
+### Occasion nudges (birthdays & holidays)
+
+The agent watches for upcoming birthdays and holidays and nudges you with enough lead time to actually plan something, instead of finding out the day of. Three sources feed this, all shown as regular alert cards on the Family Alerts panel:
+
+- **Household member birthdays** — pulled from each person's Date of Birth (set on their Profile tab).
+- **Birthdays/anniversaries on your calendar** — any event on a connected Google Calendar with "birthday" or "anniversary" in the title.
+- **Holidays** — read directly from any Google holiday calendar you've subscribed to (e.g. "Holidays in United States", "Holidays in India" — add these from Google Calendar's "Other calendars" browser). Whatever holidays *you* subscribe to are what you'll get nudged about — the agent doesn't guess or maintain its own holiday list.
+
+Nudges arrive in tiers, tagged in the alert text:
+- **`[GIFT-IDEAS]`** — 21 days before a birthday or holiday.
+- **`[LAST-CALL]`** — 5 days before a birthday or holiday (both tiers can be open at once as the date gets closer).
+- **`[SEND-WISHES]`** — 3 days before a calendar-derived birthday/anniversary.
+
+Each nudge only fires once per tier — you won't get a repeat reminder every day of the lead-time window. Resolve them with the same Resolve dropdown as any other alert. Turn the whole feature off in Settings → Family → **Occasion Nudges**.
+
+If your admin has turned on background gift research, a fresh `[GIFT-IDEAS]` nudge also kicks off a short research task automatically — no need to type `research: find a gift for...` yourself. Its result shows up in the Run history table below (Type: **Gift research**) once it finishes, same as a manually-asked research question. This is off by default; ask your admin if you're not seeing it.
+
+### Quick Capture
+
+The Family page's **Quick capture** box turns a freeform note into a reminder, drafted message, calendar event, or saved fact — type it and click **Ask**. Behind the scenes the agent decides how to handle it:
+
+- **Quick asks** ("remind me to call the vet Friday", "draft a message to the nanny about pickup") get an answer in a couple of seconds.
+- **Research asks** ("find swim camps with summer openings under $200", "compare flights to Chicago next weekend") take longer — up to about 45 seconds — while the agent searches the web and checks its findings before answering. A "Working on it…" note appears while this runs, and the response is tagged **Researched · N step(s)**.
+
+If a quick ask should have triggered research (or vice versa), start your note with `research:` to force the deeper research path — for example `research: find a birthday gift for a 7 year old under $40`. Research results are also added to the Alerts panel as a suggestion, so you can find them again later.
+
+Any result — quick ask or research — has a **Save as preference** button. It classifies the result text for you (category and topic, both editable) and opens a save dialog so you can turn it into a standing fact in Settings › Family › **PA Preferences** without retyping it.
+
+The Family page's **Run history** table shows the last 30 agent runs, newest first — both Quick Capture asks (Source: **Quick capture**) and the scheduled daily digest (Source: **Digest**) in one combined timeline. Click a row to expand its full summary; use the refresh icon to pull in a run submitted moments ago.
+
+The digest email itself (sent to both parents on the schedule set in Settings → Family) is organized into a handful of named sections — **Coverage & Nanny**, **Deadlines**, **Occasions**, **Research finds** — each shown only when it has something to report, rather than one flat list of bullets. The subject line follows a fixed pattern ("Today/This week in the &lt;household&gt; household — &lt;highlight&gt;") so digest emails are easy to scan and search in your inbox.
 
 ## Year-in-Review
 

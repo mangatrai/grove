@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { getChatAdapter, chatModel } from "../../llm/index.js";
-import { log } from "../../logger.js";
 import type { InsightPayload } from "./insights.types.js";
 
 const PROMPT_VERSION = "v1.2";

@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -12,6 +13,7 @@ import {
   Menu,
   Modal,
   Paper,
+  Select,
   Stack,
   Table,
   Text,
@@ -23,6 +25,7 @@ import {
 import {
   IconAlertTriangle,
   IconBell,
+  IconBookmarkPlus,
   IconCalendarPlus,
   IconCheck,
   IconChevronDown,
@@ -49,8 +52,11 @@ type AgentAlert = {
   recipientHint: string | null;
   isResolved: boolean;
   resolvedAt: string | null;
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
+  /** FIX #215: verbatim excerpt the email-ingest extraction cited, for email-derived suggestions. */
+  sourceQuote: string | null;
 };
 
 type DigestEntry = {
@@ -67,6 +73,31 @@ type DigestEntry = {
   recipients: string[] | null;
 };
 
+// #230: Quick Capture ask history (pa_task_run), merged into the same Run History table as digests.
+type TaskRunEntry = {
+  id: string;
+  goal: string;
+  origin: "user" | "scheduler";
+  captureMode: "one_shot" | "research_loop" | null;
+  status: string;
+  iterationsUsed: number | null;
+  resultSummary: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+type RunHistoryRow = {
+  key: string;
+  when: string;
+  source: "digest" | "ask";
+  typeLabel: string;
+  status: string;
+  countLabel: string;
+  recipients: string[] | null;
+  summary: string | null;
+  goal: string | null;
+};
+
 type CaptureActionType = "create_event" | "set_reminder" | "draft_message" | "note";
 
 type CaptureAction = {
@@ -80,6 +111,40 @@ type CaptureResult = {
   responseText: string;
   actions: CaptureAction[];
 };
+
+// #167: research-loop result shape (pa-task-runner.ts's PATaskResult) — a second, slower engine
+// behind the same Quick Capture box, for asks that need live web research.
+type PATaskResult = {
+  goal: string;
+  summary: string;
+  actions: CaptureAction[];
+  iterationsUsed: number;
+  hitIterationCap: boolean;
+};
+
+type PATaskResponse =
+  | { type: "one_shot"; result: CaptureResult }
+  | { type: "research_loop"; result: PATaskResult; runId: string };
+
+// #238: "Save as preference" — lets the household save a task result as durable PA memory.
+type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+type PaPreferenceTopicTag = "travel" | "school" | "health" | "finance" | "gifts" | "household" | "other";
+
+const PA_PREFERENCE_CATEGORY_SELECT_DATA = [
+  { value: "preference", label: "Preference" },
+  { value: "discovered_fact", label: "Discovered fact" },
+  { value: "decision_history", label: "Decision history" },
+];
+
+const PA_PREFERENCE_TOPIC_TAG_SELECT_DATA = [
+  { value: "travel", label: "Travel" },
+  { value: "school", label: "School" },
+  { value: "health", label: "Health" },
+  { value: "finance", label: "Finance" },
+  { value: "gifts", label: "Gifts" },
+  { value: "household", label: "Household" },
+  { value: "other", label: "Other" },
+];
 
 const ALERT_TYPE_LABELS: Record<string, string> = {
   conflict: "Schedule pressure",
@@ -108,6 +173,10 @@ const STATUS_COLORS: Record<string, string> = {
   sent: "green",
   skipped: "gray",
   error: "red",
+  succeeded: "green",
+  failed: "red",
+  running: "blue",
+  refused_budget: "orange",
 };
 
 const ACTION_ICONS: Record<CaptureActionType, React.ReactNode> = {
@@ -138,10 +207,13 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
   const [calLink, setCalLink] = useState<string | null>(null);
   const textRef = useRef<HTMLPreElement>(null);
 
-  async function handleResolve() {
+  async function handleResolve(kind: "useful" | "not_relevant" | "already_knew" | null) {
     setResolving(true);
     try {
-      await apiFetch(`/api/family/alerts/${alert.id}/resolve`, { method: "PATCH" });
+      await apiFetch(`/api/family/alerts/${alert.id}/resolve`, {
+        method: "PATCH",
+        body: JSON.stringify({ kind }),
+      });
       onResolve(alert.id);
     } finally {
       setResolving(false);
@@ -233,6 +305,15 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
           </Box>
         ) : null}
 
+        {alert.sourceQuote ? (
+          <Box>
+            <Text size="xs" c="dimmed" fw={500} mb={4}>From the email</Text>
+            <Code block style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>
+              {alert.sourceQuote}
+            </Code>
+          </Box>
+        ) : null}
+
         <Group justify="flex-end">
           {alert.copyPasteText ? (
             <Button
@@ -257,16 +338,27 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
               Add to Calendar
             </Button>
           ) : null}
-          <Button
-            size="xs"
-            variant="subtle"
-            color="green"
-            loading={resolving}
-            leftSection={<IconCheck size={13} />}
-            onClick={() => void handleResolve()}
-          >
-            Dismiss
-          </Button>
+          <Menu position="bottom-end" withinPortal disabled={resolving}>
+            <Menu.Target>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="green"
+                loading={resolving}
+                leftSection={<IconCheck size={13} />}
+                rightSection={<IconChevronDown size={13} />}
+              >
+                Resolve
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item onClick={() => void handleResolve("useful")}>Useful</Menu.Item>
+              <Menu.Item onClick={() => void handleResolve("not_relevant")}>Not relevant</Menu.Item>
+              <Menu.Item onClick={() => void handleResolve("already_knew")}>Already knew</Menu.Item>
+              <Menu.Divider />
+              <Menu.Item onClick={() => void handleResolve(null)}>Dismiss (no feedback)</Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
         {calError ? (
           <Text size="xs" c="red" mt={4}>{calError}</Text>
@@ -396,7 +488,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
   return (
     <Paper withBorder p="md" radius="md">
       <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="xs" align="flex-start">
+        <Group gap="xs" align="flex-start" style={{ flex: 1, minWidth: 0 }}>
           <Box mt={2} c="dimmed">{ACTION_ICONS[action.type]}</Box>
           <Stack gap={4}>
             <Group gap="xs">
@@ -408,7 +500,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
           </Stack>
         </Group>
         {approved ? (
-          <Badge size="sm" color="green" variant="filled" leftSection={<IconCheck size={11} />}>Done</Badge>
+          <Badge size="sm" color="green" variant="filled" leftSection={<IconCheck size={11} />} style={{ flexShrink: 0 }}>Done</Badge>
         ) : (
           <Button
             size="xs"
@@ -417,6 +509,7 @@ function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardPr
             loading={approving}
             leftSection={action.type === "draft_message" ? <IconMail size={13} /> : <IconCheck size={13} />}
             onClick={() => void handleApprove()}
+            style={{ flexShrink: 0 }}
           >
             {action.type === "draft_message" ? "Compose" : "Approve"}
           </Button>
@@ -434,17 +527,31 @@ export function FamilyAgentPage() {
   const [digests, setDigests] = useState<DigestEntry[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
   const [digestsLoading, setDigestsLoading] = useState(true);
+  const [taskRuns, setTaskRuns] = useState<TaskRunEntry[]>([]);
+  const [taskRunsLoading, setTaskRunsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
-  const [expandedDigest, setExpandedDigest] = useState<string | null>(null);
+  const [expandedRunKey, setExpandedRunKey] = useState<string | null>(null);
 
   // Quick capture
   const [captureNote, setCaptureNote] = useState("");
+  const [lastCaptureNote, setLastCaptureNote] = useState("");
   const [captureLoading, setCaptureLoading] = useState(false);
-  const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
+  const [captureResult, setCaptureResult] = useState<PATaskResponse | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
+
+  // Save as preference (#238)
+  const [saveAsPrefOpen, setSaveAsPrefOpen] = useState(false);
+  const [saveAsPrefClassifying, setSaveAsPrefClassifying] = useState(false);
+  const [saveAsPrefDraft, setSaveAsPrefDraft] = useState<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null; factText: string }>({
+    category: "discovered_fact",
+    topicTag: "other",
+    factText: "",
+  });
+  const [savingAsPref, setSavingAsPref] = useState(false);
+  const [saveAsPrefError, setSaveAsPrefError] = useState<string | null>(null);
 
   // Compose modal
   const [composeOpen, setComposeOpen] = useState(false);
@@ -476,8 +583,52 @@ export function FamilyAgentPage() {
     }
   }, []);
 
+  const loadTaskRuns = useCallback(async () => {
+    setTaskRunsLoading(true);
+    try {
+      const res = await apiJson<{ entries: TaskRunEntry[] }>("/api/family/agent/task/history");
+      setTaskRuns(res.entries);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load ask history.");
+    } finally {
+      setTaskRunsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { void loadAlerts(); }, [loadAlerts]);
   useEffect(() => { void loadDigests(); }, [loadDigests]);
+  useEffect(() => { void loadTaskRuns(); }, [loadTaskRuns]);
+
+  const runHistoryRows = useMemo<RunHistoryRow[]>(() => {
+    const digestRows: RunHistoryRow[] = digests.map(d => ({
+      key: `digest:${d.id}`,
+      when: d.runAt,
+      source: "digest",
+      typeLabel: RUN_TYPE_LABELS[d.runType] ?? d.runType,
+      status: d.status,
+      countLabel: String(d.alertsCreated),
+      recipients: d.recipients,
+      summary: d.summaryText ?? d.skipReason ?? d.errorMessage ?? null,
+      goal: null,
+    }));
+    const askRows: RunHistoryRow[] = taskRuns.map(t => ({
+      key: `ask:${t.id}`,
+      when: t.createdAt,
+      source: "ask",
+      typeLabel: t.origin === "scheduler" ? "Gift research" : t.captureMode === "research_loop" ? "Research" : "One-shot",
+      status: t.status,
+      countLabel: t.captureMode === "research_loop" ? String(t.iterationsUsed ?? 0) : "—",
+      recipients: null,
+      // #246: summary is the real answer only (nullable) — never fall back to the goal here, or
+      // a pending/failed run with no result would render its own question as if it were the
+      // answer. The goal is still shown for context via `goal` below.
+      summary: t.resultSummary,
+      goal: t.goal,
+    }));
+    return [...digestRows, ...askRows]
+      .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
+      .slice(0, 30);
+  }, [digests, taskRuns]);
 
   async function handleRun(runType: string) {
     setRunning(true);
@@ -498,7 +649,7 @@ export function FamilyAgentPage() {
           ? `Skipped — ${res.message ?? "no action needed"}.`
           : `Error: ${res.message ?? "unknown"}.`
       );
-      await Promise.all([loadAlerts(), loadDigests()]);
+      await Promise.all([loadAlerts(), loadDigests(), loadTaskRuns()]);
     } catch (e) {
       setRunResult(e instanceof Error ? e.message : "Run failed.");
     } finally {
@@ -519,18 +670,68 @@ export function FamilyAgentPage() {
     setCaptureLoading(true);
     setCaptureResult(null);
     setCaptureError(null);
+    setLastCaptureNote(captureNote);
     try {
-      const res = await apiJson<CaptureResult>("/api/family/agent/capture", {
+      const res = await apiJson<PATaskResponse>("/api/family/agent/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: captureNote }),
       });
       setCaptureResult(res);
       setCaptureNote("");
+      void loadTaskRuns();
     } catch (e) {
       setCaptureError(e instanceof Error ? e.message : "Capture failed.");
+      void loadTaskRuns();
     } finally {
       setCaptureLoading(false);
+    }
+  }
+
+  async function openSaveAsPreference(text: string) {
+    setSaveAsPrefOpen(true);
+    setSaveAsPrefError(null);
+    setSaveAsPrefDraft({ category: "discovered_fact", topicTag: "other", factText: text });
+    setSaveAsPrefClassifying(true);
+    try {
+      const res = await apiJson<{ category: PaPreferenceCategory; topicTag: PaPreferenceTopicTag | null; factText: string }>(
+        "/api/family/pa-preferences/classify",
+        { method: "POST", body: JSON.stringify({ factText: text }) }
+      );
+      setSaveAsPrefDraft({ category: res.category, topicTag: res.topicTag, factText: res.factText });
+    } catch {
+      // classification is a convenience suggestion; keep the fallback draft and let the user pick manually
+    } finally {
+      setSaveAsPrefClassifying(false);
+    }
+  }
+
+  async function confirmSaveAsPreference() {
+    if (!saveAsPrefDraft.factText.trim()) {
+      setSaveAsPrefError("Enter a fact.");
+      return;
+    }
+    if (saveAsPrefDraft.category !== "preference" && !saveAsPrefDraft.topicTag) {
+      setSaveAsPrefError("Pick a topic tag.");
+      return;
+    }
+    setSavingAsPref(true);
+    setSaveAsPrefError(null);
+    try {
+      await apiJson("/api/family/pa-preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          category: saveAsPrefDraft.category,
+          factText: saveAsPrefDraft.factText.trim(),
+          topicTag: saveAsPrefDraft.category === "preference" ? undefined : saveAsPrefDraft.topicTag,
+          source: "notes_extraction",
+        }),
+      });
+      setSaveAsPrefOpen(false);
+    } catch (e) {
+      setSaveAsPrefError(e instanceof Error ? e.message : "Could not save preference");
+    } finally {
+      setSavingAsPref(false);
     }
   }
 
@@ -599,8 +800,8 @@ export function FamilyAgentPage() {
         <Group gap="xs">
           <ActionIcon
             variant="subtle"
-            onClick={() => { void loadAlerts(); void loadDigests(); }}
-            disabled={alertsLoading || digestsLoading}
+            onClick={() => { void loadAlerts(); void loadDigests(); void loadTaskRuns(); }}
+            disabled={alertsLoading || digestsLoading || taskRunsLoading}
             aria-label="Refresh"
           >
             <IconRefresh size={18} stroke={1.5} />
@@ -611,7 +812,7 @@ export function FamilyAgentPage() {
 
       {error ? <Text c="red" size="sm">{error}</Text> : null}
       {runResult ? (
-        <Paper withBorder p="sm" radius="sm" bg="var(--mantine-color-dark-6)">
+        <Paper withBorder p="sm" radius="sm">
           <Text size="sm">{runResult}</Text>
         </Paper>
       ) : null}
@@ -623,7 +824,10 @@ export function FamilyAgentPage() {
             <IconMessageCircle size={18} stroke={1.5} />
             <Title order={5}>Quick capture</Title>
           </Group>
-          <Text size="xs" c="dimmed">Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).</Text>
+          <Text size="xs" c="dimmed">
+            Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).
+            Prefix with "research:" to force a deeper web-research pass.
+          </Text>
           <Textarea
             placeholder="e.g. Find swim camps with summer openings, draft an absence note for Jake's school, remind me to follow up on Mia's referral next Monday…"
             value={captureNote}
@@ -634,7 +838,10 @@ export function FamilyAgentPage() {
             disabled={captureLoading}
           />
           {captureError ? <Text size="xs" c="red">{captureError}</Text> : null}
-          <Group justify="flex-end">
+          <Group justify="space-between" align="center">
+            {captureLoading ? (
+              <Text size="xs" c="dimmed">Working on it — research asks can take up to 45s…</Text>
+            ) : <span />}
             <Button
               size="sm"
               leftSection={<IconSend size={14} />}
@@ -642,14 +849,40 @@ export function FamilyAgentPage() {
               disabled={!captureNote.trim()}
               onClick={() => void handleCapture()}
             >
-              Send to agent
+              Ask
             </Button>
           </Group>
 
           {captureResult ? (
             <Stack gap="sm" mt="xs">
-              <Text size="sm" c="dimmed">{captureResult.responseText}</Text>
-              {captureResult.actions.map((action, i) => (
+              {lastCaptureNote ? (
+                <Stack gap={2}>
+                  <Text size="xs" fw={600}>You asked:</Text>
+                  <Text size="sm" c="dimmed">{lastCaptureNote}</Text>
+                </Stack>
+              ) : null}
+              {captureResult.type === "research_loop" ? (
+                <Badge size="sm" variant="light" color="grape" style={{ alignSelf: "flex-start" }}>
+                  Researched · {captureResult.result.iterationsUsed} step{captureResult.result.iterationsUsed === 1 ? "" : "s"}
+                </Badge>
+              ) : null}
+              <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+                {captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary}
+              </Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                leftSection={<IconBookmarkPlus size={14} />}
+                style={{ alignSelf: "flex-start" }}
+                onClick={() =>
+                  void openSaveAsPreference(
+                    captureResult.type === "one_shot" ? captureResult.result.responseText : captureResult.result.summary
+                  )
+                }
+              >
+                Save as preference
+              </Button>
+              {captureResult.result.actions.map((action, i) => (
                 <CaptureActionCard
                   key={i}
                   action={action}
@@ -724,16 +957,17 @@ export function FamilyAgentPage() {
           <Text size="xs" c="dimmed">(last 30)</Text>
         </Group>
 
-        {digestsLoading ? (
+        {digestsLoading || taskRunsLoading ? (
           <Group><Loader size="sm" /><Text size="sm" c="dimmed">Loading…</Text></Group>
-        ) : digests.length === 0 ? (
-          <Text c="dimmed" size="sm">No runs yet. Connect Google Calendar in Settings → Family, then trigger a manual run.</Text>
+        ) : runHistoryRows.length === 0 ? (
+          <Text c="dimmed" size="sm">No runs yet. Connect Google Calendar in Settings → Family, then trigger a manual run, or try Quick Capture below.</Text>
         ) : (
           <Paper withBorder radius="md" style={{ overflow: "hidden" }}>
             <Table striped highlightOnHover withRowBorders={false}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>When</Table.Th>
+                  <Table.Th>Source</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Alerts</Table.Th>
@@ -742,30 +976,40 @@ export function FamilyAgentPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {digests.map(d => {
-                  const isExpanded = expandedDigest === d.id;
-                  const summaryFull = d.summaryText ?? d.skipReason ?? d.errorMessage ?? null;
+                {runHistoryRows.map(row => {
+                  const isExpanded = expandedRunKey === row.key;
+                  // #246: hasResult gates expand/click affordance and the expanded answer panel —
+                  // only a real result_summary counts. previewText is display-only, for the
+                  // collapsed row when no result exists yet (e.g. still running), so the row
+                  // isn't blank while it's in flight.
+                  const hasResult = Boolean(row.summary);
+                  const previewText = row.summary ?? row.goal ?? null;
                   return (
-                    <Fragment key={d.id}>
-                      <Table.Tr style={{ cursor: summaryFull ? "pointer" : "default" }} onClick={() => summaryFull && setExpandedDigest(isExpanded ? null : d.id)}>
+                    <Fragment key={row.key}>
+                      <Table.Tr style={{ cursor: hasResult ? "pointer" : "default" }} onClick={() => hasResult && setExpandedRunKey(isExpanded ? null : row.key)}>
                         <Table.Td>
                           <Text size="xs">
-                            {new Date(d.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+                            {new Date(row.when).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs">{RUN_TYPE_LABELS[d.runType] ?? d.runType}</Text>
+                          <Badge size="xs" color={row.source === "digest" ? "grape" : "cyan"} variant="light">
+                            {row.source === "digest" ? "Digest" : "Quick capture"}
+                          </Badge>
                         </Table.Td>
                         <Table.Td>
-                          <Badge size="xs" color={STATUS_COLORS[d.status]} variant="light">{d.status}</Badge>
+                          <Text size="xs">{row.typeLabel}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs" c={d.alertsCreated > 0 ? "red" : "dimmed"}>{d.alertsCreated}</Text>
+                          <Badge size="xs" color={STATUS_COLORS[row.status] ?? "gray"} variant="light">{row.status}</Badge>
                         </Table.Td>
                         <Table.Td>
-                          {d.recipients && d.recipients.length > 0 ? (
+                          <Text size="xs" c={row.source === "digest" && Number(row.countLabel) > 0 ? "red" : "dimmed"}>{row.countLabel}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {row.recipients && row.recipients.length > 0 ? (
                             <Stack gap={2}>
-                              {d.recipients.map(r => (
+                              {row.recipients.map(r => (
                                 <Text key={r} size="xs" c="dimmed">{r}</Text>
                               ))}
                             </Stack>
@@ -776,9 +1020,9 @@ export function FamilyAgentPage() {
                         <Table.Td>
                           <Group gap={4} wrap="nowrap">
                             <Text size="xs" c="dimmed" lineClamp={isExpanded ? undefined : 1} style={{ flex: 1 }}>
-                              {summaryFull ?? "—"}
+                              {previewText ?? "—"}
                             </Text>
-                            {summaryFull && summaryFull.length > 60 ? (
+                            {hasResult && previewText && previewText.length > 60 ? (
                               <ActionIcon size="xs" variant="subtle" color="gray" aria-label={isExpanded ? "Collapse" : "Expand"}>
                                 {isExpanded ? <IconCheck size={12} /> : <IconChevronDown size={12} />}
                               </ActionIcon>
@@ -786,11 +1030,14 @@ export function FamilyAgentPage() {
                           </Group>
                         </Table.Td>
                       </Table.Tr>
-                      {isExpanded && summaryFull ? (
+                      {isExpanded && hasResult ? (
                         <Table.Tr>
-                          <Table.Td colSpan={6}>
-                            <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
-                              <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
+                          <Table.Td colSpan={7}>
+                            <Paper withBorder p="sm" radius="sm" mb={4}>
+                              {row.goal ? (
+                                <Text size="xs" fw={600} c="dimmed" mb={4}>Asked: {row.goal}</Text>
+                              ) : null}
+                              <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>{row.summary}</Text>
                             </Paper>
                           </Table.Td>
                         </Table.Tr>
@@ -809,6 +1056,59 @@ export function FamilyAgentPage() {
         onClose={() => setComposeOpen(false)}
         initial={composeInitial}
       />
+
+      <Modal
+        opened={saveAsPrefOpen}
+        onClose={() => setSaveAsPrefOpen(false)}
+        title="Save as preference"
+        centered
+      >
+        <Stack gap="sm">
+          {saveAsPrefClassifying ? (
+            <Group gap="sm">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">Suggesting category…</Text>
+            </Group>
+          ) : null}
+          <Textarea
+            label="Fact"
+            value={saveAsPrefDraft.factText}
+            onChange={(e) => setSaveAsPrefDraft((d) => ({ ...d, factText: e.currentTarget.value }))}
+            autosize
+            minRows={2}
+          />
+          <Group align="end" grow>
+            <Select
+              label="Category"
+              data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+              value={saveAsPrefDraft.category}
+              onChange={(v) => {
+                const category = (v as PaPreferenceCategory) ?? "discovered_fact";
+                setSaveAsPrefDraft((d) => ({ ...d, category, topicTag: category === "preference" ? null : d.topicTag ?? "other" }));
+              }}
+              allowDeselect={false}
+            />
+            {saveAsPrefDraft.category !== "preference" ? (
+              <Select
+                label="Topic"
+                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                value={saveAsPrefDraft.topicTag}
+                onChange={(v) => setSaveAsPrefDraft((d) => ({ ...d, topicTag: v as PaPreferenceTopicTag | null }))}
+                placeholder="Pick a topic"
+              />
+            ) : null}
+          </Group>
+          {saveAsPrefError ? <Alert color="red" p="xs">{saveAsPrefError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setSaveAsPrefOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={savingAsPref} onClick={() => void confirmSaveAsPreference()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

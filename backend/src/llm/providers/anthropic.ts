@@ -78,6 +78,39 @@ export async function anthropicChat(
 ): Promise<{ content: string; usage: LlmUsage }> {
   const client = buildClient();
   const { system, rest } = splitSystem(messages);
+
+  // Real structured-output enforcement: force the model to call a single synthetic tool whose
+  // input_schema is the desired shape, then read the already-parsed tool_use input back out.
+  // Anthropic has no json_object-equivalent mode — this is its actual enforcement mechanism
+  // (same tools API anthropicToolLoop uses below, just tool_choice forced instead of "auto").
+  if (options.responseFormat === "json" && options.jsonSchema && options.jsonSchemaName) {
+    const res = await client.messages.create({
+      model: options.model,
+      max_tokens: options.maxTokens ?? 1024,
+      ...(system ? { system } : {}),
+      messages: toAnthropicMessages(rest),
+      tools: [
+        {
+          name: options.jsonSchemaName,
+          description: "Return the structured result for this request.",
+          input_schema: options.jsonSchema as Anthropic.Messages.Tool["input_schema"],
+        },
+      ],
+      tool_choice: { type: "tool", name: options.jsonSchemaName },
+    });
+    const toolUse = res.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+    );
+    return {
+      content: toolUse ? JSON.stringify(toolUse.input) : "",
+      usage: {
+        promptTokens: res.usage.input_tokens,
+        completionTokens: res.usage.output_tokens,
+        totalTokens: res.usage.input_tokens + res.usage.output_tokens,
+      },
+    };
+  }
+
   const systemFull =
     options.responseFormat === "json"
       ? [system, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
@@ -176,12 +209,6 @@ export async function anthropicVision(
     .filter(Boolean);
   const systemPrompt = systemParts.join("\n\n") || undefined;
 
-  // Append JSON instruction when JSON output is requested
-  const systemFull =
-    options.responseFormat === "json"
-      ? [systemPrompt, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
-      : systemPrompt;
-
   const anthropicMessages: Anthropic.Messages.MessageParam[] = messages
     .filter((m) => m.role === "user")
     .map((m) => ({
@@ -202,6 +229,43 @@ export async function anthropicVision(
                   }
             ),
     }));
+
+  // Real structured-output enforcement (same mechanism as anthropicChat above): force a synthetic
+  // tool call whose input_schema is the desired shape, read the already-parsed tool_use input back
+  // out. Replaces the old "Return ONLY valid JSON" prompt coercion, which broke whenever Claude added
+  // markdown fences or any prose around the JSON.
+  if (options.responseFormat === "json" && options.jsonSchema && options.jsonSchemaName) {
+    const res = await client.messages.create({
+      model: options.model,
+      max_tokens: options.maxTokens ?? 2048,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: anthropicMessages,
+      tools: [
+        {
+          name: options.jsonSchemaName,
+          description: "Return the structured result for this request.",
+          input_schema: options.jsonSchema as Anthropic.Messages.Tool["input_schema"],
+        },
+      ],
+      tool_choice: { type: "tool", name: options.jsonSchemaName },
+    });
+    const toolUse = res.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+    );
+    return {
+      content: toolUse ? JSON.stringify(toolUse.input) : "",
+      usage: {
+        promptTokens: res.usage.input_tokens,
+        completionTokens: res.usage.output_tokens,
+        totalTokens: res.usage.input_tokens + res.usage.output_tokens,
+      },
+    };
+  }
+
+  const systemFull =
+    options.responseFormat === "json"
+      ? [systemPrompt, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
+      : systemPrompt;
 
   const res = await client.messages.create({
     model: options.model,

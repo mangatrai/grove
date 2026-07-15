@@ -79,10 +79,6 @@ function toIsoDate(v: unknown): string | null {
   return v.trim().slice(0, 10);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
  * Fetch all available DCAD data for one property and return as a canonical object.
  * Callers use only the fields they need.
@@ -259,40 +255,6 @@ export async function searchDcadComps(
   county?: string | null
 ): Promise<DCADProperty[]> {
   return searchDCADByAddress(address, taxYear, county ?? null);
-}
-
-/**
- * Batch-enrich up to maxCount addresses with throttling between requests.
- * Returns a Map from address → DcadCanonicalProperty.
- * Addresses that fail or find no match are omitted from the map.
- */
-export async function fetchDcadCanonicalBatch(opts: {
-  addresses: string[];
-  taxYear: number;
-  maxCount?: number;
-  throttleMs?: number;
-  county?: string;
-}): Promise<Map<string, DcadCanonicalProperty>> {
-  const { taxYear, maxCount = 10, throttleMs = 200, county } = opts;
-  const results = new Map<string, DcadCanonicalProperty>();
-  const toFetch = opts.addresses.slice(0, maxCount);
-
-  for (const address of toFetch) {
-    try {
-      await sleep(throttleMs);
-      const result = await fetchDcadCanonical({ address, taxYear, county });
-      if (result) {
-        results.set(address, result);
-      }
-    } catch (err) {
-      log.warn("fetchDcadCanonicalBatch: failed for address", {
-        address,
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  return results;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   Divider,
   Group,
   Modal,
@@ -13,6 +14,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   TagsInput,
   Text,
@@ -55,6 +57,79 @@ type HelpAvailabilitySlot = {
   isActive: boolean;
   createdAt: string;
 };
+
+type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
+type PaPreferenceTopicTag =
+  | "travel"
+  | "school"
+  | "health"
+  | "finance"
+  | "gifts"
+  | "household"
+  | "food"
+  | "interests"
+  | "other";
+
+type PaPreference = {
+  id: number;
+  householdId: string;
+  category: PaPreferenceCategory;
+  factText: string;
+  source: PaPreferenceSource;
+  topicTag: PaPreferenceTopicTag | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PaPreferenceCandidate = {
+  personName: string | null;
+  category: PaPreferenceCategory;
+  factText: string;
+  topicTag: PaPreferenceTopicTag | null;
+};
+
+const PA_PREFERENCE_CATEGORY_LABELS: Record<PaPreferenceCategory, string> = {
+  preference: "Preference",
+  discovered_fact: "Discovered fact",
+  decision_history: "Decision history",
+};
+
+const PA_PREFERENCE_SOURCE_LABELS: Record<PaPreferenceSource, string> = {
+  manual: "Manual",
+  feedback: "From feedback",
+  notes_extraction: "From notes",
+};
+
+const PA_PREFERENCE_CATEGORY_SELECT_DATA = [
+  { value: "preference", label: "Preference" },
+  { value: "discovered_fact", label: "Discovered fact" },
+  { value: "decision_history", label: "Decision history" },
+];
+
+const PA_PREFERENCE_TOPIC_TAG_LABELS: Record<PaPreferenceTopicTag, string> = {
+  travel: "Travel",
+  school: "School",
+  health: "Health",
+  finance: "Finance",
+  gifts: "Gifts",
+  household: "Household",
+  food: "Food",
+  interests: "Interests",
+  other: "Other",
+};
+
+const PA_PREFERENCE_TOPIC_TAG_SELECT_DATA = [
+  { value: "travel", label: "Travel" },
+  { value: "school", label: "School" },
+  { value: "health", label: "Health" },
+  { value: "finance", label: "Finance" },
+  { value: "gifts", label: "Gifts" },
+  { value: "household", label: "Household" },
+  { value: "food", label: "Food" },
+  { value: "interests", label: "Interests" },
+  { value: "other", label: "Other" },
+];
 
 type MemberDraft = {
   interestsJson: string[];
@@ -189,6 +264,43 @@ export function FamilySection({ active }: FamilySectionProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [occasionNudgesEnabled, setOccasionNudgesEnabled] = useState(true);
+  const [occasionSettingsLoading, setOccasionSettingsLoading] = useState(false);
+  const [occasionSettingsSaving, setOccasionSettingsSaving] = useState(false);
+  const [occasionSettingsError, setOccasionSettingsError] = useState<string | null>(null);
+
+  // ── PA Preferences ──────────────────────────────────────────────────────────
+  const [preferences, setPreferences] = useState<PaPreference[]>([]);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+
+  const [newPreference, setNewPreference] = useState<{ category: PaPreferenceCategory; factText: string; topicTag: PaPreferenceTopicTag | null }>({
+    category: "preference",
+    factText: "",
+    topicTag: null,
+  });
+  const [addingPreference, setAddingPreference] = useState(false);
+  const [addPreferenceError, setAddPreferenceError] = useState<string | null>(null);
+
+  const [deletePreferenceId, setDeletePreferenceId] = useState<number | null>(null);
+  const [deletingPreference, setDeletingPreference] = useState(false);
+
+  const [editPreference, setEditPreference] = useState<
+    (Pick<PaPreference, "category" | "factText" | "topicTag"> & { id: number }) | null
+  >(null);
+  const [editPreferenceSaving, setEditPreferenceSaving] = useState(false);
+  const [editPreferenceError, setEditPreferenceError] = useState<string | null>(null);
+  const [deletePreferenceError, setDeletePreferenceError] = useState<string | null>(null);
+
+  // ── PA Preferences: suggest-from-notes approval ─────────────────────────────
+  const [suggestModalOpen, setSuggestModalOpen] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<PaPreferenceCandidate[]>([]);
+  const [checkedCandidates, setCheckedCandidates] = useState<Set<number>>(new Set());
+  const [approvingCandidates, setApprovingCandidates] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
   function initDrafts(ms: HouseholdMember[]) {
     const map: Record<string, MemberDraft> = {};
     for (const m of ms) {
@@ -235,6 +347,212 @@ export function FamilySection({ active }: FamilySectionProps) {
     if (!active) return;
     void load();
   }, [active, load]);
+
+  const loadOccasionSettings = useCallback(async () => {
+    setOccasionSettingsLoading(true);
+    setOccasionSettingsError(null);
+    try {
+      const res = await apiJson<{ settings: { enabled: boolean } }>("/api/family/occasion-settings");
+      setOccasionNudgesEnabled(res.settings.enabled);
+    } catch (e) {
+      setOccasionSettingsError(e instanceof Error ? e.message : "Failed to load occasion nudge settings");
+    } finally {
+      setOccasionSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadOccasionSettings();
+  }, [active, loadOccasionSettings]);
+
+  const toggleOccasionNudges = useCallback(async (enabled: boolean) => {
+    const prev = occasionNudgesEnabled;
+    setOccasionNudgesEnabled(enabled);
+    setOccasionSettingsSaving(true);
+    setOccasionSettingsError(null);
+    try {
+      const res = await apiFetch("/api/family/occasion-settings", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(`Failed to save (${res.status})`);
+    } catch (e) {
+      setOccasionNudgesEnabled(prev);
+      setOccasionSettingsError(e instanceof Error ? e.message : "Failed to save occasion nudge settings");
+    } finally {
+      setOccasionSettingsSaving(false);
+    }
+  }, [occasionNudgesEnabled]);
+
+  const loadPreferences = useCallback(async () => {
+    setPreferencesLoading(true);
+    setPreferencesError(null);
+    try {
+      const res = await apiJson<{ preferences: PaPreference[] }>("/api/family/pa-preferences");
+      setPreferences(res.preferences);
+    } catch (e) {
+      setPreferencesError(e instanceof Error ? e.message : "Failed to load PA preferences");
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadPreferences();
+  }, [active, loadPreferences]);
+
+  async function addPreference() {
+    if (!newPreference.factText.trim()) {
+      setAddPreferenceError("Enter a fact.");
+      return;
+    }
+    if (newPreference.category !== "preference" && !newPreference.topicTag) {
+      setAddPreferenceError("Pick a topic tag.");
+      return;
+    }
+    setAddingPreference(true);
+    setAddPreferenceError(null);
+    try {
+      await apiJson<{ preference: PaPreference }>("/api/family/pa-preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          category: newPreference.category,
+          factText: newPreference.factText.trim(),
+          topicTag: newPreference.topicTag,
+        }),
+      });
+      await loadPreferences();
+      setNewPreference((prev) => ({ ...prev, factText: "", topicTag: null }));
+    } catch (e) {
+      setAddPreferenceError(e instanceof Error ? e.message : "Could not add preference");
+    } finally {
+      setAddingPreference(false);
+    }
+  }
+
+  async function suggestFromNotes() {
+    setSuggestModalOpen(true);
+    setSuggesting(true);
+    setSuggestError(null);
+    setApproveError(null);
+    try {
+      const res = await apiJson<{ candidates: PaPreferenceCandidate[] }>("/api/family/pa-preferences/suggest", {
+        method: "POST",
+      });
+      setCandidates(res.candidates);
+      setCheckedCandidates(new Set(res.candidates.map((_, i) => i)));
+    } catch (e) {
+      setSuggestError(e instanceof Error ? e.message : "Could not fetch suggestions");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  function updateCandidate(index: number, patch: Partial<PaPreferenceCandidate>) {
+    setCandidates((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  }
+
+  function toggleCandidate(index: number) {
+    setCheckedCandidates((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
+  async function approveCandidates() {
+    setApprovingCandidates(true);
+    setApproveError(null);
+    try {
+      const selected = candidates.filter((_, i) => checkedCandidates.has(i));
+      for (const c of selected) {
+        await apiJson<{ preference: PaPreference }>("/api/family/pa-preferences", {
+          method: "POST",
+          body: JSON.stringify({
+            category: c.category,
+            factText: c.factText.trim(),
+            topicTag: c.topicTag,
+            source: "notes_extraction",
+          }),
+        });
+      }
+      await loadPreferences();
+      setSuggestModalOpen(false);
+      setCandidates([]);
+      setCheckedCandidates(new Set());
+    } catch (e) {
+      setApproveError(e instanceof Error ? e.message : "Could not save selected preferences");
+    } finally {
+      setApprovingCandidates(false);
+    }
+  }
+
+  async function deletePreferenceRow() {
+    if (deletePreferenceId === null) return;
+    setDeletingPreference(true);
+    setDeletePreferenceError(null);
+    try {
+      const res = await apiFetch(`/api/family/pa-preferences/${deletePreferenceId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setPreferences((prev) => prev.filter((p) => p.id !== deletePreferenceId));
+      setDeletePreferenceId(null);
+    } catch (e) {
+      setDeletePreferenceError(e instanceof Error ? e.message : "Could not remove preference");
+    } finally {
+      setDeletingPreference(false);
+    }
+  }
+
+  function openEditPreference(pref: PaPreference) {
+    setEditPreference({
+      id: pref.id,
+      category: pref.category,
+      factText: pref.factText,
+      topicTag: pref.topicTag,
+    });
+    setEditPreferenceError(null);
+  }
+
+  async function saveEditPreference() {
+    if (!editPreference) return;
+    if (!editPreference.factText.trim()) {
+      setEditPreferenceError("Enter a fact.");
+      return;
+    }
+    if (editPreference.category !== "preference" && !editPreference.topicTag) {
+      setEditPreferenceError("Pick a topic tag.");
+      return;
+    }
+    setEditPreferenceSaving(true);
+    setEditPreferenceError(null);
+    try {
+      await apiJson<{ preference: PaPreference }>(
+        `/api/family/pa-preferences/${editPreference.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            category: editPreference.category,
+            factText: editPreference.factText.trim(),
+            topicTag: editPreference.topicTag,
+          }),
+        }
+      );
+      await loadPreferences();
+      setEditPreference(null);
+    } catch (e) {
+      setEditPreferenceError(e instanceof Error ? e.message : "Could not save preference");
+    } finally {
+      setEditPreferenceSaving(false);
+    }
+  }
 
   function setDraftField<K extends keyof MemberDraft>(profileId: string, key: K, value: MemberDraft[K]) {
     setDrafts((prev) => ({
@@ -588,8 +906,143 @@ export function FamilySection({ active }: FamilySectionProps) {
 
       <Divider my="lg" />
 
+      {/* ── PA Preferences ────────────────────────────────────────────────── */}
+      <Group justify="space-between" align="center">
+        <Title order={3}>PA Preferences</Title>
+        <Button size="xs" variant="light" onClick={() => void suggestFromNotes()}>
+          Suggest from notes
+        </Button>
+      </Group>
+      <Text c="dimmed" size="sm">
+        Standing facts and constraints the planning assistant should always take into account —
+        e.g. dietary restrictions, travel rules, recurring decisions. Discovered facts and decision
+        history carry a topic tag so the assistant can look them up on demand instead of reading
+        every fact on every run.
+      </Text>
+      {preferencesError ? <Alert color="red">{preferencesError}</Alert> : null}
+      {preferencesLoading ? (
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading preferences…</Text>
+        </Group>
+      ) : null}
+      {!preferencesLoading && preferences.length > 0 ? (
+        <Table withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Fact</Table.Th>
+              <Table.Th>Category</Table.Th>
+              <Table.Th>Topic</Table.Th>
+              <Table.Th>Source</Table.Th>
+              <Table.Th style={{ width: 64 }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {preferences.map((p) => (
+              <Table.Tr key={p.id}>
+                <Table.Td>{p.factText}</Table.Td>
+                <Table.Td>{PA_PREFERENCE_CATEGORY_LABELS[p.category] ?? p.category}</Table.Td>
+                <Table.Td>{p.topicTag ? PA_PREFERENCE_TOPIC_TAG_LABELS[p.topicTag] ?? p.topicTag : "—"}</Table.Td>
+                <Table.Td>{PA_PREFERENCE_SOURCE_LABELS[p.source] ?? p.source}</Table.Td>
+                <Table.Td>
+                  <Group gap={4} wrap="nowrap">
+                    <ActionIcon
+                      variant="subtle"
+                      onClick={() => openEditPreference(p)}
+                      title="Edit preference"
+                      aria-label="Edit preference"
+                    >
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      onClick={() => setDeletePreferenceId(p.id)}
+                      title="Remove preference"
+                      aria-label="Remove preference"
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : null}
+      {!preferencesLoading && preferences.length === 0 ? (
+        <Text size="sm" c="dimmed">No preferences saved yet.</Text>
+      ) : null}
+
+      {/* Add preference form */}
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="sm">
+          <Group gap="xs" align="center">
+            <IconPlus size={14} />
+            <Text fw={600} size="sm">Add preference</Text>
+          </Group>
+          <Group align="end" grow>
+            <Select
+              label="Category"
+              data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+              value={newPreference.category}
+              onChange={(v) =>
+                setNewPreference((p) => ({ ...p, category: (v as PaPreferenceCategory) ?? "preference" }))
+              }
+              disabled={addingPreference}
+              allowDeselect={false}
+            />
+            <Select
+              label={newPreference.category === "preference" ? "Topic (optional)" : "Topic"}
+              data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+              value={newPreference.topicTag}
+              onChange={(v) => setNewPreference((p) => ({ ...p, topicTag: v as PaPreferenceTopicTag | null }))}
+              disabled={addingPreference}
+              placeholder="Pick a topic"
+              clearable={newPreference.category === "preference"}
+            />
+          </Group>
+          <Textarea
+            label="Fact"
+            placeholder="e.g. No Schengen transit — visa risk"
+            value={newPreference.factText}
+            onChange={(e) => setNewPreference((p) => ({ ...p, factText: e.currentTarget.value }))}
+            disabled={addingPreference}
+            autosize
+            minRows={2}
+          />
+          {addPreferenceError ? <Alert color="red" p="xs">{addPreferenceError}</Alert> : null}
+          <Group>
+            <Button size="sm" loading={addingPreference} onClick={() => void addPreference()}>
+              {addingPreference ? "Adding…" : "Add preference"}
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+
+      <Divider my="lg" />
+
       {/* ── Google Calendar ────────────────────────────────────────────────── */}
       <GCalSection active={active} />
+
+      <Divider my="lg" />
+
+      {/* ── Occasion nudges ───────────────────────────────────────────────── */}
+      <Paper p="md" withBorder radius="md">
+        <Stack gap="sm">
+          <Title order={3} size="h5">Occasion nudges</Title>
+          <Text c="dimmed" size="sm">
+            Birthday and holiday reminders in your weekly digest, with lead time to plan a gift.
+          </Text>
+          <Switch
+            label="Enable occasion nudges"
+            checked={occasionNudgesEnabled}
+            disabled={occasionSettingsLoading || occasionSettingsSaving}
+            onChange={(e) => void toggleOccasionNudges(e.currentTarget.checked)}
+          />
+          {occasionSettingsError ? <Alert color="red" p="xs">{occasionSettingsError}</Alert> : null}
+        </Stack>
+      </Paper>
 
       {/* ── Edit slot modal ───────────────────────────────────────────────── */}
       <Modal
@@ -715,6 +1168,159 @@ export function FamilySection({ active }: FamilySectionProps) {
               Remove
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={editPreference !== null}
+        onClose={() => { setEditPreference(null); setEditPreferenceError(null); }}
+        title="Edit preference"
+        centered
+      >
+        {editPreference ? (
+          <Stack gap="sm">
+            <Textarea
+              label="Fact"
+              value={editPreference.factText}
+              onChange={(e) =>
+                setEditPreference((p) => (p ? { ...p, factText: e.currentTarget.value } : null))
+              }
+              disabled={editPreferenceSaving}
+              autosize
+              minRows={2}
+            />
+            <Group align="end" grow>
+              <Select
+                label="Category"
+                data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+                value={editPreference.category}
+                onChange={(v) =>
+                  setEditPreference((p) => (p ? { ...p, category: (v as PaPreferenceCategory) ?? "preference" } : null))
+                }
+                disabled={editPreferenceSaving}
+                allowDeselect={false}
+              />
+              <Select
+                label={editPreference.category === "preference" ? "Topic (optional)" : "Topic"}
+                data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                value={editPreference.topicTag}
+                onChange={(v) =>
+                  setEditPreference((p) => (p ? { ...p, topicTag: v as PaPreferenceTopicTag | null } : null))
+                }
+                disabled={editPreferenceSaving}
+                placeholder="Pick a topic"
+                clearable={editPreference.category === "preference"}
+              />
+            </Group>
+            {editPreferenceError ? <Alert color="red" p="xs">{editPreferenceError}</Alert> : null}
+            <Group justify="flex-end" mt="xs">
+              <Button variant="default" onClick={() => { setEditPreference(null); setEditPreferenceError(null); }} disabled={editPreferenceSaving}>
+                Cancel
+              </Button>
+              <Button loading={editPreferenceSaving} onClick={() => void saveEditPreference()}>
+                Save
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+
+      <Modal
+        opened={deletePreferenceId !== null}
+        onClose={() => { setDeletePreferenceId(null); setDeletePreferenceError(null); }}
+        title="Remove preference?"
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">This preference will no longer be included in planning assistant context.</Text>
+          {deletePreferenceError ? <Alert color="red" p="xs">{deletePreferenceError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => { setDeletePreferenceId(null); setDeletePreferenceError(null); }}>
+              Cancel
+            </Button>
+            <Button color="red" loading={deletingPreference} onClick={() => void deletePreferenceRow()}>
+              Remove
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={suggestModalOpen}
+        onClose={() => { setSuggestModalOpen(false); setCandidates([]); setCheckedCandidates(new Set()); }}
+        title="Suggest preferences from notes"
+        centered
+        size="lg"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Scanned each household member&apos;s notes for durable facts worth remembering. Review,
+            edit, and uncheck anything that isn&apos;t useful before saving.
+          </Text>
+          {suggesting ? (
+            <Group gap="sm">
+              <GroveLoader size="sm" color="muted" />
+              <Text size="sm" c="dimmed">Scanning notes…</Text>
+            </Group>
+          ) : null}
+          {suggestError ? <Alert color="red" p="xs">{suggestError}</Alert> : null}
+          {!suggesting && !suggestError && candidates.length === 0 ? (
+            <Text size="sm" c="dimmed">No new facts found in current notes.</Text>
+          ) : null}
+          {candidates.map((c, i) => (
+            <Paper key={i} withBorder p="sm" radius="md">
+              <Stack gap="xs">
+                <Group justify="space-between" align="flex-start">
+                  <Checkbox
+                    checked={checkedCandidates.has(i)}
+                    onChange={() => toggleCandidate(i)}
+                    label={c.personName ?? "Household"}
+                  />
+                </Group>
+                <Textarea
+                  value={c.factText}
+                  onChange={(e) => updateCandidate(i, { factText: e.currentTarget.value })}
+                  autosize
+                  minRows={2}
+                />
+                <Group align="end" grow>
+                  <Select
+                    label="Category"
+                    data={PA_PREFERENCE_CATEGORY_SELECT_DATA}
+                    value={c.category}
+                    onChange={(v) => {
+                      const category = (v as PaPreferenceCategory) ?? "discovered_fact";
+                      updateCandidate(i, { category });
+                    }}
+                    allowDeselect={false}
+                  />
+                  <Select
+                    label={c.category === "preference" ? "Topic (optional)" : "Topic"}
+                    data={PA_PREFERENCE_TOPIC_TAG_SELECT_DATA}
+                    value={c.topicTag}
+                    onChange={(v) => updateCandidate(i, { topicTag: v as PaPreferenceTopicTag | null })}
+                    placeholder="Pick a topic"
+                    clearable={c.category === "preference"}
+                  />
+                </Group>
+              </Stack>
+            </Paper>
+          ))}
+          {approveError ? <Alert color="red" p="xs">{approveError}</Alert> : null}
+          {candidates.length > 0 ? (
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => { setSuggestModalOpen(false); setCandidates([]); setCheckedCandidates(new Set()); }}>
+                Cancel
+              </Button>
+              <Button
+                loading={approvingCandidates}
+                disabled={checkedCandidates.size === 0}
+                onClick={() => void approveCandidates()}
+              >
+                Approve selected ({checkedCandidates.size})
+              </Button>
+            </Group>
+          ) : null}
         </Stack>
       </Modal>
 

@@ -24,12 +24,6 @@ export function isValidSessionTransition(
   return (transitions[from] ?? []).includes(to);
 }
 
-export function allowedNextSessionStatuses(
-  current: ImportSessionStatus
-): ImportSessionStatus[] {
-  return [...(transitions[current] ?? [])];
-}
-
 /** Session accepts new file uploads only in these states. */
 export function sessionAcceptsFileUploads(status: ImportSessionStatus): boolean {
   return status === "created" || status === "processing";

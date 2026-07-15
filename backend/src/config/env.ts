@@ -85,7 +85,7 @@ const envSchema = z.object({
   /** Fast/cheap Anthropic model for one-shot completions. */
   ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5-20251001"),
   /** Capable Anthropic model for vision, agentic loops, and complex generation. */
-  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-4-6"),
+  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-5"),
   /** Embedding provider — independent of LLM_PROVIDER (Voyage AI, Cohere, etc. may differ). */
   EMBEDDING_PROVIDER: z.string().default("openai"),
   SMTP_HOST: z.string().optional(),
@@ -95,6 +95,19 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
   PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("")),
+  /**
+   * FIX #215: household inbox email ingestion — dedicated household Gmail account, IMAP + App
+   * Password. Deliberately NOT routed through the per-parent Google OAuth integration
+   * (`oauth_integrations`, used for Calendar/Drive) — see ADMIN_GUIDE for rationale.
+   * Reuses `SMTP_USER`/`SMTP_PASS` for auth — the dedicated household mailbox's Gmail App
+   * Password is the same credential already configured for SMTP send, so IMAP only needs the
+   * protocol-specific bits (host/port/secure/folder actually differ from SMTP's).
+   */
+  FAMILY_INBOX_IMAP_HOST: z.string().optional(),
+  FAMILY_INBOX_IMAP_PORT: optionalIntEnv(993, 1, 65535),
+  FAMILY_INBOX_IMAP_SECURE: optionalBoolEnv(true),
+  /** Gmail label mapped as an IMAP folder (defense-in-depth: only this folder is ever queried). */
+  FAMILY_INBOX_IMAP_FOLDER: z.string().default("INBOX"),
   /**
    * Minimum severity emitted to stdout/stderr (`debug` = most verbose, `silent` = none).
    * Used by `backend/src/logger.ts`; set in repo root `.env`.
@@ -133,6 +146,24 @@ const envSchema = z.object({
   REALTY_API_KEY: z.string().optional(),
   /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
   TAVILY_API_KEY: z.string().optional(),
+  /**
+   * PA agent task loop (#164): max non-failed pa_task_run rows per household per calendar month.
+   * Run-count ceiling chosen over a dollar ceiling — no price-table maintenance, predictable for the user.
+   * At cap, runPATask() writes a refused_budget row and returns PA_BUDGET_EXCEEDED.
+   */
+  PA_TASK_MAX_RUNS_PER_MONTH: optionalIntEnv(60, 1, 10000),
+  /**
+   * PA agent task loop (#167): max non-failed pa_task_run rows per household per calendar day.
+   * Second, tighter ceiling on top of PA_TASK_MAX_RUNS_PER_MONTH — cheap insurance against a
+   * runaway frontend bug or a curious family member triggering many research loops in a row.
+   */
+  PA_TASK_MAX_RUNS_PER_DAY: optionalIntEnv(20, 1, 10000),
+  /**
+   * #223 Phase 2: auto-enqueue a gift-research PA task when a GIFT-IDEAS (21-day) occasion
+   * nudge fires. Off by default — opt-in, since it silently spends PA budget on the household's
+   * behalf without a direct ask.
+   */
+  PA_OCCASION_RESEARCH_ENABLED: optionalBoolEnv(false),
   /**
    * OpenAI embedding model for pgvector RAG (protest document store).
    * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
@@ -193,4 +224,16 @@ export function isEmailConfigured(): boolean {
     smtpFrom.length > 0 &&
     publicBaseUrl.length > 0
   );
+}
+
+/**
+ * FIX #215: separate from isEmailConfigured() — this gates IMAP inbox polling, not SMTP send.
+ * Reuses SMTP_USER/SMTP_PASS as the IMAP credentials (same dedicated household Gmail account's
+ * App Password works for both protocols) — only the IMAP host needs to be set independently.
+ */
+export function isEmailIngestConfigured(): boolean {
+  const host = env.FAMILY_INBOX_IMAP_HOST?.trim() ?? "";
+  const user = env.SMTP_USER?.trim() ?? "";
+  const pass = env.SMTP_PASS?.trim() ?? "";
+  return host.length > 0 && user.length > 0 && pass.length > 0;
 }

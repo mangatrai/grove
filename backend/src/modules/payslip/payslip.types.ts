@@ -35,7 +35,7 @@ export const LLM_PAYSLIP_PROFILE_IDS = [
   DELOITTE_PAYSLIP_PDF_PROFILE_ID
 ] as const;
 
-/** Optional LLM hybrid columns; used when inserting from `openai_llm_payslip` pipeline. */
+/** Optional LLM hybrid columns; used when inserting from `llm_payslip` pipeline. */
 export type PayslipHybridColumns = {
   canonicalExtractJson: string;
   currency: string | null;

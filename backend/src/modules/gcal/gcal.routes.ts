@@ -14,10 +14,13 @@ import {
   decodeGCalOAuthState,
   disconnectGCal,
   exchangeAndSaveCalendar,
+  getCalendarRoles,
   getCalendarSelection,
   getGCalStatus,
+  heuristicCalendarRole,
   listUpcomingEvents,
   listUserCalendars,
+  saveCalendarRoles,
   saveCalendarSelection
 } from "./gcal.service.js";
 
@@ -157,7 +160,11 @@ gcalRouter.get("/calendars", requireRole(["owner", "admin"]), async (req: Authen
     return;
   }
   const selection = await getCalendarSelection(req.authUser!.userId);
-  res.json({ calendars: result.calendars, selectedIds: selection ?? [] });
+  const savedRoles = await getCalendarRoles(req.authUser!.userId);
+  const roles = Object.fromEntries(
+    result.calendars.map(cal => [cal.id, savedRoles[cal.id] ?? heuristicCalendarRole(cal.summary)])
+  );
+  res.json({ calendars: result.calendars, selectedIds: selection ?? [], roles });
 });
 
 /** PATCH /gcal/calendars — save the user's calendar selection */
@@ -171,6 +178,23 @@ gcalRouter.patch(
       return;
     }
     await saveCalendarSelection(req.authUser!.userId, parsed.data.selectedIds);
+    res.json({ ok: true });
+  }
+);
+
+/** PATCH /gcal/calendar-roles — save per-calendar role (work/school/activities/other) (FIX #212) */
+gcalRouter.patch(
+  "/calendar-roles",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z
+      .object({ roles: z.record(z.string().min(1), z.enum(["work", "school", "activities", "other"])) })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ message: "roles must be a map of calendarId to work|school|activities|other", issues: parsed.error.issues });
+      return;
+    }
+    await saveCalendarRoles(req.authUser!.userId, parsed.data.roles);
     res.json({ ok: true });
   }
 );

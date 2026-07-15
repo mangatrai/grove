@@ -10,12 +10,12 @@ function notifyTokenListeners(): void {
 }
 
 /** Subscribe for `useSyncExternalStore` — call when auth changes so UI re-renders without a route change. */
-export function subscribeToken(onStoreChange: () => void): () => void {
+function subscribeToken(onStoreChange: () => void): () => void {
   tokenListeners.add(onStoreChange);
   return () => tokenListeners.delete(onStoreChange);
 }
 
-export function getTokenSnapshot(): string | null {
+function getTokenSnapshot(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 

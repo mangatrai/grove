@@ -305,7 +305,7 @@ export async function deleteStagingFilesForSession(sessionId: string): Promise<v
  * DB rows (import_session, import_file) are kept for audit trail — only disk files are removed.
  * Idempotent: safe to run repeatedly; already-cleared rows have stored_path = NULL and are skipped.
  */
-export async function purgeStaleImportFiles(): Promise<void> {
+async function purgeStaleImportFiles(): Promise<void> {
   const rows = await qAll<{ id: string; stored_path: string }>(
     `SELECT f.id, f.stored_path
        FROM import_file f

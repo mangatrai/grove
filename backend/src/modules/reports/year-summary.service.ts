@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
-import OpenAI from "openai";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { sendMail } from "../mailer/mailer.service.js";
-import { env } from "../../config/env.js";
+import { getChatAdapter, strongModel, isLlmConfigured } from "../../llm/index.js";
 import { log } from "../../logger.js";
 import { DEFAULT_CATEGORY_IDS } from "../category/category-ids.js";
 import type {
@@ -375,22 +374,19 @@ function parseNarrative(raw: string): string[] {
 }
 
 async function generateNarrative(data: YearSummaryData): Promise<string[]> {
-  if (!env.OPENAI_API_KEY) {
-    log.warn("year-summary: OPENAI_API_KEY not set, skipping narrative");
+  if (!isLlmConfigured()) {
+    log.warn("year-summary: LLM provider not configured, skipping narrative");
     return ["", "", ""];
   }
   try {
-    const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 60_000 });
-    const completion = await client.chat.completions.create({
-      model: env.OPENAI_STRONG_MODEL,
-      max_tokens: 800,
-      temperature: 0.7,
-      messages: [
+    const { content } = await getChatAdapter().complete(
+      [
         { role: "system", content: NARRATIVE_SYSTEM_PROMPT },
         { role: "user", content: buildPrompt(data) },
       ],
-    });
-    return parseNarrative(completion.choices[0]?.message?.content ?? "");
+      { model: strongModel(), maxTokens: 800, temperature: 0.7 }
+    );
+    return parseNarrative(content ?? "");
   } catch (err) {
     log.warn({ err }, "year-summary: narrative generation failed");
     return ["", "", ""];

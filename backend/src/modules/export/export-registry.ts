@@ -257,6 +257,27 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 28,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "email_ingest_log",
+    tableName: "email_ingest_log",
+    restoreOrder: 29,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
+  {
+    tableKey: "family_occasion_settings",
+    tableName: "family_occasion_settings",
+    restoreOrder: 30,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
+  {
+    tableKey: "household_pa_preferences",
+    tableName: "household_pa_preferences",
+    restoreOrder: 31,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
   }
 ];
 
@@ -278,5 +299,7 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   // Notification rows are transient UI state — not restored from backups
   "notification",
   "notification_preference",
-  "protest_document_chunks"
+  "protest_document_chunks",
+  // PA task loop run history — job-run log, same bucket as import_job/export_job/insight_job
+  "pa_task_run"
 ];

@@ -151,7 +151,7 @@ paths:
                     type: string
                     example: If that address is registered, a reset link is on its way.
         "400":
-          description: Validation failure (`{ errors: z.issues }`)
+          description: "Validation failure (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -283,7 +283,7 @@ paths:
                   profile:
                     $ref: '#/components/schemas/HouseholdProfile'
         "400":
-          description: Validation failure (`{ errors: z.issues }`)
+          description: "Validation failure (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -853,7 +853,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/InsightJob'
         "400":
-          description: Invalid path params (`{ errors: z.issues }`)
+          description: "Invalid path params (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -906,7 +906,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/InsightRecord'
         "400":
-          description: Invalid path params (`{ errors: z.issues }`)
+          description: "Invalid path params (`{ errors: z.issues }`)"
           content:
             application/json:
               schema:
@@ -2234,9 +2234,10 @@ paths:
       tags: [gdrive]
       summary: Restore household from a Drive backup file
       description: |
-        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline as
-        `POST /exports/household/import`. Poll `GET /exports/import/{jobId}` until terminal status; JWTs may be
-        invalidated after success (same as local restore).
+        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline used
+        by the device-upload restore (`POST /exports/household/import/execute`), skipping that flow's separate
+        prepare/token step since the file is already server-fetched. Poll `GET /exports/import/{jobId}` until
+        terminal status; JWTs may be invalidated after success (same as local restore).
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -2417,6 +2418,132 @@ paths:
         "403":
           $ref: '#/components/responses/Forbidden'
 
+  /gcal/calendars:
+    get:
+      tags: [gcal]
+      summary: List the requesting user's accessible Google Calendars
+      description: >
+        Returns every calendar the connected Google account can read, the user's saved
+        selection (which calendars feed the family agent), and a role per calendar
+        ("work" | "school" | "activities" | "other"). Role defaults to a name-based
+        heuristic (FIX #212) when no explicit role has been saved.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Calendar list, selection, and roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calendars:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        summary: { type: string }
+                        primary: { type: boolean }
+                        backgroundColor: { type: string, nullable: true }
+                  selectedIds:
+                    type: array
+                    items: { type: string }
+                  roles:
+                    type: object
+                    additionalProperties: { type: string, enum: [work, school, activities, other] }
+                    description: Map of calendar ID to role
+        "401":
+          description: Not authenticated or Calendar requires re-authorization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NEEDS_REAUTH }
+                  message: { type: string }
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          description: Google Calendar not connected for this user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NOT_CONNECTED }
+                  message: { type: string }
+        "502":
+          description: Google Calendar API error
+    patch:
+      tags: [gcal]
+      summary: Save the requesting user's calendar selection
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selectedIds]
+              properties:
+                selectedIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        "200":
+          description: Selection saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /gcal/calendar-roles:
+    patch:
+      tags: [gcal]
+      summary: Save per-calendar role (work/school/activities/other)
+      description: >
+        Lets the household mark a calendar as "school" so the family agent treats its
+        events as informational only (a school closure is not parent unavailability),
+        or as "activities" for kid activity calendars, rather than defaulting every
+        calendar to "work" via the name heuristic. (FIX #212)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles:
+                  type: object
+                  additionalProperties: { type: string, enum: [work, school, activities, other] }
+                  description: Map of calendar ID to role
+      responses:
+        "200":
+          description: Roles saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
   /gcal/events:
     get:
       tags: [gcal]
@@ -2517,8 +2644,18 @@ paths:
     get:
       tags: [notifications]
       summary: Get unread notification count
-      description: Lightweight endpoint polled every 60 seconds by the frontend bell icon.
+      description: >
+        Lightweight endpoint polled every 60 seconds by the frontend bell icon. The frontend
+        marks this call with `x-background-poll: 1` so the server can reject it once the session
+        has been idle 15+ minutes (FIX #221 Layer 2 backstop), independent of the JWT's own
+        expiry — this bounds how long an unattended/zombie tab can keep generating DB traffic.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: x-background-poll
+          in: header
+          required: false
+          schema: { type: string, enum: ["1"] }
+          description: Marks this as a passive background poll rather than a user-initiated request.
       responses:
         "200":
           description: Unread count
@@ -2529,7 +2666,10 @@ paths:
                 properties:
                   count: { type: integer }
         "401":
-          description: Unauthorized
+          description: >
+            Unauthorized, or (when `x-background-poll: 1` is set) the session has been idle 15+
+            minutes with no non-background request — `{ "message": "Session idle", "code":
+            "token_stale" }`.
 
   /notifications/read-all:
     post:
@@ -3850,16 +3990,16 @@ paths:
               schema: { $ref: '#/components/schemas/LineItemMutationResult' }
         "404":
           description: Line item not found or not owned by this household
-  /exports/household/import:
+  /exports/household/import/prepare:
     post:
       tags: [exports]
-      summary: Restore household from exported .hfb backup (async, destructive)
+      summary: "SEC #186 step 1: validate an .hfb backup and issue a restore confirmation token"
       description: |
-        `multipart/form-data` with field **`file`** (`.hfb` only). Queues **wipe-then-restore** for the
-        authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
-        Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
-        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 4** (manifest + one JSON
-        per table); v1/v2 monolithic bundles are still accepted. See `docs/API_EXPORTS.md`.
+        `multipart/form-data` with field **`file`** (`.hfb` only). Reads and returns the manifest (same
+        shape as `POST /exports/preview`) and stashes the file server-side under a short-lived, single-use
+        **`token`**. Does not modify the database. A direct single-shot "restore now" endpoint no longer
+        exists — every restore must call this, then `POST /exports/household/import/execute` with the
+        returned token. The token expires after 15 minutes if never executed.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -3874,6 +4014,45 @@ paths:
                   format: binary
                   description: .hfb backup produced by export job download
       responses:
+        "200":
+          description: Manifest summary plus a confirmation token for /execute
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BackupPreviewResponse'
+                  - type: object
+                    required: [token]
+                    properties:
+                      token:
+                        type: string
+        "400":
+          description: Missing `file` field, not a `.hfb`, or the file could not be read as a valid backup
+        "413":
+          description: File exceeds upload limit (500 MB)
+        "422":
+          description: Backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured
+  /exports/household/import/execute:
+    post:
+      tags: [exports]
+      summary: "SEC #186 step 2: consume a prepare token and queue the restore"
+      description: |
+        Consumes the single-use **`token`** returned by `POST /exports/household/import/prepare` and queues
+        **wipe-then-restore** for the authenticated household. Poll **`GET /exports/import/{jobId}`** until
+        `status` is terminal. Successful restore increments **`app_user.token_version`** (all JWTs for that
+        household's users become invalid).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
         "202":
           description: Restore job accepted; poll import job status
           content:
@@ -3887,9 +4066,9 @@ paths:
                   message:
                     type: string
         "400":
-          description: Missing `file` field or not a `.hfb`
-        "413":
-          description: File exceeds upload limit (500 MB)
+          description: Missing/invalid `token` field
+        "410":
+          description: "PREPARE_TOKEN_EXPIRED — token missing, expired, already used, or issued to a different household/user"
   /exports/preview:
     post:
       tags: [exports]
@@ -3952,6 +4131,7 @@ paths:
                   error:
                     type: string
                     nullable: true
+                    description: Fixed safe message when status=failed; never raw exception text (full detail is server-log only).
                   stats:
                     type: object
                     additionalProperties:
@@ -4405,6 +4585,172 @@ paths:
         "401": { description: Unauthorized }
         "404": { description: Slot not found }
 
+  /api/family/pa-preferences:
+    get:
+      tags: [family]
+      summary: List PA agent memory-store rows
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string, enum: [preference, discovered_fact, decision_history] }
+          description: Filter to one category (default returns all categories)
+      responses:
+        "200":
+          description: Preference list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaPreference' }
+        "401": { description: Unauthorized }
+    post:
+      tags: [family]
+      summary: Create a PA preference (dedups near-exact text in place)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, factText]
+              properties:
+                category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+                source: { type: string, enum: [manual, feedback, notes_extraction] }
+                topicTag:
+                  type: string
+                  nullable: true
+                  enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  description: Required when category is discovered_fact/decision_history; optional when category is preference (GH #239 — may be set for browsability, no longer forbidden).
+      responses:
+        "201":
+          description: Created (or dedup-updated) preference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preference: { $ref: '#/components/schemas/PaPreference' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+
+  /api/family/pa-preferences/{id}:
+    patch:
+      tags: [family]
+      summary: Update a PA preference in place (GH #239)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, factText]
+              properties:
+                category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+                topicTag:
+                  type: string
+                  nullable: true
+                  enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  description: Required when category is discovered_fact/decision_history; optional when category is preference.
+      responses:
+        "200":
+          description: Updated preference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preference: { $ref: '#/components/schemas/PaPreference' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "404": { description: Preference not found }
+    delete:
+      tags: [family]
+      summary: Delete a PA preference
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
+        "400": { description: Invalid id }
+        "401": { description: Unauthorized }
+        "404": { description: Preference not found }
+
+  /api/family/pa-preferences/suggest:
+    post:
+      tags: [family]
+      summary: Suggest PA preference candidates from household member notes (GH #238)
+      description: |
+        Scans every household member's `notes` field and asks the LLM to propose candidate memory-store
+        facts. Returns unpersisted candidates only — nothing is written until the caller approves individual
+        rows via `POST /pa-preferences`. Candidates matching an existing row (normalized-text dedup) are
+        filtered out. Returns an empty list without calling the LLM if no member has non-empty notes.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Candidate list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaPreferenceCandidate' }
+        "401": { description: Unauthorized }
+
+  /api/family/pa-preferences/classify:
+    post:
+      tags: [family]
+      summary: Classify an ad-hoc fact string into category + topicTag + synthesized factText (GH #238, #240)
+      description: |
+        Used by the Family Agent page's "Save as preference" button to suggest a starting category/tag,
+        and to synthesize the raw input into a short standalone factText (≤~140 chars) instead of the
+        caller persisting the raw input verbatim. Does not persist anything itself.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factText]
+              properties:
+                factText: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Classification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category: { type: string, enum: [preference, discovered_fact, decision_history] }
+                  topicTag:
+                    type: string
+                    nullable: true
+                    enum: [travel, school, health, finance, gifts, household, food, interests, other]
+                  factText:
+                    type: string
+                    description: Synthesized short standalone sentence (≤~140 chars), not a copy of the request's factText.
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+
   /api/family/alerts/{alertId}/approve:
     post:
       tags: [family]
@@ -4467,6 +4813,301 @@ paths:
                   code: { type: string, example: GCAL_WRITE_ERROR }
                   message: { type: string }
 
+  /api/family/alerts/{id}/resolve:
+    patch:
+      tags: [family]
+      summary: Resolve a family agent alert, optionally with a feedback disposition (FIX #208)
+      description: |
+        Marks an alert resolved. The optional `kind` disposition feeds a rolling 60-day
+        calibration summary injected into the proactive-research (Domain 3) and digest-synthesis
+        (Domain 5) prompts on subsequent agent runs — categories repeatedly marked `not_relevant`
+        (3+ times) are instructed out of future suggestion generation. Observations-only: this
+        never produces lifestyle or spending-reduction advice, only shifts which alert categories
+        the agent surfaces.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  nullable: true
+                  enum: [useful, not_relevant, already_knew]
+      responses:
+        "200":
+          description: Alert resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          description: Invalid kind value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors: { type: array, items: { type: object } }
+        "401": { description: Unauthorized }
+        "404":
+          description: Alert not found or already resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+  /api/family/occasion-settings:
+    get:
+      tags: [family]
+      summary: Get the household's occasion-nudge toggle (#223)
+      description: |
+        Returns whether birthday/holiday lead-time nudges are enabled for the caller's household.
+        Missing row defaults to `enabled: true`. Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current occasion-nudge settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  settings:
+                    type: object
+                    properties:
+                      householdId: { type: string }
+                      enabled: { type: boolean }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+    patch:
+      tags: [family]
+      summary: Enable or disable occasion-nudge alerts (#223)
+      description: |
+        Toggles birthday/holiday lead-time nudges for the caller's household. When disabled,
+        `detectOccasions` returns no alerts on subsequent agent runs — existing open occasion
+        alerts are left untouched. Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  settings:
+                    type: object
+                    properties:
+                      householdId: { type: string }
+                      enabled: { type: boolean }
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors: { type: array, items: { type: object } }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+
+  /api/family/agent/task:
+    post:
+      tags: [family]
+      summary: Quick Capture — classify and dispatch a note to the one-shot or research-loop engine (#167)
+      description: |
+        Classifies a freeform note as `one_shot` (existing lightweight tool loop,
+        `processCaptureNote`) or `research_loop` (the bounded BabyAGI-style loop, `runPATask` —
+        see `docs/ADMIN_GUIDE.md` §10.6), then dispatches to that engine. Classification is
+        skipped when the note is prefixed `research:` (stripped before use) or `mode` is set
+        explicitly. Replaces the removed `POST /api/family/agent/capture` (no classifier, always
+        one-shot). Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 2000 }
+                mode:
+                  type: string
+                  enum: [one_shot, research_loop]
+      responses:
+        "200":
+          description: One-shot or research-loop result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      type: { type: string, enum: [one_shot] }
+                      result:
+                        type: object
+                        properties:
+                          responseText: { type: string }
+                          actions:
+                            type: array
+                            items: { $ref: "#/components/schemas/CaptureAction" }
+                  - type: object
+                    properties:
+                      type: { type: string, enum: [research_loop] }
+                      runId: { type: string, format: uuid }
+                      result:
+                        type: object
+                        properties:
+                          goal: { type: string }
+                          summary: { type: string }
+                          actions:
+                            type: array
+                            items: { $ref: "#/components/schemas/CaptureAction" }
+                          iterationsUsed: { type: integer }
+                          hitIterationCap: { type: boolean }
+                          promptTokens: { type: integer }
+                          completionTokens: { type: integer }
+                          tavilyCalls: { type: integer }
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors: { type: array, items: { type: object } }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+        "409":
+          description: A normalized-equal research goal is already running for this household (#167 D5)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: PA_TASK_ALREADY_RUNNING }
+                  message: { type: string }
+                  runId: { type: string, format: uuid }
+        "429":
+          description: Monthly or daily PA task run budget exhausted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: PA_BUDGET_EXCEEDED }
+                  message: { type: string }
+        "502":
+          description: LLM or tool failure on either dispatch path
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, enum: [CAPTURE_FAILED, PA_TASK_FAILED] }
+                  message: { type: string }
+
+  /api/family/agent/task/history:
+    get:
+      tags: [family]
+      summary: List recent Quick Capture asks for Run History (#230)
+      description: |
+        Last 30 `pa_task_run` rows for the caller's household, newest first — both `one_shot`
+        (synchronous) and `research_loop` (BabyAGI-style) capture modes. Feeds the merged
+        "Run history" table on the Family Agent page alongside `GET /family/digests`. Requires
+        `owner | admin`. Registered before `/agent/task/{runId}` so Express doesn't match
+        `history` as a literal runId.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Recent task runs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        householdId: { type: string, format: uuid }
+                        goal: { type: string }
+                        captureMode: { type: string, enum: [one_shot, research_loop], nullable: true }
+                        origin: { type: string, enum: [user, scheduler] }
+                        status: { type: string, enum: [running, succeeded, failed, refused_budget] }
+                        iterationsUsed: { type: integer, nullable: true }
+                        resultSummary: { type: string, nullable: true }
+                        createdAt: { type: string, format: date-time }
+                        finishedAt: { type: string, format: date-time, nullable: true }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+
+  /api/family/agent/task/{runId}:
+    get:
+      tags: [family]
+      summary: Poll a research-loop run's status (#167 D4)
+      description: |
+        Fallback for a slow/timed-out synchronous `POST /agent/task` request. Scoped to the
+        caller's household. Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current run status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string, format: uuid }
+                  status: { type: string, enum: [running, succeeded, failed, refused_budget] }
+                  summary: { type: string, nullable: true }
+                  iterationsUsed: { type: integer, nullable: true }
+                  hitIterationCap: { type: boolean, nullable: true }
+                  createdAt: { type: string, format: date-time }
+                  finishedAt: { type: string, format: date-time, nullable: true }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+        "404":
+          description: Unknown runId, or belongs to a different household
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: NOT_FOUND }
+                  message: { type: string }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4474,6 +5115,18 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    CaptureAction:
+      type: object
+      description: A suggested action from Quick Capture (either dispatch path), awaiting approve/compose.
+      properties:
+        type:
+          type: string
+          enum: [create_event, set_reminder, draft_message, note]
+        title: { type: string }
+        summary: { type: string }
+        details:
+          type: object
+          description: Type-specific payload (date/time for events, recipient for messages, etc.)
     UnifiedComp:
       type: object
       description: A comparable property from any source (dcad_search, redfin, manual, cad_evidence)
@@ -5428,6 +6081,33 @@ components:
           type: array
           items: { type: string }
         notes: { type: string, nullable: true }
+
+    PaPreference:
+      type: object
+      properties:
+        id: { type: integer }
+        householdId: { type: string }
+        category: { type: string, enum: [preference, discovered_fact, decision_history] }
+        factText: { type: string }
+        source: { type: string, enum: [manual, feedback, notes_extraction] }
+        topicTag:
+          type: string
+          nullable: true
+          enum: [travel, school, health, finance, gifts, household, food, interests, other]
+          description: Required for discovered_fact/decision_history; optional (browsability only) for category=preference.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PaPreferenceCandidate:
+      type: object
+      properties:
+        personName: { type: string, nullable: true }
+        category: { type: string, enum: [preference, discovered_fact, decision_history] }
+        factText: { type: string }
+        topicTag:
+          type: string
+          nullable: true
+          enum: [travel, school, health, finance, gifts, household, food, interests, other]
 
     HelpAvailabilitySlot:
       type: object

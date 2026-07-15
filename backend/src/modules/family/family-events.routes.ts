@@ -12,13 +12,16 @@ import {
   updateFamilyEvent,
 } from "./family-events.service.js";
 import {
+  classifyCaptureNote,
   listAlerts,
   listDigestLog,
   processCaptureNote,
   resolveAlert,
   runFamilyAgent,
 } from "./family-agent.service.js";
+import { listTaskRunHistory, recordOneShotCapture, runPATask } from "./pa-task-runner.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
+import { getOccasionSettings, setOccasionSettings } from "./family-occasion-settings.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { log } from "../../logger.js";
@@ -95,12 +98,24 @@ familyEventsRouter.get("/alerts", requireRole(["owner", "admin"]), async (req: A
   res.json({ alerts });
 });
 
+// FIX #208: optional disposition captured at resolve time, feeds the calibration block.
+const resolveAlertSchema = z.object({
+  kind: z.enum(["useful", "not_relevant", "already_knew"]).nullable().optional(),
+});
+
 /** PATCH /family/alerts/:id/resolve */
 familyEventsRouter.patch(
   "/alerts/:id/resolve",
   requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
-    const ok = await resolveAlert(req.params.id, req.authUser!.householdId, req.authUser!.userId);
+    const parsed = resolveAlertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+    const ok = await resolveAlert(
+      req.params.id,
+      req.authUser!.householdId,
+      req.authUser!.userId,
+      parsed.data.kind ?? null
+    );
     if (!ok) { res.status(404).json({ message: "Alert not found or already resolved." }); return; }
     res.json({ ok: true });
   }
@@ -214,19 +229,105 @@ familyEventsRouter.post(
   }
 );
 
-/** POST /family/agent/capture — quick-capture inbox: parse freeform note into action suggestions */
+const captureTaskSchema = z.object({
+  note: z.string().min(1).max(2000),
+  mode: z.enum(["one_shot", "research_loop"]).optional(),
+});
+
+/**
+ * POST /family/agent/task (#167) — quick-capture inbox: classifies a freeform note as answerable
+ * immediately (one_shot, reuses the existing capture loop) or requiring web research
+ * (research_loop, dispatches to the BabyAGI runPATask() loop). Replaces the old POST /agent/capture
+ * — nothing else called that route, so it's removed rather than kept alongside this one.
+ */
 familyEventsRouter.post(
-  "/agent/capture",
+  "/agent/task",
   requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
-    const parsed = z.object({ note: z.string().min(1).max(2000) }).safeParse(req.body ?? {});
+    const parsed = captureTaskSchema.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
-    try {
-      const result = await processCaptureNote(parsed.data.note);
-      res.json(result);
-    } catch (err) {
-      res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
+    const householdId = req.authUser!.householdId;
+    log.info("family-events: agent/task request", { householdId, noteLength: parsed.data.note.length });
+
+    const { mode, note } = await classifyCaptureNote(parsed.data.note, parsed.data.mode);
+
+    if (mode === "one_shot") {
+      try {
+        const result = await processCaptureNote(note, householdId);
+        log.info("family-events: agent/task completed", { householdId, type: "one_shot" });
+        void recordOneShotCapture(householdId, note, "succeeded", result.responseText);
+        res.json({ type: "one_shot", result });
+      } catch (err) {
+        void recordOneShotCapture(householdId, note, "failed", null);
+        res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
+      }
+      return;
     }
+
+    const runResult = await runPATask(note, householdId);
+    if (!runResult.ok) {
+      if (runResult.code === "PA_BUDGET_EXCEEDED") {
+        res.status(429).json({ error: runResult.code, message: runResult.message });
+      } else if (runResult.code === "PA_TASK_ALREADY_RUNNING") {
+        res.status(409).json({ error: runResult.code, message: runResult.message, runId: runResult.runId });
+      } else {
+        res.status(502).json({ error: runResult.code, message: runResult.message });
+      }
+      return;
+    }
+
+    // #167 spec: persist research results into the alerts feed too, for visibility outside the
+    // inline Quick Capture response. source_digest_id has no FK — null is fine, this isn't a digest run.
+    await qExec(
+      `INSERT INTO family_agent_alerts (household_id, alert_type, reason)
+       VALUES (?, 'suggestion', ?)`,
+      householdId, runResult.data.summary
+    );
+
+    log.info("family-events: agent/task completed", { householdId, type: "research_loop", runId: runResult.runId });
+    res.json({ type: "research_loop", result: runResult.data, runId: runResult.runId });
+  }
+);
+
+/** GET /family/agent/task/history (#230) — last 30 Quick Capture asks (one-shot + research-loop), for Run History.
+ *  Must be registered before the /:runId route below, or Express matches "history" as a runId. */
+familyEventsRouter.get(
+  "/agent/task/history",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const entries = await listTaskRunHistory(req.authUser!.householdId);
+    res.json({ entries });
+  }
+);
+
+/** GET /family/agent/task/:runId (#167 D4) — poll a research-loop run, e.g. after a sync request times out. */
+familyEventsRouter.get(
+  "/agent/task/:runId",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const row = await qGet<{
+      id: string;
+      status: string;
+      result_summary: string | null;
+      iterations_used: number | null;
+      hit_iteration_cap: boolean | null;
+      created_at: string;
+      finished_at: string | null;
+    }>(
+      `SELECT id, status, result_summary, iterations_used, hit_iteration_cap, created_at, finished_at
+       FROM pa_task_run WHERE id = ? AND household_id = ?`,
+      req.params.runId, req.authUser!.householdId
+    );
+    if (!row) { res.status(404).json({ error: "NOT_FOUND", message: "No task run found with that id." }); return; }
+    res.json({
+      runId: row.id,
+      status: row.status,
+      summary: row.result_summary,
+      iterationsUsed: row.iterations_used,
+      hitIterationCap: row.hit_iteration_cap,
+      createdAt: row.created_at,
+      finishedAt: row.finished_at,
+    });
   }
 );
 
@@ -308,5 +409,28 @@ familyEventsRouter.post(
       return;
     }
     res.json({ ok: true });
+  }
+);
+
+/** GET /family/occasion-settings — birthday/holiday lead-time nudge toggle (#223) */
+familyEventsRouter.get(
+  "/occasion-settings",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const settings = await getOccasionSettings(req.authUser!.householdId);
+    res.json({ ok: true, settings });
+  }
+);
+
+/** PATCH /family/occasion-settings — enable/disable occasion nudges (#223) */
+familyEventsRouter.patch(
+  "/occasion-settings",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+
+    const settings = await setOccasionSettings(req.authUser!.householdId, parsed.data.enabled);
+    res.json({ ok: true, settings });
   }
 );

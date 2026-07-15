@@ -1,13 +1,27 @@
 import { google } from "googleapis";
+import { z } from "zod";
 
-import { getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
+import { chatModel, getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
 import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
 import { log } from "../../logger.js";
+import { env } from "../../config/env.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
-import { buildOAuth2Client, getDecryptedRefreshToken } from "../gcal/gcal.service.js";
-import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
-import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
+import {
+  buildOAuth2Client,
+  type CalendarRole,
+  getCalendarRoles,
+  getDecryptedRefreshToken,
+  heuristicCalendarRole
+} from "../gcal/gcal.service.js";
+import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember, PaPreference } from "./family.types.js";
+import { listAvailability, listHouseholdMembers, listPreferences } from "./family-profiles.service.js";
+import { getOccasionSettings } from "./family-occasion-settings.service.js";
+import { decryptDob } from "../household/dob-crypto.js";
+// Circular with pa-task-runner.ts (which imports getConnectedParents/fetchCalendarEvents/
+// buildCaptureContextHeader from this file) is safe: both sides only touch the other's
+// exports inside function bodies, never at module-evaluation time.
+import { runPATask } from "./pa-task-runner.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,57 +29,87 @@ import { listAvailability, listHouseholdMembers } from "./family-profiles.servic
 
 export type AgentRunType = "sunday_preview" | "monday_digest" | "daily_delta" | "manual";
 
-type ConnectedParent = {
+export type ConnectedParent = {
   userId: string;
   email: string;
   selectedCalendarIds: string[] | null;
   lastSyncedAt: string | null;
 };
 
-type CalendarEvent = {
+export type CalendarEvent = {
   summary: string;
   start: string | null;
   end: string | null;
   allDay: boolean;
   location: string | null;
   calendarId: string;
+  calendarName: string;
+  role: CalendarRole;
+  isHolidayCalendar: boolean;
 };
 
-type AlertItem = {
-  alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
-  reason: string;
-  affectedDate: string | null;
-  copyPasteText: string;
-  recipientHint: string;
-  calendarEventPayload?: {
-    title: string;
-    date: string;
-    description: string;
-  } | null;
-};
+// FIX #217: validated against parsed LLM output before it reaches family_agent_alerts (writeAlerts)
+// — a malformed alertType/recipientHint or missing field would otherwise flow straight into the
+// INSERT (DB error mid-run) or into garbage rows the UI has to render.
+const alertItemSchema = z.object({
+  alertType: z.enum(["conflict", "travel", "coverage_gap", "deadline_approaching", "suggestion"]),
+  reason: z.string().min(1),
+  affectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  copyPasteText: z.string(),
+  recipientHint: z.enum(["Nanny", "Spouse", "Both", "Self"]),
+  calendarEventPayload: z
+    .object({
+      title: z.string(),
+      date: z.string(),
+      description: z.string(),
+      time: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+});
 
-type AgentAnalysis = {
+/** FIX #217: validate a domain's parsed alert-item array; on any invalid item, treat the whole
+ *  response as a parse failure (same as malformed JSON) so the caller's existing warn+empty path
+ *  runs and the pipeline continues with other domains. */
+export function parseAlertItems(items: unknown): AlertItem[] {
+  const result = z.array(alertItemSchema).safeParse(items);
+  if (!result.success) {
+    throw new Error(`alert item schema validation failed: ${result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  }
+  return result.data as AlertItem[];
+}
+
+export type AlertItem = z.infer<typeof alertItemSchema>;
+
+// #231: subject is composed in code (digestSubject), not by the LLM — the LLM only supplies
+// the highlight phrase and the structured per-domain sections.
+export type DigestPayload = { subject: string; sections: { heading: string; items: string[] }[] };
+
+export type AgentAnalysis = {
   conflicts: AlertItem[];
-  parentADigest: { subject: string; body: string } | null;
-  parentBDigest: { subject: string; body: string } | null;
+  parentADigest: DigestPayload | null;
+  parentBDigest: DigestPayload | null;
   summaryText: string;
   hasOutput: boolean;
 };
 
-type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
-type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
-type ResearchItem      = { title: string; summary: string; category: string };
-type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
-type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
+export type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
+export type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
+type ResearchItem      = { title: string; summary: string; category: string; grade: "verified" | "lead" };
+export type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
+export type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
+export type OccasionResult    = { hasOutput: boolean; alerts: AlertItem[] };
 
-type PipelineOutputs = {
+export type PipelineOutputs = {
   coverageGaps: CoverageGapResult;
   nannyCoord: NannyCoordResult;
   research: ResearchResult;
   deadlines: DeadlineResult;
+  occasions: OccasionResult;
 };
 
-type FamilyContext = {
+export type FamilyContext = {
+  householdId: string;
   location: string;
   today: string;
   todayIso: string;
@@ -74,13 +118,15 @@ type FamilyContext = {
   parentEvents: Array<{ email: string; events: CalendarEvent[] }>;
   dbEvents: FamilyEvent[];
   openAlerts: AgentAlert[];
+  // FIX #208: compact household-feedback block (categories to avoid/keep), "" when no history yet.
+  calibrationBlock: string;
 };
 
 // ---------------------------------------------------------------------------
 // DB helpers
 // ---------------------------------------------------------------------------
 
-async function getConnectedParents(householdId: string): Promise<ConnectedParent[]> {
+export async function getConnectedParents(householdId: string): Promise<ConnectedParent[]> {
   type Row = {
     user_id: string;
     app_email: string;
@@ -94,7 +140,8 @@ async function getConnectedParents(householdId: string): Promise<ConnectedParent
      WHERE oi.provider = 'google_calendar'
        AND oi.household_id = ?
        AND oi.needs_reauth = FALSE
-       AND oi.refresh_token IS NOT NULL`,
+       AND oi.refresh_token IS NOT NULL
+     ORDER BY oi.connected_at ASC`,
     householdId
   );
   return rows.map(r => {
@@ -122,17 +169,23 @@ async function updateLastSyncedAt(userId: string): Promise<void> {
   );
 }
 
-async function getFamilyEventsForWeek(householdId: string): Promise<FamilyEvent[]> {
+/**
+ * `days` must cover the widest window any caller needs (FIX #212: the deadline sweep's
+ * "next 30 days" prompt text was silently truncated to 14 days of actual data).
+ */
+async function getFamilyEventsForWeek(householdId: string, days = 14): Promise<FamilyEvent[]> {
   const rows = await qAll<FamilyEventRow>(
     `SELECT * FROM family_events
      WHERE household_id = ? AND is_active = TRUE
        AND (
-         (start_at IS NOT NULL AND start_at >= NOW() AND start_at < NOW() + INTERVAL '14 days')
+         (start_at IS NOT NULL AND start_at >= NOW() AND start_at < NOW() + make_interval(days => ?::int))
          OR
-         (due_date IS NOT NULL AND due_date::date >= CURRENT_DATE AND due_date::date < CURRENT_DATE + 14)
+         (due_date IS NOT NULL AND due_date::date >= CURRENT_DATE AND due_date::date < CURRENT_DATE + ?::int)
        )
      ORDER BY COALESCE(start_at, due_date::timestamptz) ASC NULLS LAST`,
-    householdId
+    householdId,
+    days,
+    days
   );
 
   return rows.map(r => ({
@@ -158,12 +211,38 @@ async function getFamilyEventsForWeek(householdId: string): Promise<FamilyEvent[
   }));
 }
 
+// Mechanical dedup key (FIX #216) — a cheap backstop independent of whether the LLM honored the
+// "already flagged, do not re-flag" prompt instructions. Same alert type + affected date + first
+// 80 chars of the reason/title text is treated as the same finding.
+export function alertDedupKey(alertType: string, affectedDate: string | null, reason: string): string {
+  return `${alertType}|${affectedDate ?? ""}|${reason.slice(0, 80).trim().toLowerCase()}`;
+}
+
+// Already-surfaced "suggestion" alerts, rendered for the Domain 3 prompts (FIX #216) so query-gen
+// and synthesis both avoid resurfacing something the household has already seen.
+export function buildAlreadySuggestedText(openAlerts: AgentAlert[]): string {
+  const suggestions = openAlerts.filter(a => a.alertType === "suggestion");
+  if (suggestions.length === 0) return "Nothing suggested yet.";
+  return suggestions.map(a => `- ${a.reason.slice(0, 100)}`).join("\n");
+}
+
 async function writeAlerts(
   householdId: string,
   digestId: string,
-  conflicts: AgentAnalysis["conflicts"]
-): Promise<void> {
+  conflicts: AgentAnalysis["conflicts"],
+  existingOpenAlerts: AgentAlert[]
+): Promise<number> {
+  const seen = new Set(existingOpenAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
+  let inserted = 0;
   for (const c of conflicts) {
+    const key = alertDedupKey(c.alertType, c.affectedDate, c.reason);
+    if (seen.has(key)) {
+      log.debug("family-agent: skipping duplicate alert (mechanical dedup backstop)", {
+        alertType: c.alertType, affectedDate: c.affectedDate, reasonPrefix: c.reason.slice(0, 80),
+      });
+      continue;
+    }
+    seen.add(key);
     const hasCalPayload = c.calendarEventPayload != null;
     await qExec(
       `INSERT INTO family_agent_alerts
@@ -179,7 +258,9 @@ async function writeAlerts(
       hasCalPayload ? "create_gcal_event" : null,
       hasCalPayload ? c.calendarEventPayload : null
     );
+    inserted++;
   }
+  return inserted;
 }
 
 async function writeDigestLog(
@@ -217,9 +298,17 @@ async function writeDigestLog(
 // GCal fetch
 // ---------------------------------------------------------------------------
 
-async function fetchCalendarEvents(
+// Google's built-in subscribable public holiday calendars ("Holidays in India", "Holidays in
+// United States", etc.) always use this ID suffix. #223 reads these directly instead of guessing
+// seasonal/cultural occasions via a hardcoded list or an LLM/Tavily lookup — Google's calendars
+// are already correctly localized to whatever the household actually subscribes to.
+const HOLIDAY_CALENDAR_ID_SUFFIX = "#holiday@group.v.calendar.google.com";
+
+/** #164 C4: optional explicit window override, used by search_calendar for arbitrary date ranges. Defaults preserve existing 14-day/25-day behavior for the weekly-digest caller. */
+export async function fetchCalendarEvents(
   parent: ConnectedParent,
-  _opts: { fullFetch: boolean }
+  _opts: { fullFetch: boolean },
+  window?: { timeMin: string; timeMax: string }
 ): Promise<CalendarEvent[]> {
   const refreshToken = await getDecryptedRefreshToken(parent.userId);
   if (!refreshToken) {
@@ -229,19 +318,35 @@ async function fetchCalendarEvents(
   const auth = buildOAuth2Client(refreshToken);
   const calendar = google.calendar({ version: "v3", auth });
 
-  const timeMin = new Date().toISOString();
-  const timeMax = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  const timeMin = window?.timeMin ?? new Date().toISOString();
+  const timeMax = window?.timeMax ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
-  const calendarIds = parent.selectedCalendarIds?.length
-    ? parent.selectedCalendarIds
-    : await (async () => {
-        const res = await calendar.calendarList.list({ minAccessRole: "reader" });
-        return (res.data.items ?? []).map(c => c.id).filter((id): id is string => !!id);
-      })();
+  // Fetch calendar list unconditionally — needed for names (role heuristic + prompt provenance),
+  // not just to discover IDs when none were explicitly selected (FIX #212).
+  const listRes = await calendar.calendarList.list({ minAccessRole: "reader" });
+  const allCalendars = listRes.data.items ?? [];
+  const nameById = new Map(allCalendars.map(c => [c.id ?? "", c.summary ?? c.id ?? "Calendar"]));
+
+  const holidayCalendarIds = allCalendars
+    .map(c => c.id)
+    .filter((id): id is string => !!id && id.endsWith(HOLIDAY_CALENDAR_ID_SUFFIX));
+  const holidayCalendarIdSet = new Set(holidayCalendarIds);
+
+  // Holiday calendars are handled by the dedicated wider-window pass below, always — regardless
+  // of selectedCalendarIds — so exclude them here to avoid fetching the same calendar twice.
+  const calendarIds = (
+    parent.selectedCalendarIds?.length
+      ? parent.selectedCalendarIds
+      : allCalendars.map(c => c.id).filter((id): id is string => !!id)
+  ).filter(id => !holidayCalendarIdSet.has(id));
+
+  const savedRoles = await getCalendarRoles(parent.userId);
 
   const events: CalendarEvent[] = [];
 
   for (const calId of calendarIds) {
+    const calendarName = nameById.get(calId) ?? calId;
+    const role: CalendarRole = savedRoles[calId] ?? heuristicCalendarRole(calendarName);
     try {
       const res = await calendar.events.list({
         calendarId: calId,
@@ -260,6 +365,9 @@ async function fetchCalendarEvents(
           allDay: !ev.start?.dateTime,
           location: ev.location ?? null,
           calendarId: calId,
+          calendarName,
+          role,
+          isHolidayCalendar: false,
         });
       }
     } catch (err) {
@@ -267,7 +375,174 @@ async function fetchCalendarEvents(
     }
   }
 
+  // Holiday calendars: wider window (#223 nudge tiers need 21-day lead time), independent of
+  // selectedCalendarIds so narrowing day-to-day sync never disables occasion awareness.
+  const holidayTimeMax = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString();
+  for (const calId of holidayCalendarIds) {
+    const calendarName = nameById.get(calId) ?? calId;
+    try {
+      const res = await calendar.events.list({
+        calendarId: calId,
+        timeMin,
+        timeMax: holidayTimeMax,
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: 100,
+      });
+      for (const ev of res.data.items ?? []) {
+        if (ev.status === "cancelled") continue;
+        events.push({
+          summary: ev.summary ?? "(no title)",
+          start: ev.start?.dateTime ?? ev.start?.date ?? null,
+          end: ev.end?.dateTime ?? ev.end?.date ?? null,
+          allDay: !ev.start?.dateTime,
+          location: ev.location ?? null,
+          calendarId: calId,
+          calendarName,
+          role: "other",
+          isHolidayCalendar: true,
+        });
+      }
+    } catch (err) {
+      log.warn("family-agent: skipping holiday calendar due to fetch error", { calId, err: String(err) });
+    }
+  }
+
   return events;
+}
+
+// ---------------------------------------------------------------------------
+// Day grid (FIX #209 / #212) — deterministic day-by-day merge of parent
+// commitments, school-calendar status, kid activities, and caregiver coverage.
+// Computed in code (never left to the LLM) so weekday/date arithmetic and
+// calendar-role exclusion are always correct, regardless of model behavior.
+// ---------------------------------------------------------------------------
+
+// FIX #210: two Tavily start_date windows shared by Domains 3 & 4. "new" (news-like: this
+// weekend's events, newly announced things) keeps a narrow recent-publish window; "seasonal"
+// (registrations, enrollment windows, schedules — including deadline-sweep queries, which are
+// inherently this class) uses a much wider window since those pages are typically published
+// weeks-to-months before the run that needs them.
+const NEW_WINDOW_DAYS = 7;
+const SEASONAL_WINDOW_DAYS = 180;
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function localIsoDate(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
+}
+
+/** `iso` is a plain YYYY-MM-DD date (no time component) — safe to treat as UTC midnight for arithmetic. */
+function addDaysIso(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function weekdayIndexOf(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/**
+ * FIX #210: Tavily `start_date` for a query's freshness class — "new" (news-like: this weekend's
+ * events, newly announced things) gets a narrow recent-publish window; "seasonal" (registrations,
+ * enrollment windows, schedules — including deadline-sweep queries) gets a much wider rolling
+ * window since those pages are typically published weeks-to-months before the run that needs them.
+ */
+export function startDateForFreshness(freshness: "new" | "seasonal", todayIso: string): string {
+  return addDaysIso(todayIso, freshness === "seasonal" ? -SEASONAL_WINDOW_DAYS : -NEW_WINDOW_DAYS);
+}
+
+/**
+ * Household-local ISO date (FIX #209) — never server/UTC time. A run kicked off at 11pm UTC
+ * must still resolve "today" to the household's own calendar day, not the day after.
+ */
+export function computeTodayIso(now: Date, tz: string): string {
+  return now.toLocaleDateString("en-CA", { timeZone: tz }); // en-CA => YYYY-MM-DD
+}
+
+function formatDateLabel(iso: string): string {
+  const [, m, dd] = iso.split("-").map(Number);
+  return `${DAY_NAMES[weekdayIndexOf(iso)]} ${MONTH_NAMES[m - 1]} ${dd}`;
+}
+
+function formatEventTime(ev: CalendarEvent): string {
+  if (ev.allDay) return "all-day";
+  const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: env.TZ }) : "?";
+  return `${fmt(ev.start)}–${fmt(ev.end)}`;
+}
+
+function eventCoversDate(ev: CalendarEvent, iso: string): boolean {
+  if (!ev.start) return false;
+  if (ev.allDay) {
+    const startIso = ev.start.slice(0, 10);
+    const endIso = ev.end ? ev.end.slice(0, 10) : addDaysIso(startIso, 1);
+    return iso >= startIso && iso < endIso; // GCal all-day end date is exclusive
+  }
+  const startIso = localIsoDate(new Date(ev.start));
+  const endIso = ev.end ? localIsoDate(new Date(ev.end)) : startIso;
+  return iso >= startIso && iso <= endIso;
+}
+
+function dbEventCoversDate(ev: FamilyEvent, iso: string): boolean {
+  if (ev.recordType !== "event" || !ev.startAt) return false;
+  if (ev.allDay) {
+    const startIso = ev.startAt.slice(0, 10);
+    const endIso = ev.endAt ? ev.endAt.slice(0, 10) : addDaysIso(startIso, 1);
+    return iso >= startIso && iso < endIso;
+  }
+  const startIso = localIsoDate(new Date(ev.startAt));
+  const endIso = ev.endAt ? localIsoDate(new Date(ev.endAt)) : startIso;
+  return iso >= startIso && iso <= endIso;
+}
+
+function caregiverActiveOnDate(slot: HelpAvailabilitySlot, iso: string, weekday: number): boolean {
+  if (slot.slotType === "one_off") return slot.specificDate === iso;
+  return slot.daysOfWeek.includes(weekday);
+}
+
+/**
+ * Builds one text block per day covering `days` days starting today. Parent events tagged
+ * role "school" are informational only (a school closure is not parent unavailability) and
+ * are listed separately from actual parent commitments (FIX #212 calendar provenance).
+ */
+export function buildDayGrid(ctx: FamilyContext, days: number): string[] {
+  const lines: string[] = [];
+  for (let i = 0; i < days; i++) {
+    const iso = addDaysIso(ctx.todayIso, i);
+    const weekday = weekdayIndexOf(iso);
+    const parts: string[] = [`${formatDateLabel(iso)} (${iso}):`];
+
+    ctx.parentEvents.forEach((p, idx) => {
+      const dayEvents = p.events.filter(ev => ev.role !== "school" && eventCoversDate(ev, iso));
+      if (dayEvents.length > 0) {
+        parts.push(`  Parent ${String.fromCharCode(65 + idx)}: ` + dayEvents.map(ev => `${ev.summary} (${formatEventTime(ev)})`).join("; "));
+      }
+    });
+
+    const schoolEvents = ctx.parentEvents.flatMap(p => p.events).filter(ev => ev.role === "school" && eventCoversDate(ev, iso));
+    if (schoolEvents.length > 0) {
+      parts.push(`  School (informational, not a parent commitment): ` + schoolEvents.map(ev => ev.summary).join("; "));
+    }
+
+    const caregiverToday = ctx.caregiverSlots.filter(s => caregiverActiveOnDate(s, iso, weekday));
+    if (caregiverToday.length > 0) {
+      parts.push(`  Caregiver: ` + caregiverToday.map(s => {
+        const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+        return `${s.personName}${time}`;
+      }).join("; "));
+    }
+
+    const activitiesToday = ctx.dbEvents.filter(ev => dbEventCoversDate(ev, iso));
+    if (activitiesToday.length > 0) {
+      parts.push(`  Activities: ` + activitiesToday.map(ev => ev.title).join("; "));
+    }
+
+    if (parts.length === 1) parts.push("  Nothing scheduled.");
+    lines.push(parts.join("\n"));
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +599,12 @@ async function getHouseholdLocation(householdId: string): Promise<string> {
   return [row.city, row.state].filter(Boolean).join(", ");
 }
 
+/** #231: household display name for the digest subject line and email masthead. */
+async function getHouseholdName(householdId: string): Promise<string> {
+  const row = await qGet<{ name: string | null }>(`SELECT name FROM household WHERE id = ?`, householdId);
+  return row?.name ?? "Household";
+}
+
 function getSeason(month: number): string {
   if (month >= 2 && month <= 4) return "Spring";
   if (month >= 5 && month <= 7) return "Summer";
@@ -336,7 +617,222 @@ function parseJsonResponse<T>(raw: string): T {
   return JSON.parse(cleaned) as T;
 }
 
-function buildMemberProfile(members: HouseholdMember[]): string {
+// ---------------------------------------------------------------------------
+// #229: LLM call schemas — hand-written JSON Schema mirrors of each site's expected shape,
+// enforced via responseFormat:"json"+jsonSchema (OpenAI json_schema strict mode / Anthropic
+// forced tool-use, see llm/providers/{openai,anthropic}.ts) so malformed output is caught before
+// parsing instead of silently degrading a Promise.all fan-out branch to an empty result. Same
+// additionalProperties:false / all-fields-required-and-nullable convention as pa-task-runner.ts's
+// #228 schemas (strict mode requires objects fully closed).
+// ---------------------------------------------------------------------------
+
+const ALERT_ITEM_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    alertType: { type: "string", enum: ["conflict", "travel", "coverage_gap", "deadline_approaching", "suggestion"] },
+    reason: { type: "string" },
+    affectedDate: { type: ["string", "null"] },
+    copyPasteText: { type: "string" },
+    recipientHint: { type: "string", enum: ["Nanny", "Spouse", "Both", "Self"] },
+    calendarEventPayload: {
+      type: ["object", "null"],
+      properties: {
+        title: { type: "string" },
+        date: { type: "string" },
+        description: { type: "string" },
+        time: { type: ["string", "null"] },
+      },
+      required: ["title", "date", "description", "time"],
+      additionalProperties: false,
+    },
+  },
+  required: ["alertType", "reason", "affectedDate", "copyPasteText", "recipientHint", "calendarEventPayload"],
+  additionalProperties: false,
+};
+
+const COVERAGE_COORDINATION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    gaps: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+    coordinationNeeds: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+  },
+  required: ["gaps", "coordinationNeeds"],
+  additionalProperties: false,
+};
+
+const RESEARCH_QUERY_GEN_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    queries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          intent: { type: "string" },
+          freshness: { type: "string", enum: ["new", "seasonal"] },
+        },
+        required: ["query", "intent", "freshness"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["queries"],
+  additionalProperties: false,
+};
+
+const researchQueryGenSchema = z.object({
+  queries: z.array(z.object({
+    query: z.string(),
+    intent: z.string(),
+    freshness: z.enum(["new", "seasonal"]),
+  })).default([]),
+});
+
+const RESEARCH_FALLBACK_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          category: { type: "string", enum: ["activity", "suggestion"] },
+        },
+        required: ["title", "summary", "category"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+};
+
+const researchFallbackSchema = z.object({
+  items: z.array(z.object({
+    title: z.string(),
+    summary: z.string(),
+    category: z.enum(["activity", "suggestion"]),
+  })).default([]),
+});
+
+const RESEARCH_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          category: { type: "string", enum: ["event", "deadline", "restaurant", "weather", "activity", "entertainment"] },
+          grade: { type: "string", enum: ["verified", "lead"] },
+        },
+        required: ["title", "summary", "category", "grade"],
+        additionalProperties: false,
+      },
+    },
+    discarded: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          reason: { type: "string", enum: ["age", "geo", "duplicate", "date", "feedback"] },
+        },
+        required: ["title", "reason"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items", "discarded"],
+  additionalProperties: false,
+};
+
+const researchSynthesisSchema = z.object({
+  items: z.array(z.object({
+    title: z.string(),
+    summary: z.string(),
+    category: z.enum(["event", "deadline", "restaurant", "weather", "activity", "entertainment"]),
+    grade: z.enum(["verified", "lead"]),
+  })).default([]),
+  discarded: z.array(z.object({
+    title: z.string(),
+    reason: z.enum(["age", "geo", "duplicate", "date", "feedback"]),
+  })).default([]),
+});
+
+const DEADLINE_QUERY_GEN_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    queries: { type: "array", items: { type: "string" } },
+  },
+  required: ["queries"],
+  additionalProperties: false,
+};
+
+const deadlineQueryGenSchema = z.object({ queries: z.array(z.string()).default([]) });
+
+const DEADLINE_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    alerts: { type: "array", items: ALERT_ITEM_JSON_SCHEMA },
+  },
+  required: ["alerts"],
+  additionalProperties: false,
+};
+
+const DIGEST_SECTION_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    subjectHighlight: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          heading: { type: "string" },
+          items: { type: "array", items: { type: "string" } },
+        },
+        required: ["heading", "items"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["subjectHighlight", "sections"],
+  additionalProperties: false,
+};
+
+const DIGEST_SYNTHESIS_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    summaryText: { type: "string" },
+    parentADigest: DIGEST_SECTION_JSON_SCHEMA,
+    parentBDigest: DIGEST_SECTION_JSON_SCHEMA,
+  },
+  required: ["summaryText", "parentADigest", "parentBDigest"],
+  additionalProperties: false,
+};
+
+const digestSectionSchema = z.object({
+  subjectHighlight: z.string(),
+  sections: z.array(z.object({
+    heading: z.string(),
+    items: z.array(z.string()),
+  })).default([]),
+});
+
+const digestSynthesisSchema = z.object({
+  summaryText: z.string(),
+  parentADigest: digestSectionSchema,
+  parentBDigest: digestSectionSchema,
+});
+
+// FIX #215: exported for reuse by email-ingest.service.ts's extraction prompt.
+export function buildMemberProfile(members: HouseholdMember[]): string {
   if (members.length === 0) return "No household members configured.";
   return members.map(m => {
     const parts = [`${m.fullName} (${m.relationship}${m.age != null ? `, age ${m.age}` : ""})`];
@@ -346,32 +842,53 @@ function buildMemberProfile(members: HouseholdMember[]): string {
   }).join("\n");
 }
 
+// FIX #213: shared with the quick-capture context header — extracted from Domain 1+2 so both
+// call sites render caregiver schedules identically instead of duplicating the mapping logic.
+function buildCaregiverLines(slots: HelpAvailabilitySlot[]): string {
+  if (slots.length === 0) return "No caregiver configured.";
+  return slots.map(s => {
+    const when = s.slotType === "one_off" && s.specificDate
+      ? `one-off ${s.specificDate}`
+      : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
+    const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+    return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
+  }).join("\n");
+}
+
+// #165: `preference`-category rows are full-inclusion (never top-K filtered) — a dropped hard
+// constraint (e.g. "no Schengen transit") is a wrong answer, not a slightly worse one. At the
+// ratified ~10-30 row scale this is ~300 tokens; `discovered_fact`/`decision_history` retrieval via
+// `search_memory` is deferred to #238.
+function buildPreferenceLines(preferences: PaPreference[]): string {
+  if (preferences.length === 0) return "No preferences recorded.";
+  return preferences.map(p => `- ${p.factText}`).join("\n");
+}
+
 // ---------------------------------------------------------------------------
-// Domain 1 — Coverage gap detection
+// Domain 1+2 — Coverage gap detection + nanny coordination (merged, FIX #211)
 // ---------------------------------------------------------------------------
 
-async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): Promise<CoverageGapResult> {
+// FIX #211: previously two separate strong-model calls over near-identical context (member
+// profiles + caregiver schedule + day grid), answering overlapping "does this window need adult
+// action?" questions — double context cost, and no shared view meant D1 could call a window
+// covered while D2 flagged the same window. Merged into one call producing both arrays; downstream
+// (PipelineOutputs, synthesizeDigest) is unchanged — only the call count and prompt changed.
+export async function analyzeCoverageAndCoordination(
+  ctx: FamilyContext,
+  runType: AgentRunType
+): Promise<{ coverageGaps: CoverageGapResult; nannyCoord: NannyCoordResult }> {
   const children = ctx.members.filter(m => m.relationship === "child" || m.relationship === "dependent");
-  if (children.length === 0) return { hasOutput: false, gaps: [] };
+  if (children.length === 0 && ctx.caregiverSlots.length === 0) {
+    return { coverageGaps: { hasOutput: false, gaps: [] }, nannyCoord: { hasOutput: false, items: [] } };
+  }
 
-  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const parentLines = ctx.parentEvents.map((p, i) =>
-    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
-    (p.events.length === 0 ? "  No events." :
-      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"}${ev.location ? ` | ${ev.location}` : ""}`).join("\n"))
-  ).join("\n\n");
+  const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
 
-  const caregiverLines = ctx.caregiverSlots.length === 0
-    ? "No caregiver configured."
-    : ctx.caregiverSlots.map(s => {
-        const when = s.slotType === "one_off" && s.specificDate
-          ? `one-off ${s.specificDate}`
-          : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
-        const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-        return `- ${s.personName} [${s.serviceType}]: ${when}${time}`;
-      }).join("\n");
+  const caregiverLines = buildCaregiverLines(ctx.caregiverSlots);
 
-  const childLines = children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n");
+  const childLines = children.length > 0
+    ? children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n")
+    : "No children in household.";
   const openGapAlerts = ctx.openAlerts
     .filter(a => a.alertType === "coverage_gap")
     .map(a => `- ${a.affectedDate ?? "no date"}: ${a.reason}`)
@@ -383,115 +900,73 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
 
 Household members:
 ${memberProfile}
-↑ Use these profiles when assessing gaps: check ages, school schedules in notes, and activity times — a child at school or a confirmed activity during a gap window is not at risk and should not be flagged.
+↑ Use these profiles when assessing gaps and coordination needs: check ages, school schedules in notes, and activity times — a child at school or a confirmed activity during a gap window is not at risk and should not be flagged.
 
 Children needing care:
 ${childLines}
 
-Caregiver schedule (CONFIRMED — these slots are already covered, do NOT ask to confirm them):
+Caregiver schedule (CONFIRMED — these slots are already covered/arranged, do NOT ask to confirm them):
 ${caregiverLines}
 
-Parent calendars (next 14 days):
-${parentLines}
+Day-by-day schedule (next 14 days) — merges parent commitments (with start/end times), school-calendar
+status (informational only — never counts as parent unavailability), caregiver coverage, and kid activities:
+${dayGrid}
 
 ${openGapAlerts ? `Already flagged coverage gaps (DO NOT re-flag):\n${openGapAlerts}\n` : ""}
-Identify GENUINE childcare gaps only — windows where a child has no adult present because ALL of the following are true:
-1. BOTH parents are simultaneously unavailable (overlapping commitments on the SAME time window), AND
-2. The caregiver is NOT scheduled during that window.
+You are assessing TWO separate but related things from the same schedule data above. A single window
+must be flagged in AT MOST ONE of the two categories, never both.
 
-Rules you must follow:
-- If the caregiver is scheduled during an event's time, that time is COVERED. Do not flag it.
-- A parent taking a child to a doctor or dentist appointment is NOT a gap. The child is with the parent; other children remain with the caregiver as normal.
-- If only one parent's calendar is shown (the other shows "No events"), assume the other parent is AVAILABLE — absence of calendar data does not mean unavailability.
-- An event with a location far from home (e.g., a workshop or conference in another city) during a time when a child activity is scheduled IS worth flagging if it creates a pickup or dropoff gap outside caregiver hours.
-- Only flag situations where children would genuinely have NO adult present. Err strongly toward returning an empty gaps array.
+1. COVERAGE GAPS — genuine childcare gaps where a child has no adult present, because ALL of the following are true:
+   - BOTH parents are simultaneously unavailable (overlapping commitments on the SAME time window), AND
+   - The caregiver is NOT scheduled during that window.
+   Rules:
+   - If the caregiver is scheduled during an event's time, that time is COVERED. Do not flag it.
+   - A parent taking a child to a doctor or dentist appointment is NOT a gap. The child is with the parent; other children remain with the caregiver as normal.
+   - If only one parent's calendar is shown (the other shows "No events"), assume the other parent is AVAILABLE — absence of calendar data does not mean unavailability.
+   - An event with a location far from home (e.g., a workshop or conference in another city) during a time when a child activity is scheduled IS worth flagging if it creates a pickup or dropoff gap outside caregiver hours.
+   - Only flag situations where children would genuinely have NO adult present. Err strongly toward returning an empty gaps array.
 
-Respond with ONLY valid JSON: { "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
-If no gaps, return { "gaps": [] }.`;
+2. CAREGIVER COORDINATION NEEDS — action needed BEYOND the regular caregiver schedule above (the caregiver IS present or arranged, but something about the schedule needs adjusting). Flag ONLY:
+   - Parent traveling overnight or to a multi-day conference requiring care on days the caregiver is not scheduled.
+   - Events that START before or END after the caregiver's scheduled hours on a given day, where a child needs to be present (e.g., early-morning school drop-off before caregiver arrives, or a late evening activity after caregiver leaves).
+   - Both parents simultaneously away on a day the caregiver is not scheduled.
+   Do NOT flag:
+   - ANY appointment, meeting, or activity that falls WITHIN the caregiver's already-scheduled hours. The caregiver is present — no coordination needed.
+   - Parent working from home on a normal day.
+   - Medical appointments or child appointments during caregiver hours.
+   - "Busy" or "fully-booked" days where the caregiver is already on duty.
+   - Anything speculative or not directly evidenced by the calendar data above.
 
-  const { content } = await getChatAdapter().complete(
-    [
-      { role: "system", content: "You are a careful childcare coverage analyst for a household PA. Identify genuine gaps where children have no adult present — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at an activity during the flagged window is not at risk. Err strongly toward empty results. Return valid JSON only." },
-      { role: "user", content: prompt },
-    ],
-    { model: strongModel(), maxTokens: 800 }
-  );
-
-  try {
-    const parsed = parseJsonResponse<{ gaps: AlertItem[] }>(content);
-    return { hasOutput: parsed.gaps.length > 0, gaps: parsed.gaps };
-  } catch {
-    log.warn("family-agent: Domain 1 coverage gap parse failed", { raw: content.slice(0, 200) });
-    return { hasOutput: false, gaps: [] };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Domain 2 — Nanny coordination
-// ---------------------------------------------------------------------------
-
-async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType): Promise<NannyCoordResult> {
-  if (ctx.caregiverSlots.length === 0) return { hasOutput: false, items: [] };
-
-  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const parentLines = ctx.parentEvents.map((p, i) =>
-    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
-    (p.events.length === 0 ? "  No events." :
-      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"} | ${ev.location ?? ""}`).join("\n"))
-  ).join("\n\n");
-
-  const caregiverLines = ctx.caregiverSlots.map(s => {
-    const when = s.slotType === "one_off" && s.specificDate
-      ? `one-off ${s.specificDate}`
-      : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
-    const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-    return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
-  }).join("\n");
-
-  const memberProfile = buildMemberProfile(ctx.members);
-
-  const prompt = `Today: ${ctx.today}. Run: ${runType}.
-
-Household members:
-${memberProfile}
-↑ Use these profiles to assess whether coordination is genuinely needed: a school-age child at school during a gap does not need home coverage; an infant home full-time does.
-
-Caregiver schedule (CONFIRMED regular hours — already arranged, no need to reconfirm):
-${caregiverLines}
-
-Parent calendars (next 14 days):
-${parentLines}
-
-Flag ONLY genuine caregiver coordination needs that require action BEYOND the regular schedule above.
-Flag these:
-- Parent traveling overnight or to a multi-day conference requiring care on days the caregiver is not scheduled.
-- Events that START before or END after the caregiver's scheduled hours on a given day, where a child needs to be present (e.g., early-morning school drop-off before caregiver arrives, or a late evening activity after caregiver leaves).
-- Both parents simultaneously away on a day the caregiver is not scheduled.
-
-Do NOT flag these:
-- ANY appointment, meeting, or activity that falls WITHIN the caregiver's already-scheduled hours. The caregiver is present — no coordination needed.
-- Parent working from home on a normal day.
-- Medical appointments or child appointments during caregiver hours.
-- "Busy" or "fully-booked" days where the caregiver is already on duty.
-- Anything speculative or not directly evidenced by the calendar data above.
-
-Respond with ONLY valid JSON: { "items": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
-If nothing actionable, return { "items": [] }.`;
+Respond with ONLY valid JSON:
+{ "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ],
+  "coordinationNeeds": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
+If nothing in either category, return { "gaps": [], "coordinationNeeds": [] }.`;
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You are a careful family coordination assistant for a household PA. Surface only genuine caregiver needs that require action beyond the confirmed schedule — use member ages, school hours from notes, and activity context to reason about whether a gap actually affects a child who needs supervision. Return valid JSON only." },
+      { role: "system", content: "You are a careful childcare coverage and caregiver coordination analyst for a household PA. Identify genuine coverage gaps (no adult present) and genuine caregiver coordination needs (action beyond the confirmed schedule) — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at a confirmed activity during a gap window is not at risk. Err strongly toward empty results in both categories, and never double-flag the same window. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
-    { model: strongModel(), maxTokens: 700 }
+    {
+      model: strongModel(),
+      maxTokens: 1400,
+      responseFormat: "json",
+      jsonSchema: COVERAGE_COORDINATION_JSON_SCHEMA,
+      jsonSchemaName: "coverage_coordination",
+    }
   );
 
   try {
-    const parsed = parseJsonResponse<{ items: AlertItem[] }>(content);
-    return { hasOutput: parsed.items.length > 0, items: parsed.items };
-  } catch {
-    log.warn("family-agent: Domain 2 nanny coord parse failed", { raw: content.slice(0, 200) });
-    return { hasOutput: false, items: [] };
+    const parsed = parseJsonResponse<{ gaps: unknown[]; coordinationNeeds: unknown[] }>(content);
+    const gaps = parseAlertItems(parsed.gaps);
+    const items = parseAlertItems(parsed.coordinationNeeds);
+    return {
+      coverageGaps: { hasOutput: gaps.length > 0, gaps },
+      nannyCoord: { hasOutput: items.length > 0, items },
+    };
+  } catch (err) {
+    log.warn("family-agent: Domain 1+2 coverage/coordination parse failed", { raw: content.slice(0, 200), err: String(err) });
+    return { coverageGaps: { hasOutput: false, gaps: [] }, nannyCoord: { hasOutput: false, items: [] } };
   }
 }
 
@@ -499,7 +974,7 @@ If nothing actionable, return { "items": [] }.`;
 // Domain 3 — Proactive research
 // ---------------------------------------------------------------------------
 
-async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): Promise<ResearchResult> {
+export async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): Promise<ResearchResult> {
   const queryCount = runType === "daily_delta" ? 2 : runType === "sunday_preview" ? 3 : 5;
   const now = new Date();
   const month = now.toLocaleString("en-US", { month: "long" });
@@ -514,9 +989,12 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
     .slice(0, 8)
     .join("\n");
 
+  // FIX #216: already-surfaced suggestions, so query-gen and synthesis both avoid resurfacing them.
+  const alreadySuggestedLines = buildAlreadySuggestedText(ctx.openAlerts);
+
   const { content: queryJson } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return only a JSON array of query strings." },
+      { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return valid JSON only." },
       { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
 
 Household members:
@@ -533,38 +1011,66 @@ Think as a PA who has worked with this family for a year: What would you proacti
 Calendar activity locations (for local context):
 ${activityLocations || "None noted."}
 
-Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests.
+Already suggested in a prior run (FIX #216 — do NOT search for or resurface these; find something new instead):
+${alreadySuggestedLines}
 
-Return ONLY a JSON array: ["query 1", "query 2", ...]` },
+${ctx.calibrationBlock ? `${ctx.calibrationBlock}\n\n` : ""}HARD RULE (FIX #210, not a suggestion — a query violating this is invalid, rewrite it before including):
+• Every query about a specific child's activity or age-typical opportunity MUST embed that child's age or grade band from the member profile above (e.g. "swim lessons for 6 year olds", "camps for 1st graders"). Never generate an age-agnostic query for a child-specific topic.
+• Every query MUST be anchored to ${ctx.location} (household city/metro) — never search nationwide or generically. Embed the target year/season too (e.g. "summer 2026 swim registration ${ctx.location}").
+
+Each query also needs a freshness class (FIX #210) — pick per query, not globally:
+• "new" — news-like: this weekend's events, weather, newly announced things. Searched with a narrow recent-publish window.
+• "seasonal" — registrations, enrollment windows, schedules. These pages (district enrollment, rec-center summer schedule) are typically published weeks-to-months in advance, so they're searched with a much wider window. Use "seasonal" whenever the query is about a registration/enrollment/schedule topic.
+
+Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests. For each, give a short "intent" phrase describing what it's trying to find (e.g. "fall soccer signup for 7-year-old") — this will ground the synthesis step later.
+
+Return ONLY valid JSON: { "queries": [ { "query": "...", "intent": "short phrase", "freshness": "new" | "seasonal" } ] }` },
     ],
-    { model: strongModel(), maxTokens: 250 }
+    // FIX #211: brainstorm/format task, not judgment — cheap model tier.
+    {
+      model: chatModel(),
+      maxTokens: 500,
+      responseFormat: "json",
+      jsonSchema: RESEARCH_QUERY_GEN_JSON_SCHEMA,
+      jsonSchemaName: "research_query_gen",
+    }
   );
 
-  let queries: string[] = [];
+  type QueryPlan = { query: string; intent: string; freshness: "new" | "seasonal" };
+  let queries: QueryPlan[] = [];
   try {
-    queries = parseJsonResponse<string[]>(queryJson);
+    const parsedRaw = parseJsonResponse<unknown>(queryJson);
+    const parsedQueries = researchQueryGenSchema.safeParse(parsedRaw);
+    if (!parsedQueries.success) {
+      log.warn("family-agent: Domain 3 query gen response failed schema validation", { issues: parsedQueries.error.issues, raw: queryJson.slice(0, 500) });
+      return { hasOutput: false, items: [] };
+    }
+    queries = parsedQueries.data.queries;
     log.debug("family-agent: Domain 3 LLM query gen response", { raw: queryJson.slice(0, 500), queries });
   } catch {
     log.warn("family-agent: proactive research query parse failed");
     return { hasOutput: false, items: [] };
   }
 
-  const sevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const searchResults: Array<{ query: string; result: string }> = [];
+  const searchResults: Array<{ query: string; intent: string; result: string }> = [];
   let tavilyUnavailable = false;
-  for (const query of queries.slice(0, queryCount)) {
+  for (const q of queries.slice(0, queryCount)) {
+    const startDate = startDateForFreshness(q.freshness, ctx.todayIso);
     try {
-      log.debug("family-agent: Domain 3 Tavily query", { query, startDate: sevenDaysAgo });
-      const result = await tavilySearch(query, { startDate: sevenDaysAgo });
-      const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-      if (resultStr.includes("TAVILY_API_KEY")) {
-        log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.location });
-        tavilyUnavailable = true;
-        break;
+      log.debug("family-agent: Domain 3 Tavily query", { query: q.query, intent: q.intent, freshness: q.freshness, startDate });
+      const result = await tavilySearch(q.query, { startDate });
+      if (!result.ok) {
+        if (result.code === "not_configured") {
+          log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.householdId });
+          tavilyUnavailable = true;
+          break;
+        }
+        log.debug("family-agent: Domain 3 Tavily query returned no usable result", { query: q.query, code: result.code });
+        continue;
       }
-      searchResults.push({ query, result: resultStr });
+      searchResults.push({ query: q.query, intent: q.intent, result: result.text });
     } catch (err) {
-      log.warn("family-agent: tavily search failed", { query, err: String(err) });
+      log.warn("family-agent: tavily search failed", { query: q.query, err: String(err) });
     }
   }
 
@@ -582,24 +1088,44 @@ ${tavilyUnavailable ? "No live web search available. Use general knowledge only.
 Generate 2-3 genuinely useful suggestions for this household right now — seasonal activities for the kids, typical reminders for this time of year, or household tips relevant to their profile and location. Be specific to the season and location.
 For activities, name REAL well-known providers in ${ctx.location || "DFW area, Texas"} only if you are confident in the name and they genuinely serve the child's age and interest. Include their website if you know it. If you are unsure of a specific business, describe the type of provider and suggest how to find one (e.g., "Search for [X] in [city] on Google").
 Do NOT invent specific dates, prices, or event names you cannot verify.
+Any child-specific suggestion MUST match that child's actual age/grade from the member profile above — never suggest an activity for the wrong age band.
+
+Already suggested in a prior run (FIX #216 — do not repeat these):
+${alreadySuggestedLines}
 
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences", "category": "activity"|"suggestion" } ] }
 If nothing useful to say, return { "items": [] }.` },
       ],
-      { model: strongModel(), maxTokens: 400 }
+      // FIX #211: generic seasonal suggestions with no live grounding — cheap model tier.
+      {
+        model: chatModel(),
+        maxTokens: 400,
+        responseFormat: "json",
+        jsonSchema: RESEARCH_FALLBACK_JSON_SCHEMA,
+        jsonSchemaName: "research_fallback",
+      }
     );
     try {
-      const fb = parseJsonResponse<{ items: ResearchItem[] }>(fallbackJson);
-      log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: fb.items.length });
-      return { hasOutput: fb.items.length > 0, items: fb.items };
+      const fbRaw = parseJsonResponse<unknown>(fallbackJson);
+      const fb = researchFallbackSchema.safeParse(fbRaw);
+      if (!fb.success) {
+        log.warn("family-agent: Domain 3 LLM fallback response failed schema validation", { issues: fb.error.issues });
+        return { hasOutput: false, items: [] };
+      }
+      // FIX #210: no live search happened here, so nothing can be "verified" — always grade as "lead".
+      const items: ResearchItem[] = fb.data.items.map(i => ({ ...i, grade: "lead" as const }));
+      log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: items.length });
+      return { hasOutput: items.length > 0, items };
     } catch {
       log.warn("family-agent: Domain 3 LLM fallback parse failed");
       return { hasOutput: false, items: [] };
     }
   }
 
+  // FIX #210: ground each search's role in the prompt via its intent, so synthesis doesn't have
+  // to reverse-engineer why a query was run when justifying "why relevant to THIS family".
   const searchContext = searchResults
-    .map((r, i) => `Search ${i + 1}: "${r.query}"\n${r.result}`)
+    .map((r, i) => `Search ${i + 1} (intent: ${r.intent}): "${r.query}"\n${r.result}`)
     .join("\n\n---\n");
 
   const { content: synthJson } = await getChatAdapter().complete(
@@ -613,30 +1139,59 @@ ${memberProfile}
 Search results:
 ${searchContext}
 
-TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. If a result mentions a registration window or deadline, include it only if it is still open or upcoming.
+TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. If a result mentions a registration window or deadline, include it only if it is still open or upcoming. If a result clearly refers to ${Number(ctx.todayIso.slice(0, 4)) - 1} or an earlier year (a stale prior-year page Tavily still returned), discard it — reason "date".
 
-Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary MUST include everything available from the search results:
+Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary should include everything available from the search results:
 • Full official business/program name (not a generic category like "swim school")
 • Website URL — link directly to registration page if possible
 • Approximate cost or price range
 • How to register — specific steps or the registration URL
-• Why relevant to THIS family (reference the specific child's age, name, or activity interest)
+• Why relevant to THIS family (reference the specific child's age, name, or activity interest — ground this in the search's "intent" tag above, don't reverse-engineer it)
 
 BAD: "Balance Dance Studios has summer camps for ages 3-5."
 GOOD: "Balance Dance Studios (balancedancestudios.com) — summer mini-camps for ages 3-5, ~$X/week; register at [URL] or call [number]. Matches Kid Two's dance interest."
 
-Skip any item where you cannot produce at least the official name plus one concrete actionable detail (URL, price, or phone number).
+GRADE (FIX #210) — every item gets one:
+• "verified" — has the official name plus at least one concrete actionable detail (URL, price, or phone number) drawn from the search results.
+• "lead" — a real, dated finding that's missing a concrete detail (e.g. "Example Rec Center's summer registration typically opens in early July — worth checking this week"). State plainly what's unknown; never invent the missing specifics. A "lead" is still useful — don't discard an item just for lacking full details, only discard for failing the gate below.
 
-Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
-If nothing specific enough found, return { "items": [] }.` },
+DISCARD GATE (FIX #210) — before an item becomes a suggestion, evaluate all of these. If ANY fails, discard the item — do not include it in "items", and do not soften the mismatch to make it fit:
+• Age/grade: if the item states an age or grade range that excludes every household child above, discard (reason: "age").
+• Geo: if the item's venue is outside ${ctx.location}'s metro area — a different city, hundreds of miles away — discard (reason: "geo"). Ask: would a parent reasonably drive here for a weekly activity or day camp?
+• Duplicate: if the item substantially matches one of the already-suggested items below, discard (reason: "duplicate").
+• Date: keep the date rules above (reason: "date" if either fails).
+${ctx.calibrationBlock ? `• Feedback (FIX #208): ${ctx.calibrationBlock.replace(/\n/g, " ")} If the item's category is listed as "do not generate", discard it (reason: "feedback").\n` : ""}
+Do not use the "why relevant to THIS family" field to talk yourself into keeping a borderline item — if it fails a gate, it goes in "discarded", not "items".
+
+Already suggested in a prior run (FIX #216 — do not re-suggest these):
+${alreadySuggestedLines}
+
+Respond with ONLY valid JSON:
+{ "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment", "grade": "verified"|"lead" } ],
+  "discarded": [ { "title": "≤60 chars", "reason": "age"|"geo"|"duplicate"|"date"|"feedback" } ] }
+If nothing specific enough found, return { "items": [], "discarded": [] }.` },
     ],
-    { model: strongModel(), maxTokens: 600 }
+    {
+      model: strongModel(),
+      maxTokens: 900,
+      responseFormat: "json",
+      jsonSchema: RESEARCH_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "research_synthesis",
+    }
   );
 
   log.debug("family-agent: Domain 3 LLM synthesis response", { raw: synthJson.slice(0, 1000) });
   try {
-    const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
-    return { hasOutput: parsed.items.length > 0, items: parsed.items };
+    const parsedRaw = parseJsonResponse<unknown>(synthJson);
+    const parsed = researchSynthesisSchema.safeParse(parsedRaw);
+    if (!parsed.success) {
+      log.warn("family-agent: Domain 3 synthesis response failed schema validation", { issues: parsed.error.issues, raw: synthJson.slice(0, 200) });
+      return { hasOutput: false, items: [] };
+    }
+    if (parsed.data.discarded.length) {
+      log.debug("family-agent: Domain 3 discarded items (relevance gate)", { discarded: parsed.data.discarded });
+    }
+    return { hasOutput: parsed.data.items.length > 0, items: parsed.data.items };
   } catch {
     log.warn("family-agent: Domain 3 synthesis parse failed", { raw: synthJson.slice(0, 200) });
     return { hasOutput: false, items: [] };
@@ -647,7 +1202,7 @@ If nothing specific enough found, return { "items": [] }.` },
 // Domain 4 — Deadline sweep
 // ---------------------------------------------------------------------------
 
-async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promise<DeadlineResult> {
+export async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promise<DeadlineResult> {
   const cutoffDays = runType === "daily_delta" ? 7 : 30;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() + cutoffDays);
@@ -699,26 +1254,44 @@ Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this hou
 
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
-      { model: strongModel(), maxTokens: 200 }
+      // FIX #211: brainstorm/format task, same as D3 query-gen — cheap model tier.
+      {
+        model: chatModel(),
+        maxTokens: 400,
+        responseFormat: "json",
+        jsonSchema: DEADLINE_QUERY_GEN_JSON_SCHEMA,
+        jsonSchemaName: "deadline_query_gen",
+      }
     );
 
     let deadlineQueries: string[] = [];
     try {
-      deadlineQueries = parseJsonResponse<{ queries: string[] }>(queryJson).queries ?? [];
-      log.debug("family-agent: Domain 4 LLM query gen response", { raw: queryJson.slice(0, 500), queries: deadlineQueries });
+      const parsedRaw = parseJsonResponse<unknown>(queryJson);
+      const parsed = deadlineQueryGenSchema.safeParse(parsedRaw);
+      if (!parsed.success) {
+        log.warn("family-agent: Domain 4 query gen response failed schema validation", { issues: parsed.error.issues, raw: queryJson.slice(0, 500) });
+      } else {
+        deadlineQueries = parsed.data.queries;
+        log.debug("family-agent: Domain 4 LLM query gen response", { raw: queryJson.slice(0, 500), queries: deadlineQueries });
+      }
     } catch {
       log.warn("family-agent: Domain 4 query generation parse failed");
     }
 
-    const d4SevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // FIX #210: deadline/registration pages are the "seasonal" freshness class — typically
+    // published weeks-to-months ahead of the run that needs them — so use the wide window, not
+    // the narrow 7-day one (which was excluding exactly the pages this domain needs).
+    const d4SeasonalStartDate = startDateForFreshness("seasonal", ctx.todayIso);
     const results: string[] = [];
     for (const q of deadlineQueries.slice(0, 4)) {
       try {
-        log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SevenDaysAgo });
-        const r = await tavilySearch(q, { startDate: d4SevenDaysAgo });
-        const rStr = typeof r === "string" ? r : JSON.stringify(r);
-        if (rStr.includes("TAVILY_API_KEY")) break;
-        results.push(`"${q}": ${rStr}`);
+        log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SeasonalStartDate });
+        const r = await tavilySearch(q, { startDate: d4SeasonalStartDate });
+        if (!r.ok) {
+          if (r.code === "not_configured") break;
+          continue;
+        }
+        results.push(`"${q}": ${r.text}`);
       } catch { /* ignore individual search failures */ }
     }
     if (results.length > 0) tavilyContext = results.join("\n\n");
@@ -736,7 +1309,7 @@ ${tavilyContext ? `Public deadlines from web:\n${tavilyContext}\n` : ""}
 ${openDeadlineAlerts ? `Already flagged (DO NOT re-flag):\n${openDeadlineAlerts}\n` : ""}
 Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤${cutoffDays} days). Surface only new items.
 
-TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
+TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed. The wider search window can surface stale prior-year pages (e.g. a ${Number(ctx.todayIso.slice(0, 4)) - 1} registration page Tavily still returns) — if a web result clearly refers to last year or earlier, ignore it entirely, do not reuse its dates.
 
 Each alert MUST include ALL THREE of these in the reason field:
 1. WHAT: the specific thing (school, program, business name, or document — not generic category)
@@ -763,16 +1336,230 @@ Respond with ONLY valid JSON:
 Include calendarEventPayload for any deadline that benefits from being on the calendar. Set to null only for vague or unactionable items.
 If nothing new, return { "alerts": [] }.` },
     ],
-    { model: strongModel(), maxTokens: 1500 }
+    {
+      model: strongModel(),
+      maxTokens: 1500,
+      responseFormat: "json",
+      jsonSchema: DEADLINE_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "deadline_synthesis",
+    }
   );
 
   log.debug("family-agent: Domain 4 LLM synthesis response", { raw: content.slice(0, 1000) });
   try {
-    const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
-    return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };
-  } catch {
-    log.warn("family-agent: Domain 4 deadline parse failed", { raw: content.slice(0, 200) });
+    const parsed = parseJsonResponse<{ alerts: unknown[] }>(content);
+    const alerts = parseAlertItems(parsed.alerts);
+    return { hasOutput: alerts.length > 0, alerts };
+  } catch (err) {
+    log.warn("family-agent: Domain 4 deadline parse failed", { raw: content.slice(0, 200), err: String(err) });
     return { hasOutput: false, alerts: [] };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Domain — Occasion awareness (#223): birthday/holiday lead-time nudges.
+// Fully deterministic (no LLM, no Tavily) — dates are computed in code so
+// year-boundary math (Dec occasion, January run) is always correct, and
+// seasonal/cultural occasions come from Google's own subscribable holiday
+// calendars (tagged isHolidayCalendar in fetchCalendarEvents) rather than a
+// hardcoded list or a web-search guess that can be stale or wrong.
+// ---------------------------------------------------------------------------
+
+const OCCASION_GIFT_TIERS = [21, 5];
+const OCCASION_WISH_TIERS = [3];
+
+const OCCASION_TIER_TAGS: Record<number, string> = {
+  21: "GIFT-IDEAS",
+  5: "LAST-CALL",
+  3: "SEND-WISHES",
+};
+
+const OCCASION_BIRTHDAY_RE = /\b(birthday|bday)\b/i;
+const OCCASION_ANNIVERSARY_RE = /\banniversary\b/i;
+
+// #241: only holidays with an established gift-giving tradition warrant the 21-day GIFT-IDEAS
+// nudge (and the #223 Phase 2 gift-research bridge it triggers) — every holiday still gets the
+// 5-day LAST-CALL tier below. Curated, not exhaustive; deliberately conservative (miss a gift
+// holiday → user still gets LAST-CALL; over-tag a non-gift holiday → wasted alert + research run).
+const GIFT_GIVING_HOLIDAY_RE =
+  /\b(christmas|hanukkah|chanukah|diwali|deepavali|eid([\s-]?al[\s-]?(fitr|adha))?|raksha\s?bandhan|rakhi|valentine|mother'?s\s?day|father'?s\s?day|easter|new\s?year)\b/i;
+
+/** UTC-day diff between two YYYY-MM-DD strings — avoids the server-local `new Date()` TZ
+ *  ambiguity that deadline-reminder.service.ts's daysUntil helper has. */
+function daysUntilIso(targetIso: string, todayIso: string): number {
+  const target = Date.parse(`${targetIso}T00:00:00.000Z`);
+  const today = Date.parse(`${todayIso}T00:00:00.000Z`);
+  return Math.round((target - today) / 86_400_000);
+}
+
+function monthDayFromIso(iso: string): string {
+  return iso.slice(5, 10);
+}
+
+/** Next occurrence (this year, or next if already passed) of a recurring MM-DD date. Plain
+ *  ISO-string comparison handles the year boundary correctly (e.g. a Dec 25 birthday evaluated
+ *  on Jan 5 rolls forward to next Dec, not this one). */
+function nextOccurrenceIso(monthDay: string, todayIso: string): string {
+  const year = Number(todayIso.slice(0, 4));
+  const candidate = `${year}-${monthDay}`;
+  return candidate < todayIso ? `${year + 1}-${monthDay}` : candidate;
+}
+
+/**
+ * Builds one suggestion AlertItem per lead-time tier the occasion currently falls within. Reason
+ * text is stable (tag + name + date, no day-count) so writeAlerts' mechanical dedup (alertDedupKey)
+ * suppresses re-insertion after a tier first fires — each tier surfaces once, not once per day.
+ */
+function occasionTierAlerts(
+  name: string,
+  occasionIso: string,
+  tiers: number[],
+  kind: "birthday" | "anniversary" | "holiday",
+  todayIso: string
+): AlertItem[] {
+  const daysUntil = daysUntilIso(occasionIso, todayIso);
+  if (daysUntil < 0) return [];
+  const alerts: AlertItem[] = [];
+  for (const tier of tiers) {
+    if (daysUntil > tier) continue;
+    const tag = OCCASION_TIER_TAGS[tier] ?? "REMINDER";
+    const reason = kind === "holiday"
+      ? `[${tag}] ${name} is coming up on ${occasionIso}.`
+      : `[${tag}] ${name}'s ${kind} is on ${occasionIso}.`;
+    alerts.push({
+      alertType: "suggestion",
+      reason,
+      affectedDate: occasionIso,
+      copyPasteText: reason,
+      recipientHint: "Both",
+    });
+  }
+  return alerts;
+}
+
+type MemberDobRow = { full_name: string; date_of_birth_encrypted: string | null };
+
+// Source 1 — household member birthdays (person_profile.date_of_birth_encrypted). Own dedicated
+// query rather than reusing listHouseholdMembers, which doesn't select the DOB column.
+async function detectMemberBirthdays(ctx: FamilyContext): Promise<AlertItem[]> {
+  const rows = await qAll<MemberDobRow>(
+    `SELECT pp.full_name, pp.date_of_birth_encrypted
+     FROM person_profile pp
+     JOIN household_membership hm ON hm.person_profile_id = pp.id
+     WHERE hm.household_id = ? AND pp.date_of_birth_encrypted IS NOT NULL`,
+    ctx.householdId
+  );
+  const alerts: AlertItem[] = [];
+  for (const row of rows) {
+    const dob = row.date_of_birth_encrypted ? decryptDob(row.date_of_birth_encrypted) : null;
+    if (!dob) continue;
+    const occasionIso = nextOccurrenceIso(monthDayFromIso(dob), ctx.todayIso);
+    alerts.push(...occasionTierAlerts(row.full_name, occasionIso, OCCASION_GIFT_TIERS, "birthday", ctx.todayIso));
+  }
+  return alerts;
+}
+
+// Source 2 — calendar-derived birthdays/anniversaries. Classified live, in-memory, against the
+// already-fetched ctx.parentEvents — GCal events aren't bulk-synced into family_events (only
+// user-approved items are), so a persisted occasion_kind column would miss the common case (a
+// friend's birthday sitting on the shared calendar, never explicitly approved into the DB).
+function detectCalendarOccasions(ctx: FamilyContext): AlertItem[] {
+  const seen = new Set<string>();
+  const alerts: AlertItem[] = [];
+  for (const parent of ctx.parentEvents) {
+    for (const ev of parent.events) {
+      if (ev.isHolidayCalendar || !ev.start) continue;
+      const kind: "birthday" | "anniversary" | null = OCCASION_BIRTHDAY_RE.test(ev.summary)
+        ? "birthday"
+        : OCCASION_ANNIVERSARY_RE.test(ev.summary)
+        ? "anniversary"
+        : null;
+      if (!kind) continue;
+      const occasionIso = ev.start.slice(0, 10);
+      const dedupKey = `${ev.summary.trim().toLowerCase()}|${occasionIso}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, OCCASION_WISH_TIERS, kind, ctx.todayIso));
+    }
+  }
+  return alerts;
+}
+
+// Source 3 — seasonal/cultural occasions from Google's own subscribable holiday calendars
+// (fetchCalendarEvents tags these isHolidayCalendar: true, wider 25-day window). No per-holiday
+// classification needed — Google's calendar titles are already clean ("Diwali", "Labor Day").
+function detectHolidayOccasions(ctx: FamilyContext): AlertItem[] {
+  const seen = new Set<string>();
+  const alerts: AlertItem[] = [];
+  for (const parent of ctx.parentEvents) {
+    for (const ev of parent.events) {
+      if (!ev.isHolidayCalendar || !ev.start) continue;
+      const occasionIso = ev.start.slice(0, 10);
+      const dedupKey = `${ev.summary.trim().toLowerCase()}|${occasionIso}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      const tiers = GIFT_GIVING_HOLIDAY_RE.test(ev.summary) ? OCCASION_GIFT_TIERS : [5];
+      alerts.push(...occasionTierAlerts(ev.summary, occasionIso, tiers, "holiday", ctx.todayIso));
+    }
+  }
+  return alerts;
+}
+
+export async function detectOccasions(ctx: FamilyContext, _runType: AgentRunType): Promise<OccasionResult> {
+  try {
+    const settings = await getOccasionSettings(ctx.householdId);
+    if (!settings.enabled) return { hasOutput: false, alerts: [] };
+
+    const candidates: AlertItem[] = [
+      ...(await detectMemberBirthdays(ctx)),
+      ...detectCalendarOccasions(ctx),
+      ...detectHolidayOccasions(ctx),
+    ];
+
+    // Anti-spam pre-filter: drop any candidate already open, so a still-open tier alert doesn't
+    // repopulate allAlerts (and trip daily_delta's hasOutput gate) every day of its window.
+    const openKeys = new Set(ctx.openAlerts.map(a => alertDedupKey(a.alertType, a.affectedDate, a.reason)));
+    const alerts = candidates.filter(c => !openKeys.has(alertDedupKey(c.alertType, c.affectedDate, c.reason)));
+
+    // #223 Phase 2: bridge from the 21-day GIFT-IDEAS nudge into a background gift-research PA
+    // task. Only genuinely new alerts (survived the openKeys filter above) fire, so this can
+    // never re-trigger daily for the same still-open occasion. Opt-in — off by default.
+    const giftIdeasTag = `[${OCCASION_TIER_TAGS[21]}]`;
+    if (env.PA_OCCASION_RESEARCH_ENABLED) {
+      for (const alert of alerts) {
+        if (alert.reason.startsWith(giftIdeasTag) && alert.affectedDate) {
+          void triggerGiftResearch(ctx.householdId, alert.reason, alert.affectedDate);
+        }
+      }
+    }
+
+    return { hasOutput: alerts.length > 0, alerts };
+  } catch (err) {
+    // No LLM call here (unlike D1-D5) so failure means a DB problem (decryptDob already fails
+    // closed internally), but it must still fail closed itself. Otherwise a DB blip on this
+    // domain would throw uncaught through Promise.all in runFamilyAgent and take down
+    // coverage/research/deadlines with it too — same bug class FIX-195 fixed for D1/2/4/5.
+    log.warn("family-agent: detectOccasions failed", { householdId: ctx.householdId, err: String(err) });
+    return { hasOutput: false, alerts: [] };
+  }
+}
+
+/**
+ * #223 Phase 2: fire-and-forget bridge from a GIFT-IDEAS occasion nudge into a background
+ * gift-research PA task. Not awaited by the caller — runPATask's BabyAGI loop can take many LLM
+ * round-trips, and awaiting it here would stall detectOccasions inside runFamilyAgent's
+ * Promise.all fan-out, delaying digest email delivery for unrelated domains.
+ */
+async function triggerGiftResearch(householdId: string, occasionReason: string, occasionIso: string): Promise<void> {
+  try {
+    const context = occasionReason.replace(/^\[GIFT-IDEAS\]\s*/, "");
+    const goal = `Research gift ideas. ${context} Suggest 3-5 specific, budget-conscious gift ideas with rough price ranges.`;
+    const result = await runPATask(goal, householdId, "scheduler");
+    if (!result.ok) {
+      log.info("family-agent: occasion gift-research bridge skipped", { householdId, occasionIso, code: result.code });
+    }
+  } catch (err) {
+    log.warn("family-agent: occasion gift-research bridge failed", { householdId, occasionIso, err: String(err) });
   }
 }
 
@@ -780,22 +1567,32 @@ If nothing new, return { "alerts": [] }.` },
 // Domain 5 — Synthesis (per-parent digest)
 // ---------------------------------------------------------------------------
 
-async function synthesizeDigest(
+/** #231: subject line composed in code, not by the LLM — a predictable convention across runs. */
+export function digestSubject(householdName: string, runType: AgentRunType, highlight: string): string {
+  const scope = runType === "daily_delta" ? "Today" : "This week";
+  const base = `${scope} in the ${householdName} household`;
+  return highlight ? `${base} — ${highlight}` : base;
+}
+
+export async function synthesizeDigest(
   ctx: FamilyContext,
   domain: PipelineOutputs,
   runType: AgentRunType,
   parents: ConnectedParent[],
-  financeContext: string
+  financeContext: string,
+  householdName: string
 ): Promise<AgentAnalysis> {
   // Research items stored as suggestion alerts so they appear in the UI, not just in email
   const researchSuggestions: AlertItem[] = domain.research.items.map(item => ({
     alertType: "suggestion" as const,
-    reason: `[${item.category.toUpperCase()}] ${item.title} — ${item.summary}`,
+    // FIX #210: "lead" items are clearly labeled, never presented as if verified.
+    reason: `${item.grade === "lead" ? "[LEAD] " : ""}[${item.category.toUpperCase()}] ${item.title} — ${item.summary}`,
     affectedDate: null,
     copyPasteText: item.summary,
     recipientHint: "Both",
   }));
   const allAlerts: AlertItem[] = [
+    ...domain.occasions.alerts,
     ...domain.coverageGaps.gaps,
     ...domain.nannyCoord.items,
     ...domain.deadlines.alerts,
@@ -830,29 +1627,44 @@ ${researchSection}
 Finance context:
 ${financeContext}
 
-Write digest emails per parent. Parent A = primary household manager. Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
+${ctx.calibrationBlock ? `${ctx.calibrationBlock}\n` : ""}
+Write digest emails per parent. Parent A = primary household manager (FIX #217: the first Google Calendar account the household connected, deterministic — not an assumption about parenting roles). Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
 
 Respond with ONLY valid JSON:
 {
   "summaryText": "3-5 sentence summary covering ALL domains in order: (1) childcare/scheduling status this week, (2) nanny coordination needs if any, (3) deadline alerts if any, (4) proactive research findings if any. If a domain has nothing to report, say so in one clause (e.g. 'No coverage issues this week.'). Be specific — name actual events, dates, or findings where available.",
-  "parentADigest": { "subject": "...", "body": "..." },
-  "parentBDigest": { "subject": "...", "body": "..." }
-}` },
+  "parentADigest": {
+    "subjectHighlight": "3-6 word phrase naming the single most important item this parent should notice, or \"\" if nothing stands out",
+    "sections": [ { "heading": "Coverage & Nanny", "items": ["short bullet string", "..."] } ]
+  },
+  "parentBDigest": { "subjectHighlight": "...", "sections": [ ... ] }
+}
+For "sections", use ONLY these headings, in this order, and only include a heading if that parent has content for it: "Coverage & Nanny" (childcare/scheduling + nanny coordination combined), "Deadlines", "Occasions", "Research finds". Do not invent other headings. Each item is one short bullet string — mobile-readable, specific, no filler.` },
     ],
-    { model: strongModel(), maxTokens: 3500 }
+    // FIX #211: formatting/summarization of already-vetted upstream content — cheap model tier.
+    {
+      model: chatModel(),
+      maxTokens: 3500,
+      responseFormat: "json",
+      jsonSchema: DIGEST_SYNTHESIS_JSON_SCHEMA,
+      jsonSchemaName: "digest_synthesis",
+    }
   );
 
   try {
-    const parsed = parseJsonResponse<{
-      summaryText: string;
-      parentADigest: { subject: string; body: string };
-      parentBDigest: { subject: string; body: string };
-    }>(content);
+    const parsedRaw = parseJsonResponse<unknown>(content);
+    const parsed = digestSynthesisSchema.parse(parsedRaw);
 
     return {
       conflicts: allAlerts,
-      parentADigest: parsed.parentADigest,
-      parentBDigest: parsed.parentBDigest,
+      parentADigest: {
+        subject: digestSubject(householdName, runType, parsed.parentADigest.subjectHighlight),
+        sections: parsed.parentADigest.sections,
+      },
+      parentBDigest: {
+        subject: digestSubject(householdName, runType, parsed.parentBDigest.subjectHighlight),
+        sections: parsed.parentBDigest.sections,
+      },
       summaryText: parsed.summaryText,
       hasOutput: true,
     };
@@ -872,17 +1684,44 @@ Respond with ONLY valid JSON:
 // Email HTML wrapper
 // ---------------------------------------------------------------------------
 
-function wrapDigestHtml(subject: string, body: string, parentEmail: string): string {
-  const lines = body
-    .split("\n")
-    .map(l => l.startsWith("- ") ? `<li>${l.slice(2)}</li>` : `<p>${l}</p>`)
-    .join("\n");
-  return `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:16px">
-<h2 style="color:#2d6a4f">${subject}</h2>
-${lines}
-<hr style="margin-top:32px;border:none;border-top:1px solid #eee"/>
-<p style="font-size:11px;color:#999">Sent by Grove household assistant to ${parentEmail}</p>
+// FIX #217: digest body/subject come from LLM output (and Tavily content flows into it via
+// Domain 3/4) — escape before interpolating into HTML so a stray "<" or "&" can't break layout.
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// #231: table-based layout with inline styles only — Gmail strips <head>/<style>, so a <style>
+// block silently does nothing in the client most parents actually read this in.
+export function wrapDigestHtml(subject: string, sections: { heading: string; items: string[] }[], parentEmail: string, householdName: string): string {
+  const sectionsHtml = sections.map(s => `
+<h3 style="margin:24px 0 8px;font-family:sans-serif;font-size:16px;color:#2D6A4F">${escapeHtml(s.heading)}</h3>
+<ul style="margin:0;padding-left:20px;font-family:sans-serif;font-size:14px;line-height:1.5;color:#333333">
+${s.items.map(i => `<li style="margin-bottom:6px">${escapeHtml(i)}</li>`).join("\n")}
+</ul>`).join("\n");
+
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:24px 0">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden">
+<tr><td style="background:#2D6A4F;padding:18px 24px">
+<span style="font-family:sans-serif;color:#ffffff;font-size:12px;letter-spacing:0.5px;text-transform:uppercase">${escapeHtml(householdName)} household</span>
+</td></tr>
+<tr><td style="background:#C8860A;height:4px;line-height:4px;font-size:0">&nbsp;</td></tr>
+<tr><td style="padding:24px">
+<h2 style="margin:0 0 16px;font-family:sans-serif;color:#153828;font-size:20px">${escapeHtml(subject)}</h2>
+${sectionsHtml}
+<hr style="margin-top:32px;border:none;border-top:1px solid #eeeeee"/>
+<p style="font-family:sans-serif;font-size:11px;color:#999999;margin:12px 0 0">Sent by Grove household assistant to ${escapeHtml(parentEmail)}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
 </body></html>`;
+}
+
+/** #231: plain-text fallback for the digest email, built from the same structured sections. */
+export function digestPlainText(sections: { heading: string; items: string[] }[]): string {
+  return sections.map(s => `${s.heading}:\n${s.items.map(i => `- ${i}`).join("\n")}`).join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -915,40 +1754,48 @@ export async function runFamilyAgent(
       }))
     );
 
-    const dbEvents = await getFamilyEventsForWeek(householdId);
+    // 30 days covers the widest window any domain needs (full-run deadline sweep); Domain 1/2's
+    // day grid and daily_delta's shorter cutoffs simply use a prefix of the same fetched set.
+    const dbEvents = await getFamilyEventsForWeek(householdId, 30);
 
-    // For daily delta: fetch open alerts so the LLM can skip conflicts already surfaced.
-    // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
-    // delta: all open alerts (to avoid re-flagging); full runs: stale suggestions only (5+ days old)
-    const openAlerts = runType === "daily_delta"
-      ? await listAlerts(householdId, false)
-      : await listStaleSuggestions(householdId, 5);
+    // Always fetch all open alerts for dedup purposes (FIX #216) — a full run must see alerts
+    // an earlier daily_delta run created hours before, or it re-flags the same gaps/deadlines/
+    // suggestions as new rows. This list is only for dedup; the digest email body is built from
+    // domain.* outputs generated fresh this run (Domain 5), so weekly digests still restate the
+    // full week regardless of what's in openAlerts.
+    const openAlerts = await listAlerts(householdId, false);
 
-    const [members, caregiverSlots, financeContext, location] = await Promise.all([
+    const [members, caregiverSlots, financeContext, location, calibrationBlock, householdName] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
       buildFinanceContext(householdId),
       getHouseholdLocation(householdId),
+      buildCalibrationBlock(householdId),
+      getHouseholdName(householdId),
     ]);
 
-    const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const ctx: FamilyContext = { location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
+    const now = new Date();
+    // Household-local date (FIX #209) — env.TZ, never server/UTC time. A run kicked off at
+    // 11pm UTC must still resolve "today" to the household's own calendar day.
+    const today = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: env.TZ });
+    const todayIso = computeTodayIso(now, env.TZ);
+    const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts, calibrationBlock };
 
-    // Run domains 1–4 in parallel; domain 5 synthesizes their outputs
-    const [coverageGaps, nannyCoord, research, deadlines] = await Promise.all([
-      analyzeCoverageGaps(ctx, runType),
-      assessNannyCoordination(ctx, runType),
+    // Run domains 1+2 (merged, FIX #211), 3, 4, occasions (#223) in parallel; domain 5 synthesizes
+    const [{ coverageGaps, nannyCoord }, research, deadlines, occasions] = await Promise.all([
+      analyzeCoverageAndCoordination(ctx, runType),
       runProactiveResearch(ctx, runType),
       sweepDeadlines(ctx, runType),
+      detectOccasions(ctx, runType),
     ]);
 
     const analysis = await synthesizeDigest(
       ctx,
-      { coverageGaps, nannyCoord, research, deadlines },
+      { coverageGaps, nannyCoord, research, deadlines, occasions },
       runType,
       parents,
-      financeContext
+      financeContext,
+      householdName
     );
 
     // Daily delta: skip if no domain produced actionable output
@@ -967,15 +1814,17 @@ export async function runFamilyAgent(
       summaryText: analysis.summaryText,
     });
 
-    // Write alert records
+    // Write alert records — writeAlerts applies the mechanical dedup backstop (FIX #216) and
+    // returns the count actually inserted, which may be lower than analysis.conflicts.length.
+    let alertsInserted = 0;
     if (analysis.conflicts.length > 0) {
-      await writeAlerts(householdId, digestId, analysis.conflicts);
+      alertsInserted = await writeAlerts(householdId, digestId, analysis.conflicts, ctx.openAlerts);
     }
 
     // Send digest emails
     let emailsSent = 0;
     const recipientEmails: string[] = [];
-    const digests: Array<{ parent: ConnectedParent; digest: { subject: string; body: string } }> = [];
+    const digests: Array<{ parent: ConnectedParent; digest: DigestPayload }> = [];
 
     if (analysis.parentADigest && parentEvents[0]) {
       digests.push({ parent: parents[0], digest: analysis.parentADigest });
@@ -988,8 +1837,8 @@ export async function runFamilyAgent(
       const result = await sendMail({
         to: parent.email,
         subject: digest.subject,
-        text: digest.body,
-        html: wrapDigestHtml(digest.subject, digest.body, parent.email),
+        text: digestPlainText(digest.sections),
+        html: wrapDigestHtml(digest.subject, digest.sections, parent.email, householdName),
       });
       if (result.ok) {
         emailsSent++;
@@ -999,11 +1848,12 @@ export async function runFamilyAgent(
       }
     }
 
-    // Update emails_sent and recipients in the log
+    // Update emails_sent, recipients, and the post-dedup alerts_created count in the log
     await qExec(
-      `UPDATE family_digest_log SET emails_sent = ?, recipients_json = ? WHERE id = ?`,
+      `UPDATE family_digest_log SET emails_sent = ?, recipients_json = ?, alerts_created = ? WHERE id = ?`,
       emailsSent,
       recipientEmails.length > 0 ? JSON.stringify(recipientEmails) : null,
+      alertsInserted,
       digestId
     );
 
@@ -1011,12 +1861,12 @@ export async function runFamilyAgent(
     for (const p of parents) await updateLastSyncedAt(p.userId);
 
     log.info("family-agent: run complete", {
-      householdId, runType, alertsCreated: analysis.conflicts.length, emailsSent,
+      householdId, runType, alertsCreated: alertsInserted, emailsSent,
     });
 
     return {
       status: "sent",
-      alertsCreated: analysis.conflicts.length,
+      alertsCreated: alertsInserted,
       emailsSent,
     };
   } catch (err) {
@@ -1042,9 +1892,13 @@ export type AgentAlert = {
   recipientHint: string | null;
   isResolved: boolean;
   resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null;
   sourceDigestId: string | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
+  /** FIX #215: verbatim ≤200-char excerpt the extraction cited, for email-derived suggestions. */
+  sourceQuote: string | null;
 };
 
 type AlertRow = {
@@ -1058,9 +1912,12 @@ type AlertRow = {
   recipient_hint: string | null;
   is_resolved: boolean;
   resolved_at: string | null;
+  resolved_by_user_id: string | null;
+  resolution_kind: string | null;
   source_digest_id: string | null;
   action_type: string | null;
   action_payload: unknown;
+  source_quote: string | null;
 };
 
 function rowToAlert(r: AlertRow): AgentAlert {
@@ -1075,9 +1932,12 @@ function rowToAlert(r: AlertRow): AgentAlert {
     recipientHint: r.recipient_hint,
     isResolved: r.is_resolved,
     resolvedAt: r.resolved_at,
+    resolvedByUserId: r.resolved_by_user_id,
+    resolutionKind: r.resolution_kind as AgentAlert["resolutionKind"],
     sourceDigestId: r.source_digest_id,
     actionType: r.action_type,
     actionPayload: r.action_payload as AgentAlert["actionPayload"],
+    sourceQuote: r.source_quote,
   };
 }
 
@@ -1094,31 +1954,69 @@ export async function listAlerts(householdId: string, includeResolved = false): 
   return rows.map(rowToAlert);
 }
 
-export async function listStaleSuggestions(householdId: string, olderThanDays: number): Promise<AgentAlert[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - olderThanDays);
-  const rows = await qAll<AlertRow>(
-    `SELECT * FROM family_agent_alerts
-     WHERE household_id = ? AND alert_type = 'suggestion' AND is_resolved = FALSE
-       AND detected_at < ?
-     ORDER BY detected_at ASC`,
-    householdId,
-    cutoff.toISOString()
-  );
-  return rows.map(rowToAlert);
-}
-
-export async function resolveAlert(id: string, householdId: string, userId: string): Promise<boolean> {
+export async function resolveAlert(
+  id: string,
+  householdId: string,
+  userId: string,
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null = null
+): Promise<boolean> {
   const row = await qGet<{ id: string }>(
     `UPDATE family_agent_alerts
-     SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ?
+     SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ?, resolution_kind = ?
      WHERE id = ? AND household_id = ? AND is_resolved = FALSE
      RETURNING id`,
     userId,
+    resolutionKind,
     id,
     householdId
   );
   return row !== null;
+}
+
+// FIX #208: aggregate resolved-alert dispositions from the last 60 days into a compact,
+// category-level calibration block (never raw alert text) injected into Domain 3/5 prompts.
+// Suggestion-type alerts embed their category as a leading "[CATEGORY]" tag in `reason`
+// (see synthesizeDigest below); other alert types calibrate on alert_type itself.
+const NOT_RELEVANT_AVOID_THRESHOLD = 3;
+
+function extractCalibrationCategory(alertType: string, reason: string): string {
+  const tag = /^(?:\[LEAD\]\s*)?\[([A-Z_]+)\]/.exec(reason);
+  return tag ? tag[1].toLowerCase() : alertType;
+}
+
+export async function buildCalibrationBlock(householdId: string): Promise<string> {
+  const rows = await qAll<{ alert_type: string; reason: string; resolution_kind: string }>(
+    `SELECT alert_type, reason, resolution_kind
+       FROM family_agent_alerts
+      WHERE household_id = ? AND resolution_kind IS NOT NULL AND resolved_at >= NOW() - INTERVAL '60 days'`,
+    householdId
+  );
+  if (rows.length === 0) return "";
+
+  const counts = new Map<string, { useful: number; not_relevant: number; already_knew: number }>();
+  for (const r of rows) {
+    const category = extractCalibrationCategory(r.alert_type, r.reason);
+    const entry = counts.get(category) ?? { useful: 0, not_relevant: 0, already_knew: 0 };
+    if (r.resolution_kind === "useful" || r.resolution_kind === "not_relevant" || r.resolution_kind === "already_knew") {
+      entry[r.resolution_kind] += 1;
+    }
+    counts.set(category, entry);
+  }
+
+  const avoid: string[] = [];
+  const keep: string[] = [];
+  for (const [category, c] of counts) {
+    if (c.not_relevant >= NOT_RELEVANT_AVOID_THRESHOLD) avoid.push(`${category} (${c.not_relevant}x not relevant)`);
+    else if (c.not_relevant > 0) avoid.push(`${category} (${c.not_relevant}x not relevant, ${c.useful}x useful)`);
+    if (c.useful > 0 && c.not_relevant < NOT_RELEVANT_AVOID_THRESHOLD) keep.push(`${category} (${c.useful}x useful)`);
+  }
+
+  const lines: string[] = ["Household feedback (last 60 days) — observations only, no lifestyle advice:"];
+  if (avoid.length > 0) lines.push(`Deprioritize/avoid: ${avoid.join(", ")}.`);
+  if (keep.length > 0) lines.push(`Keep prioritizing: ${keep.join(", ")}.`);
+  const strongAvoid = [...counts.entries()].filter(([, c]) => c.not_relevant >= NOT_RELEVANT_AVOID_THRESHOLD).map(([category]) => category);
+  if (strongAvoid.length > 0) lines.push(`Do NOT generate suggestions in these categories: ${strongAvoid.join(", ")}.`);
+  return lines.join("\n");
 }
 
 export type DigestLogEntry = {
@@ -1198,10 +2096,13 @@ export async function runFamilyAgentForAllHouseholds(runType: AgentRunType): Pro
 
 const CAPTURE_SYSTEM = `You are a household executive assistant (PA). The user has sent you a quick-capture note — a research request, reminder, draft request, or scheduling task. Return a JSON object with a friendly acknowledgement and one or more suggested actions.
 
+A context header (today's date, location, household members, caregivers) precedes the note below. Resolve all relative dates ("tomorrow", "next Tuesday", "this weekend") against the "Today" line — never guess or hallucinate a date. Use the household member names/ages and caregiver names given for context — a note that names a family member should reflect their actual age/relationship; a draft_message to a caregiver should address them by their actual name, not a generic role. If a section (location/members/caregivers) is absent from the header, it was not configured — proceed without it, do not invent one.
+
 WHEN TO USE search_web (do this first, before generating the response):
 - Any question about external dates, deadlines, registration windows, program availability, locations, or business hours
 - "find camps near [area]", "when does X registration open", "what's the deadline for Y", "is Z still enrolling"
 - Always search before answering factual questions — do not guess at dates or availability
+- Include the household's location and the relevant year (from the context header) in search queries so results are geographically and temporally relevant (e.g. "swim camps Example City summer 2026", not just "swim camps")
 
 MULTI-STEP TASKS: If a task requires both research and an action (e.g. "find swim camps and add reminders"), return multiple actions — a "note" with research results plus a "set_reminder" or "create_event".
 
@@ -1232,17 +2133,132 @@ JSON response format (valid JSON only, no prose outside):
   ]
 }`;
 
-export async function processCaptureNote(note: string): Promise<CaptureResult> {
+// FIX #213: quick-capture previously sent the LLM zero household context, so it had no way to
+// resolve relative dates ("next Tuesday"), no location for search_web queries, and no member/
+// caregiver names — draft_message to the nanny would come out addressed "Dear Nanny" even
+// though her name is in household_help_availability. Build the same compact context header the
+// scheduled pipeline already has the data for, reusing its exact helpers (buildMemberProfile,
+// buildCaregiverLines, env.TZ-based today) rather than re-deriving any of it.
+export async function buildCaptureContextHeader(householdId: string): Promise<string> {
+  const [members, caregiverSlots, location, preferences] = await Promise.all([
+    listHouseholdMembers(householdId),
+    listAvailability(householdId),
+    getHouseholdLocation(householdId),
+    listPreferences(householdId, "preference"),
+  ]);
+
+  const now = new Date();
+  const todayFull = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: env.TZ });
+  const todayIso = computeTodayIso(now, env.TZ);
+
+  const lines = [`Today: ${todayFull} (${todayIso}).`];
+  if (location) lines.push(`Location: ${location}.`);
+  if (members.length > 0) lines.push(`Household:\n${buildMemberProfile(members)}`);
+  if (caregiverSlots.length > 0) lines.push(`Caregivers:\n${buildCaregiverLines(caregiverSlots)}`);
+  if (preferences.length > 0) lines.push(`Preferences:\n${buildPreferenceLines(preferences)}`);
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// PA task classifier (#167) — routes a quick-capture note to the cheap one-shot
+// path above, or the BabyAGI research loop (pa-task-runner.ts's runPATask).
+// ---------------------------------------------------------------------------
+
+export type CaptureMode = "one_shot" | "research_loop";
+
+const CLASSIFY_SYSTEM = `Classify a household quick-capture note as one of two modes:
+
+- "one_shot": reminders, quick scheduling requests, drafting a short message, or capturing a fact
+  for later reference — answerable immediately with no external research.
+- "research_loop": requires searching the web for current information (prices, availability,
+  opening/registration dates, comparing options) before a useful answer is possible.
+
+When uncertain, choose "one_shot" — a wrong one_shot answer only costs the user a retry (they can
+prefix their note with "research:" to force the research path), while a wrong research_loop
+classification burns several LLM calls and web searches for nothing.
+
+Respond with JSON only: {"mode":"one_shot"|"research_loop"}`;
+
+const CLASSIFY_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    mode: { type: "string", enum: ["one_shot", "research_loop"] },
+  },
+  required: ["mode"],
+  additionalProperties: false,
+};
+
+const classifySchema = z.object({ mode: z.enum(["one_shot", "research_loop"]) });
+
+const RESEARCH_PREFIX = /^research:\s*/i;
+
+/**
+ * #167 D2: an explicit "research:" prefix or a caller-supplied mode override skips the
+ * classification call entirely — cheaper and more predictable than asking the LLM to agree with
+ * what the user already told it. Returns the note with any prefix stripped either way, since the
+ * prefix itself isn't part of the goal text passed on to processCaptureNote/runPATask.
+ */
+export async function classifyCaptureNote(
+  note: string,
+  modeOverride?: CaptureMode
+): Promise<{ mode: CaptureMode; note: string }> {
+  const prefixMatch = note.match(RESEARCH_PREFIX);
+  if (prefixMatch) {
+    log.info("family-agent: capture classified", { mode: "research_loop", source: "prefix" });
+    return { mode: "research_loop", note: note.slice(prefixMatch[0].length).trim() };
+  }
+  if (modeOverride) {
+    log.info("family-agent: capture classified", { mode: modeOverride, source: "override" });
+    return { mode: modeOverride, note };
+  }
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: CLASSIFY_SYSTEM },
+      { role: "user", content: note },
+    ],
+    {
+      model: chatModel(),
+      maxTokens: 60,
+      temperature: 0,
+      responseFormat: "json",
+      jsonSchema: CLASSIFY_JSON_SCHEMA,
+      jsonSchemaName: "capture_classification",
+    }
+  );
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    raw = undefined;
+  }
+  const parsed = classifySchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn("family-agent: capture classification failed validation, defaulting to one_shot", {
+      issues: parsed.error.issues,
+      rawContent: content.slice(0, 300),
+    });
+    return { mode: "one_shot", note };
+  }
+  log.info("family-agent: capture classified", { mode: parsed.data.mode, source: "llm" });
+  return { mode: parsed.data.mode, note };
+}
+
+export async function processCaptureNote(note: string, householdId: string): Promise<CaptureResult> {
+  const contextHeader = await buildCaptureContextHeader(householdId);
+
   const { finalResponse } = await getToolUseAdapter().runToolLoop(
     [
       { role: "system", content: CAPTURE_SYSTEM },
-      { role: "user", content: note },
+      { role: "user", content: `${contextHeader}\n\n${note}` },
     ],
     [SEARCH_WEB_TOOL],
     async (name, args) => {
       if (name === "search_web") {
         const query = typeof args.query === "string" ? args.query : "";
-        return tavilySearch(query);
+        const result = await tavilySearch(query);
+        return result.ok ? result.text : result.message;
       }
       return `Unknown tool: ${name}`;
     },

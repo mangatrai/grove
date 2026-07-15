@@ -258,11 +258,6 @@ function isRawPayload(value: unknown): value is RawPayloadWithAccount {
   );
 }
 
-function existingDescriptionFingerprint(merchant: string | null, memo: string | null): string {
-  const s = (merchant || memo || "").trim();
-  return normalizeDescriptionForFingerprint(s);
-}
-
 /**
  * Map `transaction_raw` rows for a session into `transaction_canonical` with strict fingerprint dedupe
  * (`uq_transaction_canonical_fingerprint` on household_id + fingerprint).

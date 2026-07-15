@@ -30,7 +30,7 @@ export interface DbCategoryRule {
   ruleOrigin: "household" | "global";
 }
 
-export function amountMatchesScope(signedAmountRounded: number, scope: RuleAmountScope): boolean {
+function amountMatchesScope(signedAmountRounded: number, scope: RuleAmountScope): boolean {
   if (scope === "any") {
     return true;
   }

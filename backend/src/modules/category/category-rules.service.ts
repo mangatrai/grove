@@ -59,7 +59,7 @@ function normalizePattern(input: string): string {
  * Split user input into multiple patterns (newline first, then comma-separated per line).
  * Regex patterns containing commas should use one pattern per line.
  */
-export function splitPatternInput(raw: string): string[] {
+function splitPatternInput(raw: string): string[] {
   const parts: string[] = [];
   for (const line of raw.split(/\r?\n/)) {
     for (const piece of line.split(",")) {

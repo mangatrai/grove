@@ -369,7 +369,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       if (parseResult.parserProfileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
         res.status(422).json({
           message:
-            "Deloitte Pay Statement PDFs are processed via Import (async OpenAI extraction). Use Import → bind employer → Parse, then wait for processing or run Reconcile.",
+            "Deloitte Pay Statement PDFs are processed via Import (async LLM extraction). Use Import → bind employer → Parse, then wait for processing or run Reconcile.",
           code: "DELOITTE_USE_IMPORT",
           parserProfileId: parseResult.parserProfileId
         });
@@ -377,16 +377,16 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       }
       res.status(422).json({
         message:
-          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF, OpenAI vision), Deloitte Pay Statement (PDF) via Import.",
+          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF, LLM vision), Deloitte Pay Statement (PDF) via Import.",
         code: "UNSUPPORTED_PARSER",
         parserProfileId: parseResult.parserProfileId
       });
       return;
     }
-    if (parseResult.reason === "openai_api_not_configured") {
+    if (parseResult.reason === "llm_api_not_configured") {
       res.status(422).json({
-        message: "OpenAI API key is not configured. Set OPENAI_API_KEY to extract IBM payslips.",
-        code: "OPENAI_API_NOT_CONFIGURED"
+        message: "AI provider API key is not configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY to match LLM_PROVIDER.",
+        code: "LLM_API_NOT_CONFIGURED"
       });
       return;
     }

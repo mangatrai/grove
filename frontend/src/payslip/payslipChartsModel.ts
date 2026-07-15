@@ -8,7 +8,7 @@ function sortTime(r: PayslipSnapshotDetail): number {
 }
 
 /** Calendar day in local time for grouping (pay date → else period end → else period start → upload time). */
-export function payrollDayKey(r: PayslipSnapshotDetail): string | null {
+function payrollDayKey(r: PayslipSnapshotDetail): string | null {
   const raw = r.payDate ?? r.payPeriodEnd ?? r.payPeriodStart ?? r.createdAt;
   if (!raw) {
     return null;

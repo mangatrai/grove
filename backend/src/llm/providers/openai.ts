@@ -51,12 +51,21 @@ export async function openaiChat(
   options: CompletionOptions
 ): Promise<{ content: string; usage: LlmUsage }> {
   const client = buildClient();
+  let responseFormat: OpenAI.Chat.Completions.ChatCompletionCreateParams["response_format"];
+  if (options.responseFormat === "json" && options.jsonSchema && options.jsonSchemaName) {
+    responseFormat = {
+      type: "json_schema",
+      json_schema: { name: options.jsonSchemaName, strict: true, schema: options.jsonSchema },
+    };
+  } else if (options.responseFormat === "json") {
+    responseFormat = { type: "json_object" };
+  }
   const res = await client.chat.completions.create({
     model: options.model,
     messages: toOaiMessages(messages),
     max_tokens: options.maxTokens,
     temperature: options.temperature,
-    ...(options.responseFormat === "json" ? { response_format: { type: "json_object" as const } } : {}),
+    ...(responseFormat ? { response_format: responseFormat } : {}),
   });
   return {
     content: res.choices[0]?.message?.content ?? "",

@@ -222,7 +222,7 @@ export async function exchangeAndConnect(
   }
 }
 
-export async function connectGDrive(
+async function connectGDrive(
   householdId: string,
   userId: string,
   refreshToken: string,

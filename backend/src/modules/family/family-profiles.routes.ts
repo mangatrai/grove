@@ -5,12 +5,18 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import {
+  classifyPreferenceText,
   createAvailability,
+  createPreference,
   deleteAvailability,
+  deletePreference,
   listAvailability,
   listHouseholdMembers,
+  listPreferences,
+  suggestPreferencesFromNotes,
   updateAvailability,
   updateMemberProfile,
+  updatePreference,
 } from "./family-profiles.service.js";
 
 export const familyProfilesRouter = Router();
@@ -137,5 +143,129 @@ familyProfilesRouter.delete(
       return;
     }
     res.status(204).end();
+  }
+);
+
+// ── PA preferences / memory store (#165, topic_tag + suggest/classify #238) ─────────────────
+
+const paPreferenceCategoryEnum = z.enum(["preference", "discovered_fact", "decision_history"]);
+const paPreferenceTopicTagEnum = z.enum([
+  "travel",
+  "school",
+  "health",
+  "finance",
+  "gifts",
+  "household",
+  "food",
+  "interests",
+  "other",
+]);
+
+familyProfilesRouter.get(
+  "/pa-preferences",
+  requireRole(["owner", "admin", "member"]),
+  async (req: AuthenticatedRequest, res) => {
+    const category = paPreferenceCategoryEnum.safeParse(req.query.category);
+    const preferences = await listPreferences(
+      req.authUser!.householdId,
+      category.success ? category.data : undefined
+    );
+    res.json({ preferences });
+  }
+);
+
+const createPreferenceSchema = z
+  .object({
+    category: paPreferenceCategoryEnum,
+    factText: z.string().trim().min(1).max(2000),
+    source: z.enum(["manual", "feedback", "notes_extraction"]).optional(),
+    topicTag: paPreferenceTopicTagEnum.nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.category === "preference") return;
+    if (!val.topicTag) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["topicTag"], message: "topicTag is required for discovered_fact/decision_history" });
+    }
+  });
+
+familyProfilesRouter.post(
+  "/pa-preferences",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = createPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+    const preference = await createPreference(req.authUser!.householdId, parsed.data);
+    res.status(201).json({ preference });
+  }
+);
+
+familyProfilesRouter.patch(
+  "/pa-preferences/:id",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid preference id" });
+      return;
+    }
+    const parsed = createPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+    const preference = await updatePreference(id, req.authUser!.householdId, parsed.data);
+    if (!preference) {
+      res.status(404).json({ error: "Preference not found" });
+      return;
+    }
+    res.json({ preference });
+  }
+);
+
+familyProfilesRouter.delete(
+  "/pa-preferences/:id",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "Invalid preference id" });
+      return;
+    }
+    const deleted = await deletePreference(id, req.authUser!.householdId);
+    if (!deleted) {
+      res.status(404).json({ error: "Preference not found" });
+      return;
+    }
+    res.status(204).end();
+  }
+);
+
+familyProfilesRouter.post(
+  "/pa-preferences/suggest",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const candidates = await suggestPreferencesFromNotes(req.authUser!.householdId);
+    res.json({ candidates });
+  }
+);
+
+const classifyPreferenceSchema = z.object({
+  factText: z.string().trim().min(1).max(2000),
+});
+
+familyProfilesRouter.post(
+  "/pa-preferences/classify",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = classifyPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+    const classification = await classifyPreferenceText(parsed.data.factText);
+    res.json(classification);
   }
 );

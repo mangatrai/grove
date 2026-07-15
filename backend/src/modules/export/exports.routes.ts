@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { Router } from "express";
 import multer from "multer";
+import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
@@ -22,6 +24,7 @@ import {
   readHfbManifestFromFile,
   scheduleImportJobProcessing
 } from "./import-household-bundle.service.js";
+import { consumePrepareToken, createPrepareToken, sweepExpiredPrepareTokens } from "./restore-prepare-token.store.js";
 
 const EXPORT_WINDOW_MS = 60 * 60 * 1000;
 const EXPORT_MAX_PER_WINDOW = 10;
@@ -95,14 +98,25 @@ exportsRouter.post(
   }
 );
 
-/** Async restore from export bundle (.hfb). Owner only — wipes and replaces all household data. */
+const executeSchema = z.object({ token: z.string().min(1) });
+
+const IMPORTS_RESTORE_PREPARE_DIR = resolveDataPath("data/imports-restore-prepare");
+
+/**
+ * SEC #186 two-phase restore. Step 1: validate + stash the uploaded backup, return a manifest
+ * summary and a short-lived confirmation token. Step 2 (POST /household/import/execute) consumes
+ * the token to actually run the restore — a direct call to a single "restore now" endpoint no
+ * longer exists, closing the bypass where the frontend's preview step was purely client-side.
+ */
 exportsRouter.post(
-  "/household/import",
+  "/household/import/prepare",
   requireRole(["owner"]),
   restoreUpload.single("file"),
   async (req: AuthenticatedRequest, res) => {
     const householdId = req.authUser!.householdId;
     const userId = req.authUser!.userId;
+
+    sweepExpiredPrepareTokens();
 
     if (!req.file) {
       res.status(400).json({ message: "No file uploaded. Send a multipart/form-data request with a 'file' field." });
@@ -111,23 +125,63 @@ exportsRouter.post(
 
     const ext = path.extname(req.file.originalname ?? "").toLowerCase();
     if (ext !== ".hfb") {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch {
-        /* already gone */
-      }
+      try { fs.unlinkSync(req.file.path); } catch { /* already gone */ }
       res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
       return;
     }
 
-    const { jobId } = await queueHouseholdImport(householdId, userId, req.file.path);
-    scheduleImportJobProcessing(jobId, householdId);
-    res.status(202).json({
-      jobId,
-      message: "Restore started. Poll GET /exports/import/:jobId for status."
-    });
+    try {
+      const manifest = await readHfbManifestFromFile(req.file.path);
+
+      fs.mkdirSync(IMPORTS_RESTORE_PREPARE_DIR, { recursive: true });
+      const dest = path.join(IMPORTS_RESTORE_PREPARE_DIR, `${randomUUID()}.hfb`);
+      fs.renameSync(req.file.path, dest);
+      const token = createPrepareToken(householdId, userId, dest, manifest);
+      res.json({ token, ...manifest });
+    } catch (err: unknown) {
+      try { fs.unlinkSync(req.file.path); } catch { /* already gone */ }
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = (err as { code?: string }).code;
+      if (code === "ENCRYPTED_NO_KEY") {
+        log.warn("restore prepare: encrypted backup, no key", { householdId });
+        res.status(422).json({ message: msg });
+      } else {
+        log.error("restore prepare: manifest read failed", { householdId, err });
+        res.status(400).json({ message: msg });
+      }
+    }
   }
 );
+
+/** Step 2 of the SEC #186 two-phase restore: consume the token from /prepare, start the restore. */
+exportsRouter.post("/household/import/execute", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+
+  sweepExpiredPrepareTokens();
+
+  const parsed = executeSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+
+  const entry = consumePrepareToken(parsed.data.token, householdId, userId);
+  if (!entry) {
+    res.status(410).json({
+      code: "PREPARE_TOKEN_EXPIRED",
+      message: "This restore confirmation has expired. Please upload the backup file again."
+    });
+    return;
+  }
+
+  const { jobId } = await queueHouseholdImport(householdId, userId, entry.filePath);
+  scheduleImportJobProcessing(jobId, householdId);
+  res.status(202).json({
+    jobId,
+    message: "Restore started. Poll GET /exports/import/:jobId for status."
+  });
+});
 
 /** Poll status of a restore (import) job. */
 exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
@@ -147,6 +201,7 @@ exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
     status: job.status,
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    // errorText is already sanitized at write time (ExportUserFacingError-gated); see SEC #188.
     error: job.errorText,
     stats: job.statsJson ? (JSON.parse(job.statsJson) as Record<string, number>) : null
   });
@@ -243,6 +298,7 @@ exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
     scope: job.personProfileId ? "member" : "household",
     createdAt: job.createdAt,
     completedAt: job.completedAt,
+    // errorText is already sanitized at write time (ExportUserFacingError-gated); see SEC #188.
     error: job.errorText
   });
 });

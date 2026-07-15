@@ -11,7 +11,7 @@ export type SniffHints = {
 };
 
 /** Light keyword signals in extracted PDF text (first pages). */
-export function detectPayslipSignals(normalizedText: string): SniffHints {
+function detectPayslipSignals(normalizedText: string): SniffHints {
   const t = normalizedText.slice(0, 120_000);
   const ibmSignals: string[] = [];
   const adpSignals: string[] = [];
@@ -58,7 +58,7 @@ export type SniffSuggestion = {
  * Suggest parser + employer from PDF text + household employer list.
  * Does not persist; optional step before upload or import binding.
  */
-export async function suggestPayslipFromText(
+async function suggestPayslipFromText(
   householdId: string,
   userId: string,
   normalizedText: string

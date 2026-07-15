@@ -1,6 +1,6 @@
 /**
- * Background reconcile for async LLM payslip extraction (`openai_llm_payslip`).
- * Deferred work: OpenAI call runs here on poll interval (not during initial POST /parse).
+ * Background reconcile for async LLM payslip extraction (`llm_payslip`).
+ * Deferred work: LLM call runs here on poll interval (not during initial POST /parse).
  */
 import fs from "node:fs";
 
@@ -9,7 +9,7 @@ import { log } from "../../logger.js";
 import { qAll, qExec } from "../../db/query.js";
 import { getSessionForHousehold } from "./import-session.service.js";
 import { extractPayslipFromPdf } from "../payslip/llm-extract/extract-payslip-llm.js";
-import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
+import { LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
 import {
   mapCanonicalExtractToPersist,
   validateCanonicalForImport
@@ -58,7 +58,7 @@ export async function reconcilePayslipAsyncImportSession(
        AND status = 'processing'`,
     sessionId,
     ...LLM_PAYSLIP_PROFILE_IDS,
-    OPENAI_LLM_PAYSLIP_PROVIDER
+    LLM_PAYSLIP_PROVIDER
   );
 
   const outcome: ReconcilePayslipAsyncOutcome = {
@@ -160,7 +160,7 @@ export async function reconcilePayslipAsyncImportSession(
           parsedRows: 0,
           profile: file.parser_profile_id,
           payslipSnapshotId: ins.snapshot.id,
-          payslipAsyncProvider: OPENAI_LLM_PAYSLIP_PROVIDER,
+          payslipAsyncProvider: LLM_PAYSLIP_PROVIDER,
           usageTokens: usage?.totalTokens ?? null
         }),
         file.id
@@ -194,7 +194,7 @@ export async function reconcilePayslipAsyncImportSession(
        AND status = 'processing'`,
     sessionId,
     ...LLM_PAYSLIP_PROFILE_IDS,
-    OPENAI_LLM_PAYSLIP_PROVIDER
+    LLM_PAYSLIP_PROVIDER
   );
   if (remaining.length > 0) {
     outcome.stillPending = true;

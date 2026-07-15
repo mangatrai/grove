@@ -137,6 +137,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
   const [deviceFile, setDeviceFile] = useState<File | null>(null);
   const [devicePreviewBusy, setDevicePreviewBusy] = useState(false);
   const [devicePreviewError, setDevicePreviewError] = useState<string | null>(null);
+  const [prepareToken, setPrepareToken] = useState<string | null>(null);
 
   // ── Drive backup job ───────────────────────────────────────────────────────
   const [driveBackupJobId, setDriveBackupJobId] = useState<string | null>(null);
@@ -387,14 +388,15 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
     try {
       const formData = new FormData();
       formData.append("file", deviceFile);
-      const res = await apiFetch("/exports/preview", { method: "POST", body: formData });
+      const res = await apiFetch("/exports/household/import/prepare", { method: "POST", body: formData });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setDevicePreviewError((body as { message?: string }).message ?? "Could not read backup file.");
         return;
       }
-      const data = (await res.json()) as BackupPreview;
+      const data = (await res.json()) as BackupPreview & { token: string };
       setPreviewData(data);
+      setPrepareToken(data.token);
       setPreviewSource("device");
       setPreviewDriveFileId(null);
       setPreviewModalOpen(true);
@@ -431,16 +433,17 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
 
   /** Restore from device file (called from shared modal confirm). */
   const handleDeviceRestore = useCallback(async () => {
-    if (!token || !deviceFile) return;
+    if (!token || !prepareToken) return;
     setRestoreMessage("Restoring… this may take a minute.");
     setRestoreSuccess(false);
     try {
-      const formData = new FormData();
-      formData.append("file", deviceFile);
-      const res = await apiFetch("/exports/household/import", { method: "POST", body: formData });
+      const res = await apiFetch("/exports/household/import/execute", {
+        method: "POST",
+        body: JSON.stringify({ token: prepareToken })
+      });
       if (!res.ok) {
         const txt = await res.text();
-        let msg = `Upload failed (${res.status})`;
+        let msg = `Restore failed (${res.status})`;
         try { msg = (JSON.parse(txt) as { message?: string }).message ?? msg; } catch { /* ignore */ }
         throw new Error(msg);
       }
@@ -463,8 +466,10 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
     } catch (e: unknown) {
       setRestoreMessage(e instanceof Error ? e.message : String(e));
       setRestoreSuccess(false);
+    } finally {
+      setPrepareToken(null);
     }
-  }, [token, deviceFile]);
+  }, [token, prepareToken]);
 
   /** Restore from Drive file (called from shared modal confirm). */
   const handleDriveRestore = useCallback(async (fileId: string) => {
@@ -742,6 +747,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                   onChange={(file) => {
                     setDeviceFile(file);
                     setDevicePreviewError(null);
+                    setPrepareToken(null);
                   }}
                   placeholder="Choose backup .hfb…"
                   leftSection={<IconUpload size={16} />}

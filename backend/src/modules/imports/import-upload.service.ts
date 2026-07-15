@@ -45,7 +45,7 @@ type UploadFailureCode =
   | "CANONICALIZE_FAILED"
   | "EMPLOYER_REQUIRED"
   | "INVALID_EMPLOYER"
-  | "OPENAI_API_NOT_CONFIGURED"
+  | "LLM_API_NOT_CONFIGURED"
   | "LLM_CANONICAL_VALIDATION_FAILED"
   | "LLM_EXTRACTION_FAILED"
   | "UNSUPPORTED_PARSER"
@@ -182,8 +182,8 @@ async function uploadPayslipAndImport(params: UploadPayslipParams): Promise<Uplo
     if (parsed.reason === "unsupported_parser") {
       return { ok: false, code: "UNSUPPORTED_PARSER", message: "This payslip parser is not supported yet." };
     }
-    if (parsed.reason === "openai_api_not_configured") {
-      return { ok: false, code: "OPENAI_API_NOT_CONFIGURED", message: "OpenAI API key is not configured." };
+    if (parsed.reason === "llm_api_not_configured") {
+      return { ok: false, code: "LLM_API_NOT_CONFIGURED", message: "AI provider API key is not configured." };
     }
     if (parsed.reason === "llm_canonical_validation_failed") {
       return { ok: false, code: "LLM_CANONICAL_VALIDATION_FAILED", message: "Extracted payslip did not pass validation." };

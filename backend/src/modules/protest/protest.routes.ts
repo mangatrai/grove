@@ -2,7 +2,6 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 
-import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { getChatAdapter, getToolUseAdapter, getVisionAdapter, chatModel, strongModel, isLlmConfigured } from "../../llm/index.js";
 import type { Tool, ChatMessage } from "../../llm/index.js";
@@ -976,7 +975,8 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
 
       if (toolName === "search_web") {
         const query = typeof args.query === "string" ? args.query : "";
-        return tavilySearch(query);
+        const result = await tavilySearch(query);
+        return result.ok ? result.text : result.message;
       }
 
       if (toolName === "fetch_dcad_comps") {

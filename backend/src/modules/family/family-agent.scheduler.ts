@@ -4,6 +4,7 @@ import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { runFamilyAgentForAllHouseholds } from "./family-agent.service.js";
 import { sendDeadlineReminders } from "./deadline-reminder.service.js";
+import { pollHouseholdInboxForAllHouseholds } from "./email-ingest.service.js";
 
 export function startFamilyAgentScheduler(): void {
   // Sunday ~7pm — light weekly preview (always sends)
@@ -33,8 +34,22 @@ export function startFamilyAgentScheduler(): void {
     void sendDeadlineReminders();
   }, { timezone: env.TZ });
 
+  // FIX #215: daily ~6:12am — poll the household inbox before the 6:32am delta run, so any
+  // email-derived deadline/event suggestions are already visible when that digest is composed.
+  // No-op (logs debug, returns) when FAMILY_INBOX_IMAP_* is not configured.
+  cron.schedule("12 6 * * *", () => {
+    log.info("email-ingest: daily inbox poll triggered");
+    void pollHouseholdInboxForAllHouseholds();
+  }, { timezone: env.TZ });
+
   log.info("family-agent scheduler started", {
     timezone: env.TZ,
-    jobs: ["Sunday 7:00pm preview", "Monday 7:03am digest", "Tue-Sat 6:32am delta", "Daily 8:07am deadline reminders"],
+    jobs: [
+      "Sunday 7:00pm preview",
+      "Monday 7:03am digest",
+      "Tue-Sat 6:32am delta",
+      "Daily 6:12am inbox poll",
+      "Daily 8:07am deadline reminders"
+    ],
   });
 }

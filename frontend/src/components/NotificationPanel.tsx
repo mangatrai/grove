@@ -22,6 +22,7 @@ import {
 } from "@tabler/icons-react";
 
 import { apiJson, useAuthToken } from "../api";
+import { ensureActivityListeners, evaluatePollGuard, getLastActivityAt } from "../utils/activity";
 
 type NotificationRow = {
   id: string;
@@ -59,10 +60,12 @@ export function NotificationPanel() {
   const fetchUnreadCount = useCallback(async () => {
     if (!token) return;
     try {
-      const r = await apiJson<{ count: number }>("/notifications/unread-count");
+      const r = await apiJson<{ count: number }>("/notifications/unread-count", {
+        headers: { "x-background-poll": "1" },
+      });
       setUnreadCount(r.count);
     } catch {
-      /* silently ignore poll failures */
+      /* silently ignore poll failures (including the 401 the server sends once idle — apiJson already clears the token) */
     }
   }, [token]);
 
@@ -80,36 +83,36 @@ export function NotificationPanel() {
     }
   }, [token]);
 
-  // Start polling on mount; pause when tab is hidden, resume when visible
+  // Single always-on interval; every tick re-evaluates the fail-closed idle/focus guard itself
+  // rather than relying on visibilitychange firing (Safari doesn't mark occluded windows hidden).
+  // See FIX #221 — correctness must not depend on any one browser event actually being delivered.
   useEffect(() => {
     if (!token) return;
+    ensureActivityListeners();
 
-    function startPoll() {
+    function tick() {
+      const guard = evaluatePollGuard({
+        now: Date.now(),
+        lastActivityAt: getLastActivityAt(),
+        hasFocus: document.hasFocus(),
+      });
+      if (guard.logout) return; // useIdleLogout owns the actual logout; just skip the network call
+      if (!guard.poll) return;
       void fetchUnreadCount();
-      pollRef.current = setInterval(() => void fetchUnreadCount(), POLL_INTERVAL_MS);
     }
 
-    function stopPoll() {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "hidden") {
-        stopPoll();
-      } else {
-        startPoll();
-      }
-    }
-
-    startPoll();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    tick();
+    pollRef.current = setInterval(tick, POLL_INTERVAL_MS);
+    // Optimization only, not load-bearing: refresh immediately when the tab regains visibility/focus.
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    window.addEventListener("pageshow", tick);
 
     return () => {
-      stopPoll();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
+      window.removeEventListener("pageshow", tick);
     };
   }, [token, fetchUnreadCount]);
 

@@ -128,13 +128,3 @@ export const SECTION_LABELS: Record<PayslipLineItemSection, string> = {
   other_information: "Other Information",
   taxable_earnings: "Taxable Earnings"
 };
-
-export const SECTION_ORDER: PayslipLineItemSection[] = [
-  "earnings",
-  "pre_tax_deductions",
-  "post_tax_deductions",
-  "tax_deductions",
-  "other_deductions",
-  "other_information",
-  "taxable_earnings"
-];

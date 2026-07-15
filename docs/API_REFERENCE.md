@@ -1916,12 +1916,10 @@ Supported adapters:
 - CSV (`.csv`)
 - Excel (`.xlsx`, `.xls`)
 - PDF (`.pdf`) — profile-specific behavior:
-  - `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf` — local parse.
-  - `deloitte_payslip_pdf` — async OpenAI LLM extraction (queued on `import_file`).
+  - `boa_estatement_pdf`, `marcus_online_savings_pdf` — local parse.
+  - `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf` — async LLM extraction (queued on `import_file`; provider per `LLM_PROVIDER`).
 
-**Employer payslip (`ibm_pay_contributions_pdf`):** extraction creates a `payslip_snapshot` row; **no** `transaction_raw` rows created. Response still returns `parsedFiles` ≥ 1 and typically `parsedRows: 0`.
-
-**Employer payslip (`deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**.
+**Employer payslip (`ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**. On completion, creates a `payslip_snapshot` row; **no** `transaction_raw` rows.
 
 **Profile `generic_tabular`:** user supplies column mapping.
 
@@ -1957,7 +1955,7 @@ Required mapping keys: `date`, `description`, `amount`.
 
 ### `POST /imports/sessions/:sessionId/reconcile-payslip-async`
 
-Runs background OpenAI payslip extraction for Deloitte files and inserts `payslip_snapshot` rows.
+Runs background LLM payslip extraction for IBM and Deloitte files (provider per `LLM_PROVIDER`) and inserts `payslip_snapshot` rows.
 
 **Query (optional):**
 - `force=true|1` — bypass per-file throttle window.
@@ -2789,6 +2787,8 @@ Poll export job status.
 }
 ```
 
+- **`error`** — when `status = failed`, a fixed safe message ("Job failed due to a system error. Check server logs for details."); never the raw exception text. Full error detail is server-side only (`log.error`).
+
 **Errors:**
 - **403** — `FORBIDDEN` — member attempted to view another user's export job.
 - **404** — `EXPORT_JOB_NOT_FOUND`.
@@ -2810,13 +2810,57 @@ Returns the backup file as binary attachment when job finished successfully.
 
 ---
 
-### `POST /exports/household/import`
+### `POST /exports/household/import/prepare` (SEC #186)
 
 **Auth:** Bearer JWT. **Role:** owner only.
 
-Queues a **restore** job: wipes household-scoped data (FK-safe order), reloads from `.hfb` bundle (remaps bundle `householdId` to current household). `import_file` rows not restored; `import_file_id` cleared on balance snapshots/payslips.
+Step 1 of the two-phase restore flow. Validates the uploaded `.hfb` (reads and returns its
+manifest, same shape as `POST /exports/preview`) and stashes the file server-side under a
+short-lived confirmation token — it does **not** modify the database. A direct call to a
+single "restore now" endpoint no longer exists; every restore must go through `prepare` then
+`execute`.
 
 **Content-Type:** `multipart/form-data` with field **`file`** — `.hfb` backup.
+
+**Response 200:**
+```json
+{
+  "token": "uuid",
+  "exportVersion": 4,
+  "exportedAt": "2026-04-30T00:00:00.000Z",
+  "encrypted": false,
+  "scope": "household | member",
+  "personProfileId": "uuid-or-null",
+  "format": "zip-split-v4",
+  "tables": { "transaction_canonical": { "rows": 1234 } },
+  "totalRows": 1234
+}
+```
+
+The `token` is single-use and expires after **15 minutes** if `execute` is never called; expired
+or already-consumed prepared files are swept (and deleted from disk) lazily on the next call to
+either `prepare` or `execute`.
+
+**Errors:**
+- **400** — No file, not `.hfb`, or the file could not be read as a valid backup.
+- **413** — Upload over **500 MB**.
+- **422** — Encrypted but `BACKUP_ENCRYPTION_KEY` not configured.
+
+---
+
+### `POST /exports/household/import/execute` (SEC #186)
+
+**Auth:** Bearer JWT. **Role:** owner only.
+
+Step 2 of the two-phase restore flow. Consumes the token returned by `prepare` and queues the
+actual **restore** job: wipes household-scoped data (FK-safe order), reloads from the prepared
+`.hfb` bundle (remaps bundle `householdId` to current household). `import_file` rows not
+restored; `import_file_id` cleared on balance snapshots/payslips.
+
+**Content-Type:** `application/json`
+```json
+{ "token": "uuid" }
+```
 
 **Response 202:**
 ```json
@@ -2829,12 +2873,17 @@ Queues a **restore** job: wipes household-scoped data (FK-safe order), reloads f
 After success, JWTs for household users are invalidated; client should sign out.
 
 **Errors:**
-- **400** — No file, or not `.hfb`.
-- **413** — Upload over **500 MB**.
+- **400** — Missing/invalid `token` field (`{ errors: z.issues }`).
+- **410** — `PREPARE_TOKEN_EXPIRED` — token missing, expired, already used, or issued to a
+  different household/user.
 
 ---
 
 ### `POST /exports/preview`
+
+Unaffected by SEC #186 — still a standalone read-only preview (always deletes its upload) kept
+for callers that only want a manifest without ever restoring. The device restore UI now calls
+`prepare` instead, since `prepare`'s response already includes the manifest.
 
 **Auth:** Bearer JWT. **Role:** owner only.
 
@@ -2879,6 +2928,7 @@ Poll import (restore) job status.
 ```
 
 - **`stats`** — per-table row count when complete.
+- **`error`** — when `status = failed`, a fixed safe message ("Job failed due to a system error. Check server logs for details."); never the raw exception text. Full error detail is server-side only (`log.error`).
 
 **Errors:**
 - **404** — `IMPORT_JOB_NOT_FOUND`.
@@ -3261,12 +3311,27 @@ Returns authenticated user's notification list: up to **40** unread (newest firs
 
 ### `GET /notifications/unread-count`
 
-Lightweight poll endpoint.
+Lightweight poll endpoint. The frontend calls this on a background interval (not direct user
+action), so it sends `x-background-poll: 1` — this lets the server distinguish it from a
+real/user-initiated request (see FIX #221).
+
+**Headers:** `x-background-poll: 1` (frontend background poll only; any authenticated caller
+without this header is treated as a real request and always allowed).
 
 **Response 200:**
 ```json
 { "count": 3 }
 ```
+
+**Response 401** (only when `x-background-poll: 1` is set and the session has had no
+non-background request in 15+ minutes):
+```json
+{ "message": "Session idle", "code": "token_stale" }
+```
+The JWT itself is still valid — this is a server-side idle backstop independent of the JWT's own
+expiry, so a background poll from an unattended/zombie tab stops generating DB traffic even if
+the client-side idle-logout guard never runs. A real request (no `x-background-poll` header)
+from the same token always succeeds and refreshes the activity window.
 
 ---
 
@@ -3709,6 +3774,9 @@ Same Google Cloud project as Drive (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`)
 | `POST /gcal/connect` | Yes | Yes | **403** |
 | `GET /gcal/status` | Yes | Yes | **403** |
 | `DELETE /gcal/disconnect` | Yes | Yes | **403** |
+| `GET /gcal/calendars` | Yes | Yes | **403** |
+| `PATCH /gcal/calendars` | Yes | Yes | **403** |
+| `PATCH /gcal/calendar-roles` | Yes | Yes | **403** |
 | `GET /gcal/events` | Yes | Yes | **403** |
 
 ### `GET /gcal/oauth/url`
@@ -3776,6 +3844,63 @@ Removes the requesting user's Calendar tokens. Does not affect other users in th
 ```json
 { "connected": false }
 ```
+
+---
+
+### `GET /gcal/calendars`
+
+Lists every calendar the connected Google account can read, the user's saved selection (which
+calendars feed the family agent), and a **role** per calendar: `work` | `school` | `activities` | `other`.
+Role defaults to a name-based heuristic (`heuristicCalendarRole`) when no explicit role has been
+saved — e.g. a calendar named "Example ISD" defaults to `school`. The family agent uses `school`
+to treat those events as informational only (a school closure is not parent unavailability),
+never as a parent commitment (FIX #212).
+
+**Response `200`:**
+```json
+{
+  "calendars": [
+    { "id": "primary", "summary": "Jane Doe", "primary": true, "backgroundColor": "#039BE5" },
+    { "id": "abc123@group.calendar.google.com", "summary": "Example ISD", "primary": false, "backgroundColor": null }
+  ],
+  "selectedIds": ["primary", "abc123@group.calendar.google.com"],
+  "roles": {
+    "primary": "work",
+    "abc123@group.calendar.google.com": "school"
+  }
+}
+```
+
+**Errors:** `409 GCAL_NOT_CONNECTED`, `401 GCAL_NEEDS_REAUTH`, `502` (Google API error).
+
+---
+
+### `PATCH /gcal/calendars`
+
+Saves the requesting user's calendar selection (which calendars feed events into the app).
+
+**Request body:**
+```json
+{ "selectedIds": ["primary", "abc123@group.calendar.google.com"] }
+```
+
+**Response `200`:** `{ "ok": true }`. **`400`** if `selectedIds` is missing or empty.
+
+---
+
+### `PATCH /gcal/calendar-roles`
+
+Saves a per-calendar role so the family agent can distinguish a school calendar's events from
+an actual parent commitment, or tag a calendar as kid activities (FIX #212).
+
+**Request body:**
+```json
+{ "roles": { "abc123@group.calendar.google.com": "school" } }
+```
+
+Each value must be one of `work` | `school` | `activities` | `other`.
+
+**Response `200`:** `{ "ok": true }`. **`400`** if `roles` is missing or contains an invalid role value.
 
 ---
 
@@ -3950,6 +4075,126 @@ Permanently removes an availability slot. Requires `owner | admin`.
 
 ---
 
+### `GET /api/family/pa-preferences`
+
+Lists PA agent memory-store rows (standing facts/constraints for the planning assistant). Requires `owner | admin | member`.
+
+**Query params**
+- `category=preference|discovered_fact|decision_history` — filter to one category (default: all).
+
+**Response `200`**
+```json
+{
+  "preferences": [
+    {
+      "id": 1,
+      "householdId": "uuid",
+      "category": "preference",
+      "factText": "No Schengen transit — visa risk for H1B holders",
+      "source": "manual",
+      "topicTag": null,
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "updatedAt": "2026-07-14T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+`category` — `preference` rows are injected in full into every PA loop prompt (no similarity filtering). `discovered_fact` / `decision_history` rows are stored with a `topicTag` and pulled on demand by the loop's `search_memory` tool (GH #238) instead of full-included.
+`source` — `manual` (added via this API), `feedback` (reserved for a future agent-write path), or `notes_extraction` (approved via `POST /pa-preferences/suggest` or the "Save as preference" flow, GH #238).
+`topicTag` — one of `travel | school | health | finance | gifts | household | food | interests | other` (GH #239 added `food`/`interests`). Required for `discovered_fact` / `decision_history`; optional (browsability only, no effect on loop behavior — `preference` rows are always full-included regardless of tag) for `category=preference`.
+
+---
+
+### `POST /api/family/pa-preferences`
+
+Creates a preference row. Text-based dedup: if a near-exact match (trimmed/lowercased/whitespace-collapsed) already exists in the same household + category, the existing row is updated in place instead of inserting a duplicate. Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "category": "discovered_fact",
+  "factText": "Kids attend Lincoln Elementary",
+  "source": "manual",
+  "topicTag": "school"
+}
+```
+`source` is optional, defaults to `manual`. `topicTag` is **required** when `category` is `discovered_fact` or `decision_history`; **optional** (may be set or omitted) when `category` is `preference` (GH #239 — previously forbidden).
+
+**Response `201`** — `{ "preference": PaPreference }`
+**Error `400`** — validation failure (missing `topicTag` on `discovered_fact`/`decision_history`), `{ "errors": ZodIssue[] }`.
+
+---
+
+### `PATCH /api/family/pa-preferences/:id`
+
+Updates a preference row in place (correct a miscategorized or misworded row without delete-and-re-add). `:id` is an integer. Same body shape and validation as `POST /api/family/pa-preferences` (full replace, not a partial merge — all three fields are re-validated together). Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "category": "discovered_fact",
+  "factText": "Kids attend Lincoln Elementary",
+  "topicTag": "school"
+}
+```
+
+**Response `200`** — `{ "preference": PaPreference }`
+**Error `400`** — validation failure, `{ "errors": ZodIssue[] }`.
+**Error `404`** — row not in caller's household.
+
+---
+
+### `DELETE /api/family/pa-preferences/:id`
+
+Permanently removes a preference row. `:id` is an integer. Requires `owner | admin`.
+
+**Response `204`** — no body.
+**Error `400`** — `:id` is not an integer.
+**Error `404`** — row not in caller's household.
+
+---
+
+### `POST /api/family/pa-preferences/suggest`
+
+Scans every household member's `notes` field and asks the LLM (`chatModel()` tier, forced JSON schema) to propose candidate memory-store facts. Returns **unpersisted** candidates only — nothing is written until the caller approves individual rows via `POST /pa-preferences`. Candidates that already match an existing row (same normalized-text dedup as above) are filtered out before returning. The prompt also consolidates near-duplicate facts (multiple facts about the same person+topic, or the same fact shared across household members — e.g. `personName: "Jane Doe and John Doe"`) into a single candidate rather than emitting one per person/mention. Requires `owner | admin`.
+
+**Request body:** none.
+
+**Response `200`**
+```json
+{
+  "candidates": [
+    {
+      "personName": "Jane Doe",
+      "category": "discovered_fact",
+      "factText": "Enjoys hiking",
+      "topicTag": "interests"
+    }
+  ]
+}
+```
+`topicTag` is always present (GH #239 — every candidate carries a tag, including `category=preference` ones, for browsability). Each item validates independently; a single malformed candidate is dropped (logged, not surfaced) rather than discarding the whole batch. Returns `{ "candidates": [] }` without calling the LLM if no household member has non-empty notes.
+
+---
+
+### `POST /api/family/pa-preferences/classify`
+
+Classifies a single ad-hoc string into `{ category, topicTag, factText }` (`chatModel()` tier, forced JSON schema). Used by the Family Agent page's "Save as preference" button so the caller starts from a suggested category/tag/text instead of picking from scratch or saving the raw input verbatim — `factText` is the LLM's synthesized short standalone sentence (≤~140 chars), not a copy of the input. The result is not persisted by this endpoint. Requires `owner | admin`.
+
+**Body**
+```json
+{ "factText": "Kids loved the LEGO set last Christmas, especially the new Star Wars one — would be great to build on that for birthdays." }
+```
+
+**Response `200`**
+```json
+{ "category": "discovered_fact", "topicTag": "gifts", "factText": "Loved the LEGO Star Wars set." }
+```
+**Error `400`** — `factText` empty or missing.
+
+---
+
 ### `POST /api/family/alerts/:alertId/approve`
 
 Execute the action associated with a family agent alert. Currently only supports `action_type = 'create_gcal_event'` — creates a Google Calendar event from the alert's structured payload, writes a `family_events` row, and marks the alert resolved. Requires `owner | admin`.
@@ -3991,3 +4236,180 @@ Execute the action associated with a family agent alert. Currently only supports
 ```
 
 > **Note:** `GET /api/family/alerts` responses include `actionType` and `actionPayload` fields on each alert. The UI shows an **Add to Calendar** button only when `actionType === 'create_gcal_event'` and `isResolved === false`.
+
+---
+
+### `PATCH /api/family/alerts/:id/resolve`
+
+Marks an alert resolved. Requires `owner | admin`.
+
+**Request body** (all optional):
+```json
+{ "kind": "useful" | "not_relevant" | "already_knew" | null }
+```
+`kind` (FIX #208) records why the household dismissed the alert. Omitting it or sending `null` resolves with a neutral (no-feedback) disposition. Dispositions accumulate over a rolling 60-day window into a compact calibration summary that is injected into the proactive-research (Domain 3) and digest-synthesis (Domain 5) prompts on subsequent runs — categories repeatedly marked `not_relevant` (3+ times) are instructed out of future suggestion generation. This is an observations-only mechanism: it changes which alert categories the agent produces, never a lifestyle or spending recommendation.
+
+**Response `200`:** `{ "ok": true }`
+**Response `400`:** `{ "errors": [...] }` — invalid `kind` value.
+**Response `404`:** `{ "message": "Alert not found or already resolved." }`
+
+> **Note:** `GET /api/family/alerts` responses also include `resolutionKind` (`"useful" | "not_relevant" | "already_knew" | null`) on each alert.
+
+---
+
+### Household inbox email ingestion (FIX #215, broadened CR-224)
+
+No new endpoints. A daily background poll (not an HTTP route) reads the dedicated household Gmail account over IMAP, identifies each email's genre (school/activity, order/delivery, financial notice, appointment/medical, invitation/social, utility/service/government, or promotional/newsletter) and extracts actionable items via a tool-less LLM call, then writes `alert_type = 'suggestion'` rows into `family_agent_alerts` — reusing the existing `POST /api/family/alerts/:alertId/approve` and `PATCH /api/family/alerts/:id/resolve` endpoints documented above for the approve/dismiss review flow. No suggestion is ever auto-written to `family_events` or Google Calendar without explicit approval.
+
+> **Note:** `GET /api/family/alerts` responses also include `sourceQuote` (`string | null`) — for email-derived suggestions, a verbatim excerpt (≤200 chars) from the source email supporting the extracted item, rendered in the UI so the user can sanity-check the suggestion before approving it. `null` for non-email-derived alerts.
+
+Each extracted item has a `kind` of `deadline | event | info | payment_due | delivery | appointment | rsvp`. Items of any kind other than `info` populate `actionType: 'create_gcal_event'` and `actionPayload` once a date resolves, so they go through the same approve flow as other calendar-writing suggestions. `info` items (e.g. a fraud/low-balance alert, which never carries a full account number — last 4 digits only) always have `actionType: null` — the user can only resolve/dismiss them, no calendar action is offered. An optional `urgency: "high" | "normal"` extracted per item surfaces as an `[URGENT]` tag alongside the existing `[EMAIL]` tag in the alert's `reason` text.
+
+See `docs/ADMIN_GUIDE.md` for `FAMILY_INBOX_IMAP_*` env vars and IMAP App Password setup, and `docs/USER_GUIDE.md` for household-side Gmail label/filter setup.
+
+---
+
+### Occasion awareness — birthday/holiday lead-time nudges (#223)
+
+A new agent domain, `detectOccasions`, runs alongside coverage/coordination, proactive research, and deadline sweeping on every agent run. It produces `alert_type = 'suggestion'` rows in `family_agent_alerts` (same table, same approve/resolve endpoints documented above) from three fully deterministic sources — no LLM, no Tavily:
+
+1. **Household member birthdays** — `person_profile.date_of_birth_encrypted` (decrypted in-memory, never returned over the API in plaintext).
+2. **Calendar-derived birthdays/anniversaries** — event titles on the household's connected Google Calendars matched against `/\b(birthday|bday)\b/i` and `/\banniversary\b/i`.
+3. **Seasonal/cultural holidays** — read directly from any Google Calendar the household has subscribed to whose calendar ID ends `#holiday@group.v.calendar.google.com` (e.g. "Holidays in United States", "Holidays in India"). No hardcoded holiday list.
+
+Each occasion is tiered by days-until: gift-able occasions (member birthdays, holidays) fire a `[GIFT-IDEAS]` alert at 21 days out and a `[LAST-CALL]` alert at 5 days out — both can be open simultaneously. Calendar-derived birthdays/anniversaries fire a single `[SEND-WISHES]` alert at 3 days out. Reason strings are stable (no day-count) so the existing mechanical alert dedup naturally suppresses re-firing after the first day a tier opens; `detectOccasions` also pre-filters candidates against already-open alerts before returning, so a multi-week gift-tier window doesn't retrigger the digest email every day it stays open.
+
+#### `GET /api/family/occasion-settings`
+
+Returns the caller's household occasion-nudge toggle. Requires `owner | admin`.
+
+**Response `200`:**
+```json
+{ "ok": true, "settings": { "householdId": "uuid", "enabled": true } }
+```
+No row present defaults to `enabled: true`.
+
+#### `PATCH /api/family/occasion-settings`
+
+Enables or disables occasion nudges for the caller's household. Requires `owner | admin`.
+
+**Request body:**
+```json
+{ "enabled": false }
+```
+
+**Response `200`:** `{ "ok": true, "settings": { "householdId": "uuid", "enabled": false } }`
+**Response `400`:** `{ "errors": [...] }` — invalid body.
+
+When disabled, `detectOccasions` returns no alerts on subsequent runs. Existing open occasion alerts are left as-is — they're only cleared by the normal approve/resolve flow.
+
+> **Scope note:** this ships the detection + nudge slice only. The Phase 2 auto-enqueue gift-research bridge (opening a Tavily research task from a `[GIFT-IDEAS]` alert) is deferred, gated on issue #164.
+
+---
+
+### PA task endpoint — Quick Capture (#167)
+
+Backs the Family page's Quick Capture box. A classifier decides whether the note is answerable immediately (`one_shot`, existing lightweight tool loop) or needs web research first (`research_loop`, the bounded BabyAGI-style loop — see `docs/ADMIN_GUIDE.md` §10.6). Replaces the old `POST /api/family/agent/capture` (removed — that route had no classifier and only ever called the one-shot path).
+
+#### `POST /api/family/agent/task`
+
+Requires `owner | admin`.
+
+**Request body:**
+```json
+{ "note": "find swim camps with summer openings under $200", "mode": "research_loop" }
+```
+- `note` — 1-2000 chars, required.
+- `mode` — optional, `"one_shot" | "research_loop"`. Skips the classifier LLM call and forces the given path.
+- A note starting with `research:` (case-insensitive) also forces `research_loop` and skips the classifier — the prefix is stripped before the note is processed. `mode` and the prefix are independent; either alone is sufficient.
+
+**Response `200` (one-shot):**
+```json
+{
+  "type": "one_shot",
+  "result": {
+    "responseText": "Got it — I'll remind you Friday.",
+    "actions": [
+      { "type": "set_reminder", "title": "Call the vet", "summary": "Friday", "details": { "dueDate": "2026-07-17" } }
+    ]
+  }
+}
+```
+
+**Response `200` (research loop):**
+```json
+{
+  "type": "research_loop",
+  "runId": "uuid",
+  "result": {
+    "goal": "find swim camps with summer openings under $200",
+    "summary": "2-5 sentence synthesis, findings cited with observation dates.",
+    "actions": [],
+    "iterationsUsed": 4,
+    "hitIterationCap": false,
+    "promptTokens": 3500,
+    "completionTokens": 600,
+    "tavilyCalls": 3
+  }
+}
+```
+A `research_loop` result is also persisted as an `alert_type = 'suggestion'` row in `family_agent_alerts` (reason = `result.summary`), so it's visible again later in the Alerts panel.
+
+**Response `400`:** `{ "errors": [...] }` — invalid body (empty/oversized note, bad `mode`).
+
+**Response `409` (research loop only):** a normalized-equal goal is already `status = 'running'` for this household (#167 D5 concurrency dedup):
+```json
+{ "error": "PA_TASK_ALREADY_RUNNING", "message": "A similar research task is already running for this household — check back shortly.", "runId": "uuid" }
+```
+
+**Response `429` (research loop only):** monthly or daily run budget exhausted (see `PA_TASK_MAX_RUNS_PER_MONTH` / `PA_TASK_MAX_RUNS_PER_DAY` in `docs/ADMIN_GUIDE.md` §10.6):
+```json
+{ "error": "PA_BUDGET_EXCEEDED", "message": "This household has reached its PA task limit for today (20 runs). Resets at midnight (America/Chicago)." }
+```
+
+**Response `502`:** `{ "error": "CAPTURE_FAILED" | "PA_TASK_FAILED", "message": "..." }` — LLM/tool failure on either path.
+
+#### `GET /api/family/agent/task/:runId`
+
+Polls a `research_loop` run's status by id, scoped to the caller's household. Added as a fallback for a slow/timed-out synchronous `POST /agent/task` request. Requires `owner | admin`.
+
+**Response `200`:**
+```json
+{
+  "runId": "uuid",
+  "status": "running" | "succeeded" | "failed" | "refused_budget",
+  "summary": "string | null",
+  "iterationsUsed": 4,
+  "hitIterationCap": false,
+  "createdAt": "2026-07-13T00:00:00.000Z",
+  "finishedAt": "2026-07-13T00:00:20.000Z"
+}
+```
+`summary`/`iterationsUsed`/`hitIterationCap`/`finishedAt` are `null` while `status = 'running'`.
+
+**Response `404`:** `{ "error": "NOT_FOUND", "message": "No task run found with that id." }` — unknown id, or belongs to a different household.
+
+#### `GET /api/family/agent/task/history`
+
+Last 30 Quick Capture asks for the caller's household — both `one_shot` (synchronous, e.g. "draft an absence note") and `research_loop` (BabyAGI-style, e.g. "research swim camps under $200") — newest first. Feeds the merged "Run history" table in the Family Agent page alongside scheduled digest runs (`GET /family/digests`). Requires `owner | admin`. Registered before `GET /agent/task/:runId` — otherwise Express would match `history` as a literal `:runId`.
+
+**Response `200`:**
+```json
+{
+  "entries": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "goal": "draft an absence note for Emma's field trip",
+      "captureMode": "one_shot" | "research_loop" | null,
+      "origin": "user" | "scheduler",
+      "status": "running" | "succeeded" | "failed" | "refused_budget",
+      "iterationsUsed": 4,
+      "resultSummary": "string | null",
+      "createdAt": "2026-07-15T00:00:00.000Z",
+      "finishedAt": "2026-07-15T00:00:03.000Z"
+    }
+  ]
+}
+```
+`captureMode` is nullable in the type for schema-evolution safety, but every row is populated in practice — migration `0087` backfilled all pre-existing rows to `research_loop`. `iterationsUsed` is always `null` for `one_shot` rows (no loop iterations to count). `resultSummary` is `null` for a failed run. `origin` (#223) is `"scheduler"` for rows auto-enqueued by the GIFT-IDEAS occasion nudge bridge, `"user"` for every directly-triggered ask; the frontend labels `scheduler` rows "Gift research" in the Type column instead of "Research"/"One-shot".

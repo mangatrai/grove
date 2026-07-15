@@ -115,6 +115,39 @@ export type CaptureResult = {
   actions: CaptureAction[];
 };
 
+// ── PA task loop (#164) ───────────────────────────────────────────────────────
+
+/**
+ * Verbatim fact extracted by the compression step (#164 A1). A second, uncompressed
+ * accumulator alongside the compressed loop history so prices/contacts/URLs survive
+ * to final synthesis, which a 150-token summary would otherwise drop.
+ */
+export type PAFinding = {
+  fact: string;
+  entity: string | null;
+  sourceUrl: string | null;
+  /** ISO date the tool call that produced this fact ran. */
+  dateObserved: string;
+  kind: "price" | "contact" | "option" | "constraint" | "other";
+};
+
+export type PATaskResult = {
+  goal: string;
+  /** 2-5 sentence synthesis for the user. */
+  summary: string;
+  actions: CaptureAction[];
+  iterationsUsed: number;
+  hitIterationCap: boolean;
+  promptTokens: number;
+  completionTokens: number;
+  tavilyCalls: number;
+};
+
+/** #167: response of POST /family/agent/task — classifier picks which engine answered the note. */
+export type PATaskResponse =
+  | { type: "one_shot"; result: CaptureResult }
+  | { type: "research_loop"; result: PATaskResult; runId: string };
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UpdateAvailabilityInput = {
@@ -127,4 +160,55 @@ export type UpdateAvailabilityInput = {
   label?: string | null;
   notes?: string | null;
   isActive?: boolean;
+};
+
+// ── PA preferences / memory store (#165, topic_tag + search_memory #238) ──────────────────────
+
+export type PaPreferenceCategory = "preference" | "discovered_fact" | "decision_history";
+export type PaPreferenceSource = "manual" | "feedback" | "notes_extraction";
+export type PaPreferenceTopicTag =
+  | "travel"
+  | "school"
+  | "health"
+  | "finance"
+  | "gifts"
+  | "household"
+  | "food"
+  | "interests"
+  | "other";
+
+export type PaPreference = {
+  id: number;
+  householdId: string;
+  category: PaPreferenceCategory;
+  factText: string;
+  source: PaPreferenceSource;
+  topicTag: PaPreferenceTopicTag | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaPreferenceRow = {
+  id: number;
+  household_id: string;
+  category: PaPreferenceCategory;
+  fact_text: string;
+  source: PaPreferenceSource;
+  topic_tag: PaPreferenceTopicTag | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreatePaPreferenceInput = {
+  category: PaPreferenceCategory;
+  factText: string;
+  source?: PaPreferenceSource;
+  topicTag?: PaPreferenceTopicTag | null;
+};
+
+export type PaPreferenceCandidate = {
+  personName: string | null;
+  category: PaPreferenceCategory;
+  factText: string;
+  topicTag: PaPreferenceTopicTag | null;
 };

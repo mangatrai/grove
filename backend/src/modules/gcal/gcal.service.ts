@@ -59,7 +59,7 @@ function signStatePayload(dataB64url: string): string {
   return createHmac("sha256", env.JWT_SECRET).update(dataB64url).digest("base64url");
 }
 
-export function encodeGCalOAuthState(payload: { householdId: string; userId: string }): string {
+function encodeGCalOAuthState(payload: { householdId: string; userId: string }): string {
   const body: GCalOAuthStatePayload = { ...payload, exp: Date.now() + OAUTH_STATE_TTL_MS };
   const data = Buffer.from(JSON.stringify(body), "utf8").toString("base64url");
   const sig = signStatePayload(data);
@@ -160,7 +160,7 @@ export async function exchangeAndSaveCalendar(
   return { ok: true };
 }
 
-export async function connectGCal(
+async function connectGCal(
   householdId: string,
   userId: string,
   refreshToken: string,
@@ -419,6 +419,45 @@ export async function getCalendarSelection(
     return Array.isArray(parsed) ? (parsed as string[]) : null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-calendar role (FIX #212) — distinguishes school calendars from parent
+// commitment calendars so the family agent doesn't treat a school closure as
+// a parent being unavailable.
+// ---------------------------------------------------------------------------
+
+export type CalendarRole = "work" | "school" | "activities" | "other";
+
+/** Default guess when no explicit role is saved — name-based, never authoritative. */
+export function heuristicCalendarRole(summary: string): CalendarRole {
+  const s = summary.toLowerCase();
+  if (s.includes("school") || s.includes("class") || /\bisd\b/.test(s)) return "school";
+  if (s.includes("activit") || s.includes("sport") || s.includes("camp")) return "activities";
+  return "work";
+}
+
+export async function saveCalendarRoles(userId: string, roles: Record<string, CalendarRole>): Promise<void> {
+  await qExec(
+    `UPDATE oauth_integrations SET calendar_roles = ? WHERE provider = 'google_calendar' AND user_id = ?`,
+    JSON.stringify(roles),
+    userId
+  );
+}
+
+export async function getCalendarRoles(userId: string): Promise<Record<string, CalendarRole>> {
+  const row = await qGet<{ calendar_roles: string | null }>(
+    `SELECT calendar_roles FROM oauth_integrations WHERE provider = 'google_calendar' AND user_id = ?`,
+    userId
+  );
+  if (!row?.calendar_roles) return {};
+  try {
+    const parsed = JSON.parse(row.calendar_roles) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, CalendarRole>;
+    return {};
+  } catch {
+    return {};
   }
 }
 

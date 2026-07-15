@@ -7,7 +7,7 @@ type AccountRow = {
 };
 
 /** Extract last 4 digits from mask (digits only). Requires at least 4 digit chars total. */
-export function lastFourFromMask(mask: string | null | undefined): string | null {
+function lastFourFromMask(mask: string | null | undefined): string | null {
   if (!mask?.trim()) {
     return null;
   }

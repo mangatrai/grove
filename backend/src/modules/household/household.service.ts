@@ -139,7 +139,7 @@ async function accountBelongsToHousehold(accountId: string, householdId: string)
   return Boolean(row);
 }
 
-export async function updateHouseholdMonthlySavingsTarget(
+async function updateHouseholdMonthlySavingsTarget(
   householdId: string,
   monthlySavingsTargetUsd: number | null
 ): Promise<{ ok: true } | { ok: false; code: "INVALID_AMOUNT" }> {

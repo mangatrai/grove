@@ -39,6 +39,8 @@ import { friendlyParserLabel, DISABLED_PROFILES } from "../import/profileLabels"
 import { formatUsd } from "../utils/format";
 
 const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
+/** Payslip profiles that use async LLM extraction (queued, not inline) — must mirror backend LLM_PAYSLIP_PROFILE_IDS (payslip.types.ts). */
+const LLM_PAYSLIP_PROFILE_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf"]);
 const OFX_PARSER_ID = "ofx_transactions";
 
 type OfxSuggestion = {
@@ -160,8 +162,8 @@ function friendlyImportSkipReason(reason: string): string {
   if (reason === "payslip_pdf_extract_unreadable") {
     return "payslip_pdf_extract_unreadable (PDF has no usable text for parsing — re-export from payroll or use a text-based PDF)";
   }
-  if (reason === "payslip_openai_api_not_configured") {
-    return "payslip_openai_api_not_configured (set OPENAI_API_KEY for Deloitte payslip extraction)";
+  if (reason === "payslip_llm_api_not_configured") {
+    return "payslip_llm_api_not_configured (set OPENAI_API_KEY or ANTHROPIC_API_KEY to match LLM_PROVIDER)";
   }
   return reason;
 }
@@ -640,7 +642,7 @@ export function ImportWorkspacePage() {
 
   useEffect(() => {
     const pending = files.some(
-      (f) => f.parser_profile_id === "deloitte_payslip_pdf" && f.status === "processing"
+      (f) => !!f.parser_profile_id && LLM_PAYSLIP_PROFILE_IDS.has(f.parser_profile_id) && f.status === "processing"
     );
     if (!sessionId || !pending) {
       return;
@@ -1108,7 +1110,7 @@ export function ImportWorkspacePage() {
       const up = out.asyncPayslipPending ?? 0;
       if (up > 0) {
         setMessage(
-          `Queued ${up} payslip PDF(s) for extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes.`
+          `Queued ${up} payslip PDF(s) for extraction. Session stays in processing until extraction finishes — automatic check every 2 minutes.`
         );
       } else {
         setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
@@ -1950,7 +1952,7 @@ export function ImportWorkspacePage() {
       <Paper withBorder p="lg" id="import-run-import">
         <Group align="center" gap={6} mb="sm">
           <Title order={3} fz="1.1rem">Run import</Title>
-          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). Payslip PDFs (IBM and Deloitte) are extracted via OpenAI in the background — wait until they show 'parsed', then run import again." />
+          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). Payslip PDFs (IBM and Deloitte) are extracted via AI in the background — wait until they show 'parsed', then run import again." />
         </Group>
         <Group gap="sm">
           <Button

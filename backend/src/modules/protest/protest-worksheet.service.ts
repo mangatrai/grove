@@ -554,7 +554,7 @@ export async function deleteComp(
 }
 
 /** Insert comps from a parsed CAD evidence PDF into protest_comp. */
-export async function saveCadEvidenceComps(
+async function saveCadEvidenceComps(
   propertyId: string,
   householdId: string,
   taxYear: number,
@@ -972,7 +972,7 @@ export async function runDcadBackfill(
  * Sync DCAD appeal status into protest_worksheet.appeal_json and hearing_date.
  * Safe to call fire-and-forget.
  */
-export async function syncAppealStatus(
+async function syncAppealStatus(
   propertyId: string,
   householdId: string,
   taxYear: number,

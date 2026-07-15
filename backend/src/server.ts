@@ -13,6 +13,7 @@ import { startRealtyScheduler } from "./modules/household/realty-scheduler.servi
 import { startImportCleanupScheduler } from "./modules/imports/import-session.service.js";
 import { startPayslipAsyncScheduler } from "./modules/imports/payslip-async-scheduler.service.js";
 import { startFamilyAgentScheduler } from "./modules/family/family-agent.scheduler.js";
+import { reconcileOrphanedPaTaskRuns } from "./modules/family/pa-task-runner.js";
 import { purgeOldNotifications } from "./modules/notifications/notification.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
@@ -45,6 +46,7 @@ void (async () => {
   try {
     await getSql();
     await checkExportCoverage();
+    await reconcileOrphanedPaTaskRuns();
     startStockQuoteScheduler();
     if (env.MODE !== "TEST") {
       startBackupScheduler();

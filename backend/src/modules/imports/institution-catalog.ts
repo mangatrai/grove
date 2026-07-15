@@ -3,7 +3,7 @@
  * Parsers are inferred from institution + account type + file extension — see `infer-parser-profile.ts`.
  * Keep labels aligned with `normalizeInstitutionKey` so imports map to the right parser.
  */
-export const US_INSTITUTION_LABELS: readonly string[] = [
+const US_INSTITUTION_LABELS: readonly string[] = [
   "Cash & Wallet",
   "Ally Bank",
   "American Express",
