@@ -14,6 +14,37 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #249: Anthropic financial-health insight generation returns non-JSON, fails in prod (2026-07-16)
+
+**What changed:** Production log showed `insight generation failed { jobId, err: 'LLM returned
+non-JSON' }` on the Financial Health dashboard card. `generateInsight()`
+(`backend/src/modules/insights/llm-provider.service.ts`) called the shared LLM adapter with only
+`{ model, maxTokens }` — no `responseFormat`/`jsonSchema`. Anthropic has no `json_object`-equivalent
+mode; without a schema it falls back to a "Return ONLY valid JSON" prompt instruction only, which
+Claude does not always follow (occasionally wraps the JSON in prose). Compounding this,
+`parseInsightPayload()`'s prose/markdown-extraction fallback only ran *after* a
+successful-but-wrong-shape Zod parse, never after an initial `JSON.parse()` throw — so it never
+actually caught the prose-wrapped responses it was written for. Added `INSIGHT_JSON_SCHEMA` (JSON
+Schema mirror of `insightPayloadSchema`, with per-field descriptions so Anthropic's forced
+tool-use doesn't conflate the four string-array fields) and now pass `responseFormat: "json"` +
+`jsonSchema` + `jsonSchemaName` into `generateInsight()`'s adapter call — this activates the
+forced-tool-use enforcement mechanism already used by payslip extraction and the Family Planner
+agent loop (see #228). Also fixed the fallback ordering so it actually runs on parse failure.
+
+**Why:** This call site was never updated when the LLM provider moved from OpenAI to Anthropic —
+OpenAI's `json_object` mode happened to produce parseable JSON reliably enough that the gap went
+unnoticed until Anthropic became the default provider in production.
+
+**Verification:** `npm run test -w backend` (820/820, incl. 5 new tests in
+`backend/tests/insights-llm-provider.test.ts` covering schema pass-through, clean parse,
+prose-wrapped recovery, non-JSON rejection, shape-mismatch rejection). `npx tsc --noEmit` clean.
+
+**Files:** `backend/src/modules/insights/llm-provider.service.ts`, `backend/tests/insights-llm-provider.test.ts`.
+
+**GitHub:** closes [#249](https://github.com/mangatrai/grove/issues/249).
+
+---
+
 ## FIX — #247: hardcoded dark-theme colors on Family Planner page break light theme (2026-07-15)
 
 **What changed:** Manual QA reported the `runResult` banner and the Run History expanded-row

@@ -19,23 +19,61 @@ const insightPayloadSchema = z.object({
   nextSteps: z.array(z.string())
 });
 
+/**
+ * JSON Schema mirror of insightPayloadSchema for CompletionOptions.jsonSchema — Anthropic uses
+ * it as a forced tool-use input_schema, OpenAI as json_schema strict mode. Per-field
+ * descriptions matter for Anthropic tool-use: without them the model conflates the four
+ * string-array fields (whatsWorking/concerns/spendingAnalysis/investmentGaps/nextSteps).
+ */
+const INSIGHT_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    healthRating: {
+      type: "string",
+      enum: ["strong", "on_track", "needs_attention", "at_risk"],
+      description: "Overall financial health rating.",
+    },
+    healthRationale: { type: "string", description: "1-2 sentence explanation for the rating." },
+    localBenchmark: { type: "string", description: "Comparison against local (city/state) peers." },
+    nationalBenchmark: { type: "string", description: "Comparison against national peers." },
+    whatsWorking: { type: "array", items: { type: "string" }, description: "Positive habits/trends to reinforce." },
+    concerns: { type: "array", items: { type: "string" }, description: "Risks or problem areas needing attention." },
+    spendingAnalysis: { type: "array", items: { type: "string" }, description: "Observations about spending by category." },
+    investmentGaps: { type: "array", items: { type: "string" }, description: "Missed or under-funded investment opportunities." },
+    nextSteps: { type: "array", items: { type: "string" }, description: "Concrete recommended actions." },
+  },
+  required: [
+    "healthRating",
+    "healthRationale",
+    "localBenchmark",
+    "nationalBenchmark",
+    "whatsWorking",
+    "concerns",
+    "spendingAnalysis",
+    "investmentGaps",
+    "nextSteps",
+  ],
+  additionalProperties: false,
+};
+
 function parseInsightPayload(raw: string): InsightPayload {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    throw new Error("LLM returned non-JSON");
+    // Fall back to extracting a JSON object from surrounding prose/markdown fences. Previously
+    // this only ran after a successful-but-wrong-shape parse, so it never fired for genuinely
+    // non-JSON responses — the exact failure mode this fix addresses.
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("LLM returned non-JSON");
+    try {
+      parsed = JSON.parse(match[0]) as unknown;
+    } catch {
+      throw new Error("LLM returned non-JSON");
+    }
   }
   const out = insightPayloadSchema.safeParse(parsed);
-  if (!out.success) {
-    // Attempt to extract JSON object from response (Anthropic sometimes wraps in prose)
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      const out2 = insightPayloadSchema.safeParse(JSON.parse(match[0]));
-      if (out2.success) return out2.data;
-    }
-    throw new Error(`LLM JSON shape invalid: ${out.error.message}`);
-  }
+  if (!out.success) throw new Error(`LLM JSON shape invalid: ${out.error.message}`);
   return out.data;
 }
 
@@ -88,7 +126,13 @@ export async function generateInsight(promptInput: object): Promise<InsightPaylo
       { role: "system", content: buildSystemPrompt() },
       { role: "user", content: buildUserPrompt(promptInput) },
     ],
-    { model: chatModel(), maxTokens: 2000 }
+    {
+      model: chatModel(),
+      maxTokens: 2000,
+      responseFormat: "json",
+      jsonSchema: INSIGHT_JSON_SCHEMA,
+      jsonSchemaName: "financial_health_insight",
+    }
   );
   if (!content) throw new Error("LLM returned empty content");
   return parseInsightPayload(content);
