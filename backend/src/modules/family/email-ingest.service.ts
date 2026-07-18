@@ -218,7 +218,27 @@ async function isDuplicateOfExistingEvent(householdId: string, title: string, da
   });
 }
 
+// GH #250: routine transactional noise (delivery tracking, low-value "info" confirmations)
+// was unconditionally becoming an alert — 34+ alerts accumulated in prod, nearly all Amazon
+// shipping/refund notices. These kinds are still captured in email_ingest_log.items_json for
+// audit; they just never become a family_agent_alerts row.
+function isNoiseItem(item: EmailItem): boolean {
+  if (item.kind === "delivery") return true;
+  if (item.kind === "info" && item.urgency !== "high") return true;
+  return false;
+}
+
+// GH #250: digest composition needs to know which alerts are worth showing in full (payment
+// due, deadlines, anything the extraction flagged high-urgency) vs. a count-only nudge.
+function digestPriorityFor(item: EmailItem): "urgent" | "normal" {
+  if (item.kind === "payment_due" || item.kind === "deadline" || item.urgency === "high") return "urgent";
+  return "normal";
+}
+
 async function writeSuggestionAlert(householdId: string, item: EmailItem): Promise<void> {
+  if (isNoiseItem(item)) {
+    return;
+  }
   if (await isDuplicateOfExistingEvent(householdId, item.title, item.date)) {
     return;
   }
@@ -234,15 +254,16 @@ async function writeSuggestionAlert(householdId: string, item: EmailItem): Promi
 
   await qExec(
     `INSERT INTO family_agent_alerts
-       (household_id, alert_type, reason, affected_date, copy_paste_text, recipient_hint, source_quote, action_type, action_payload)
-     VALUES (?, 'suggestion', ?, ?, ?, 'Self', ?, ?, ?)`,
+       (household_id, alert_type, reason, affected_date, copy_paste_text, recipient_hint, source_quote, action_type, action_payload, digest_priority)
+     VALUES (?, 'suggestion', ?, ?, ?, 'Self', ?, ?, ?, ?)`,
     householdId,
     reason,
     item.date,
     item.actionRequired,
     item.sourceQuote,
     hasCalendarAction ? "create_gcal_event" : null,
-    actionPayload
+    actionPayload,
+    digestPriorityFor(item)
   );
 }
 

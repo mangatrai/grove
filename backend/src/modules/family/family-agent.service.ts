@@ -1580,7 +1580,8 @@ export async function synthesizeDigest(
   runType: AgentRunType,
   parents: ConnectedParent[],
   financeContext: string,
-  householdName: string
+  householdName: string,
+  hasPendingEmailAlerts = false
 ): Promise<AgentAnalysis> {
   // Research items stored as suggestion alerts so they appear in the UI, not just in email
   const researchSuggestions: AlertItem[] = domain.research.items.map(item => ({
@@ -1600,7 +1601,9 @@ export async function synthesizeDigest(
   ];
   const hasOutput = allAlerts.length > 0 || domain.research.hasOutput;
 
-  if (!hasOutput && runType === "daily_delta") {
+  // GH #250: don't short-circuit when there's a pending email-derived backlog — the caller
+  // still needs a non-null parentADigest/parentBDigest to attach the "From Your Inbox" section to.
+  if (!hasOutput && !hasPendingEmailAlerts && runType === "daily_delta") {
     return { conflicts: [], parentADigest: null, parentBDigest: null, summaryText: "Nothing new to surface today.", hasOutput: false };
   }
 
@@ -1765,6 +1768,12 @@ export async function runFamilyAgent(
     // full week regardless of what's in openAlerts.
     const openAlerts = await listAlerts(householdId, false);
 
+    // GH #250: email-ingest runs on its own cron and writes alerts with source_digest_id = NULL
+    // (domain-sourced alerts below always get their digestId set at creation, so any unresolved
+    // alert still NULL here is, by construction, an unclaimed email-derived one). These never had
+    // a path into any digest before this fix — pick them up so they actually reach the user.
+    const pendingEmailAlerts = openAlerts.filter(a => a.sourceDigestId === null);
+
     const [members, caregiverSlots, financeContext, location, calibrationBlock, householdName] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
@@ -1795,11 +1804,13 @@ export async function runFamilyAgent(
       runType,
       parents,
       financeContext,
-      householdName
+      householdName,
+      pendingEmailAlerts.length > 0
     );
 
-    // Daily delta: skip if no domain produced actionable output
-    if (runType === "daily_delta" && !analysis.hasOutput) {
+    // Daily delta: skip if no domain produced actionable output AND there's no email-derived
+    // backlog waiting — otherwise a quiet domain day would silently swallow pending email alerts.
+    if (runType === "daily_delta" && !analysis.hasOutput && pendingEmailAlerts.length === 0) {
       await writeDigestLog(householdId, runType, "skipped", {
         skipReason: "No actionable output from any domain",
         summaryText: analysis.summaryText,
@@ -1819,6 +1830,28 @@ export async function runFamilyAgent(
     let alertsInserted = 0;
     if (analysis.conflicts.length > 0) {
       alertsInserted = await writeAlerts(householdId, digestId, analysis.conflicts, ctx.openAlerts);
+    }
+
+    // GH #250: fold pending email-derived alerts into this digest. Built deterministically in
+    // code (not LLM-authored) so amounts/dates from the source email are never paraphrased —
+    // same reasoning as composing the subject line in code (FIX #231).
+    if (pendingEmailAlerts.length > 0) {
+      const urgent = pendingEmailAlerts.filter(a => a.digestPriority === "urgent");
+      const normal = pendingEmailAlerts.filter(a => a.digestPriority !== "urgent");
+      const items: string[] = urgent.map(a => a.affectedDate ? `${a.reason} (${a.affectedDate})` : a.reason);
+      if (normal.length > 0) {
+        items.push(`${normal.length} other item${normal.length === 1 ? "" : "s"} from your inbox — review in the app.`);
+      }
+      const inboxSection = { heading: "From Your Inbox", items };
+      if (analysis.parentADigest) analysis.parentADigest.sections.push(inboxSection);
+      if (analysis.parentBDigest) analysis.parentBDigest.sections.push(inboxSection);
+
+      // Claim these alerts so they never get re-surfaced in a later digest.
+      await qExec(
+        `UPDATE family_agent_alerts SET source_digest_id = ? WHERE id = ANY(?)`,
+        digestId,
+        pendingEmailAlerts.map(a => a.id)
+      );
     }
 
     // Send digest emails
@@ -1899,6 +1932,8 @@ export type AgentAlert = {
   actionPayload: { title: string; date: string; description: string } | null;
   /** FIX #215: verbatim ≤200-char excerpt the extraction cited, for email-derived suggestions. */
   sourceQuote: string | null;
+  /** GH #250: 'urgent' (payment_due/deadline/high-urgency) shown in full in digest; 'normal' is count-only. */
+  digestPriority: "urgent" | "normal";
 };
 
 type AlertRow = {
@@ -1918,6 +1953,7 @@ type AlertRow = {
   action_type: string | null;
   action_payload: unknown;
   source_quote: string | null;
+  digest_priority: string;
 };
 
 function rowToAlert(r: AlertRow): AgentAlert {
@@ -1938,6 +1974,7 @@ function rowToAlert(r: AlertRow): AgentAlert {
     actionType: r.action_type,
     actionPayload: r.action_payload as AgentAlert["actionPayload"],
     sourceQuote: r.source_quote,
+    digestPriority: r.digest_priority === "urgent" ? "urgent" : "normal",
   };
 }
 

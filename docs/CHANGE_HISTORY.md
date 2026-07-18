@@ -14,6 +14,54 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #250: email-alert pipeline was pure noise and structurally invisible to the digest (2026-07-18)
+
+**What changed:** Three compounding bugs in the PA email-ingest → digest pipeline, found while
+investigating why nothing from the household's forwarded-email inbox ever showed up in the daily
+digest despite 34+ active alerts in the app: (1) `writeSuggestionAlert()`
+(`email-ingest.service.ts`) turned **every** LLM-extracted item into a `family_agent_alerts` row
+unconditionally, including routine transactional noise (delivery tracking, low-value "info"
+confirmations) — nearly all 34 alerts were Amazon shipping/refund notices. (2)
+`synthesizeDigest()` (`family-agent.service.ts`) never queried `family_agent_alerts` at all —
+email-ingest alerts are written on their own daily cron with `source_digest_id = NULL`, and
+nothing ever read those rows back out, so email-derived alerts (including the genuinely important
+ones) could never appear in a digest, regardless of priority. (3) Worse: `runFamilyAgent()`'s
+`daily_delta` skip guard (`!analysis.hasOutput`) — and `synthesizeDigest()`'s own internal
+early-return — fired even when there was a backlog of unclaimed email alerts, so on a quiet
+domain day the digest was skipped entirely and the backlog just sat there.
+
+Fixes: added `isNoiseItem()` (drops `kind: "delivery"`, and `kind: "info"` unless
+`urgency: "high"` — still logged to `email_ingest_log` for audit, just never becomes an alert)
+and `digestPriorityFor()` (new `digest_priority` column, migration 0088; `"urgent"` for
+`payment_due`/`deadline`/`urgency: "high"`, else `"normal"`) in `email-ingest.service.ts`.
+`runFamilyAgent()` now derives `pendingEmailAlerts` from unclaimed (`source_digest_id IS NULL`)
+open alerts, passes `pendingEmailAlerts.length > 0` into `synthesizeDigest()` (new
+`hasPendingEmailAlerts` param, which the skip guard now also checks) so quiet domain days still
+send when there's an inbox backlog, appends a deterministic (not LLM-authored, for date/financial
+accuracy) "From Your Inbox" section — full text for urgent items, count-only nudge for the rest —
+to both parents' digests, and claims the alerts (`source_digest_id = ?`) so they don't resurface.
+Also moved the email-poll cron from `"12 6 * * *"` to `"0 5 * * *"` (still once/day,
+`{ timezone: env.TZ }`) to put more daylight ahead of the digest crons.
+
+**Why:** The email-ingest pipeline is a separate cron from the domain-analysis pipeline
+(Domains 1-2 do childcare coverage/coordination, not email) — a fact that was itself a source of
+confusion until traced through. Without noise filtering, alert-worthy items were buried under
+routine notices; without digest wiring, even the important ones were invisible outside the app.
+
+**Verification:** `npm run test -w backend` (825/825, incl. new noise-filter/digest_priority
+tests in `backend/tests/email-ingest.test.ts` and a `synthesizeDigest`/skip-guard test in
+`backend/tests/family-agent.test.ts`). `npx tsc --noEmit` clean on both workspaces.
+
+**Files:** `backend/db/migrations/0088_family_agent_alert_digest_priority.sql`,
+`backend/src/modules/family/email-ingest.service.ts`,
+`backend/src/modules/family/family-agent.service.ts`,
+`backend/src/modules/family/family-agent.scheduler.ts`,
+`backend/tests/email-ingest.test.ts`, `backend/tests/family-agent.test.ts`.
+
+**GitHub:** closes [#250](https://github.com/mangatrai/grove/issues/250).
+
+---
+
 ## FIX — #249: Anthropic financial-health insight generation returns non-JSON, fails in prod (2026-07-16)
 
 **What changed:** Production log showed `insight generation failed { jobId, err: 'LLM returned

@@ -4257,13 +4257,17 @@ Marks an alert resolved. Requires `owner | admin`.
 
 ---
 
-### Household inbox email ingestion (FIX #215, broadened CR-224)
+### Household inbox email ingestion (FIX #215, broadened CR-224, noise filter GH #250)
 
 No new endpoints. A daily background poll (not an HTTP route) reads the dedicated household Gmail account over IMAP, identifies each email's genre (school/activity, order/delivery, financial notice, appointment/medical, invitation/social, utility/service/government, or promotional/newsletter) and extracts actionable items via a tool-less LLM call, then writes `alert_type = 'suggestion'` rows into `family_agent_alerts` — reusing the existing `POST /api/family/alerts/:alertId/approve` and `PATCH /api/family/alerts/:id/resolve` endpoints documented above for the approve/dismiss review flow. No suggestion is ever auto-written to `family_events` or Google Calendar without explicit approval.
 
 > **Note:** `GET /api/family/alerts` responses also include `sourceQuote` (`string | null`) — for email-derived suggestions, a verbatim excerpt (≤200 chars) from the source email supporting the extracted item, rendered in the UI so the user can sanity-check the suggestion before approving it. `null` for non-email-derived alerts.
 
 Each extracted item has a `kind` of `deadline | event | info | payment_due | delivery | appointment | rsvp`. Items of any kind other than `info` populate `actionType: 'create_gcal_event'` and `actionPayload` once a date resolves, so they go through the same approve flow as other calendar-writing suggestions. `info` items (e.g. a fraud/low-balance alert, which never carries a full account number — last 4 digits only) always have `actionType: null` — the user can only resolve/dismiss them, no calendar action is offered. An optional `urgency: "high" | "normal"` extracted per item surfaces as an `[URGENT]` tag alongside the existing `[EMAIL]` tag in the alert's `reason` text.
+
+**Noise filter (GH #250):** routine transactional items never become an alert — `kind: "delivery"` (shipping/delivery tracking) and `kind: "info"` items that aren't flagged `urgency: "high"` are dropped after extraction. The source email is still logged to `email_ingest_log` (audit trail preserved), it just never surfaces as a `family_agent_alerts` row. This exists because unfiltered, routine notices (e.g. "your package has shipped") vastly outnumbered alert-worthy items in practice.
+
+**Digest priority (GH #250):** every alert (email-derived or not) has a `digestPriority: "urgent" | "normal"` field. `payment_due`, `deadline`, and any item flagged `urgency: "high"` are `"urgent"`; everything else is `"normal"`. Unclaimed alerts (`sourceDigestId === null`) are picked up by the next digest run (daily delta, weekly preview, or Sunday digest) and appended as a "From Your Inbox" section: urgent items appear with full text inline, normal-priority items are summarized as a single count line (e.g. "3 other items from your inbox — review in the app."). Once picked up, an alert's `sourceDigestId` is set so it isn't repeated in a later digest. A daily-delta run that would otherwise be skipped for having no domain output (coverage/deadlines/research all quiet) still sends if there's an unclaimed email-alert backlog.
 
 See `docs/ADMIN_GUIDE.md` for `FAMILY_INBOX_IMAP_*` env vars and IMAP App Password setup, and `docs/USER_GUIDE.md` for household-side Gmail label/filter setup.
 

@@ -1152,9 +1152,13 @@ The 6am run ensures work events are in Google Calendar before the agent's mornin
 - The Shortcut clears all future events in `Work — Mirrored` and recreates them on every run. This is intentional — clean dedup without needing API-level upsert logic.
 - The agent reads `Work — Mirrored` as a regular Google Calendar — no special handling needed.
 
-### 10.4 Household Inbox Email Ingestion (FIX #215, broadened CR-224)
+### 10.4 Household Inbox Email Ingestion (FIX #215, broadened CR-224, noise filter + digest wiring GH #250)
 
-The agent polls a **dedicated household Gmail account** daily (6:12am, `env.TZ`) over IMAP and turns actionable emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`, or `[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+The agent polls a **dedicated household Gmail account** daily (5:00am, `env.TZ` — moved from 6:12am in GH #250 to put more daylight ahead of the digest crons) over IMAP and turns actionable emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`, or `[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+
+**Noise filter (GH #250):** not every extracted item becomes an alert. `kind: "delivery"` (routine shipping/delivery tracking) and `kind: "info"` items that aren't flagged `urgency: "high"` are dropped after extraction — in practice these were the vast majority of extracted items (Amazon shipping/refund notices, e-statement-ready confirmations) and buried the genuinely important ones. The source email is still logged to `email_ingest_log` for audit; it just never becomes a `family_agent_alerts` row.
+
+**Digest wiring (GH #250):** every alert carries a `digest_priority` (`urgent` for `payment_due`/`deadline`/`urgency: "high"`, else `normal`). Alerts email-ingest writes are unclaimed (`source_digest_id IS NULL`) until the next digest run (daily delta, weekly preview, or Sunday digest) picks them up, appends a "From Your Inbox" section — urgent items shown in full, normal-priority items summarized as a single count line — to both parents' digest emails, and marks them claimed so they aren't repeated. Previously this pipeline was structurally invisible to the digest: `synthesizeDigest()` never queried `family_agent_alerts` at all, so email-derived alerts (however important) only ever showed up if the user opened the app. A daily-delta run that would otherwise skip for having no domain output (coverage/deadlines/research all quiet) still sends when there's an unclaimed inbox backlog.
 
 **What kinds of emails are understood** — the model first identifies the email's genre, then extracts per that genre's rules:
 - **school/activity** — permission slips, fundraisers, activity reminders, field trips.

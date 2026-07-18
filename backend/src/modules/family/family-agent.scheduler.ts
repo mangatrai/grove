@@ -34,10 +34,11 @@ export function startFamilyAgentScheduler(): void {
     void sendDeadlineReminders();
   }, { timezone: env.TZ });
 
-  // FIX #215: daily ~6:12am — poll the household inbox before the 6:32am delta run, so any
-  // email-derived deadline/event suggestions are already visible when that digest is composed.
+  // FIX #215/#250: daily 5:00am — poll the household inbox well ahead of every digest run
+  // (6:32am delta, 7:03am Monday, 7pm Sunday), so email-derived deadline/event suggestions are
+  // already in family_agent_alerts when digest composition runs.
   // No-op (logs debug, returns) when FAMILY_INBOX_IMAP_* is not configured.
-  cron.schedule("12 6 * * *", () => {
+  cron.schedule("0 5 * * *", () => {
     log.info("email-ingest: daily inbox poll triggered");
     void pollHouseholdInboxForAllHouseholds();
   }, { timezone: env.TZ });
@@ -48,7 +49,7 @@ export function startFamilyAgentScheduler(): void {
       "Sunday 7:00pm preview",
       "Monday 7:03am digest",
       "Tue-Sat 6:32am delta",
-      "Daily 6:12am inbox poll",
+      "Daily 5:00am inbox poll",
       "Daily 8:07am deadline reminders"
     ],
   });

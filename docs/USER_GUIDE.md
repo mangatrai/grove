@@ -835,13 +835,14 @@ The **Family** page's Alerts panel lists conflicts, coverage gaps, deadlines, an
 
 This feedback only changes which *categories* of alert the agent produces (e.g. it may stop suggesting restaurants if you've dismissed several as not relevant) — it never turns into spending or lifestyle advice.
 
-### Email suggestions (school, orders, bills, appointments, invitations, and more)
+### Email suggestions (school, bills, appointments, invitations, and more)
 
-If the household admin has configured a dedicated household Gmail account for inbox ingestion (see `ADMIN_GUIDE.md` §"Household inbox email ingestion"), the agent polls that inbox once a day and turns actionable emails — permission slips, package deliveries, bill due dates, appointment confirmations, party invitations/RSVPs, subscription renewals — into suggestion alerts, tagged `[EMAIL]` in the alert text (`[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Each one shows the verbatim line from the email it was extracted from ("From the email") so you can sanity-check it before acting.
+If the household admin has configured a dedicated household Gmail account for inbox ingestion (see `ADMIN_GUIDE.md` §"Household inbox email ingestion"), the agent polls that inbox once a day and turns actionable emails — permission slips, bill due dates, appointment confirmations, party invitations/RSVPs, subscription renewals — into suggestion alerts, tagged `[EMAIL]` in the alert text (`[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Each one shows the verbatim line from the email it was extracted from ("From the email") so you can sanity-check it before acting. Routine transactional notices (package delivery/shipping updates, low-value account confirmations) are filtered out and never become an alert (GH #250) — they'd otherwise vastly outnumber the items actually worth your attention.
 
 - Alerts with a date resolve to an **Add to Calendar** button, same as other agent suggestions — nothing is added to your calendar until you click it. Low-balance/fraud notices are surfaced info-only, with no calendar action, and never include a full account number.
 - Use the same Resolve dropdown (Useful / Not relevant / Already knew / Dismiss) to give feedback — email-derived alerts feed into the same calibration described above.
 - The agent never acts on anything an email asks it to do — it only extracts facts (dates, titles, who's involved) for you to review.
+- Payment-due, deadline, and urgent items also show up inline in your next digest email under "From Your Inbox" — you don't have to open the app to catch them (GH #250). Lower-priority items are summarized as a count so the digest stays scannable.
 
 ### Occasion nudges (birthdays & holidays)
 

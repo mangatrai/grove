@@ -278,9 +278,9 @@ describe("FIX #215 — household inbox email ingestion", () => {
     expect(logRow?.status).toBe("processed");
   });
 
-  // CR-224: extraction contract broadened beyond school/activity to order/delivery, financial
-  // notice, appointment/medical, invitation/social, and utility/service/government genres.
-  it("extracts an order/delivery item as calendar-actionable", async () => {
+  // GH #250: routine delivery tracking is noise — never becomes an alert, even though the
+  // message itself is still logged (so it's not re-fetched/re-extracted next poll).
+  it("does not create an alert for an order/delivery item (noise filter)", async () => {
     primeOneMessage({
       messageId: "<msg-delivery@shop.example>",
       from: { text: "orders@acmeshop.example" },
@@ -303,15 +303,46 @@ describe("FIX #215 — household inbox email ingestion", () => {
 
     await pollHouseholdInboxForAllHouseholds();
 
-    const alert = await qGet<{ action_type: string | null; reason: string }>(
-      `SELECT action_type, reason FROM family_agent_alerts WHERE household_id = ?`,
-      HOUSEHOLD_ID
+    const alerts = await qAll(`SELECT id FROM family_agent_alerts WHERE household_id = ?`, HOUSEHOLD_ID);
+    expect(alerts.length).toBe(0);
+
+    const logRow = await qGet<{ status: string }>(
+      `SELECT status FROM email_ingest_log WHERE household_id = ? AND message_id = ?`,
+      HOUSEHOLD_ID, "<msg-delivery@shop.example>"
     );
-    expect(alert?.reason).toContain("[EMAIL]");
-    expect(alert?.action_type).toBe("create_gcal_event");
+    expect(logRow?.status).toBe("processed");
   });
 
-  it("extracts a financial-notice payment_due item as calendar-actionable", async () => {
+  // GH #250: low-value "info" confirmations (statement-ready notices, generic FYI) are noise
+  // unless the extraction itself flagged them urgency: "high".
+  it("does not create an alert for an 'info' item without high urgency (noise filter)", async () => {
+    primeOneMessage({
+      messageId: "<msg-info-lowvalue@examplebank.example>",
+      from: { text: "statements@examplebank.example" },
+      subject: "Your e-statement is ready",
+      text: "Your Example Bank e-statement for July is now available online."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "info",
+          title: "E-statement ready",
+          date: null,
+          time: null,
+          who: null,
+          actionRequired: "View the statement online if desired.",
+          sourceQuote: "Your Example Bank e-statement for July is now available online."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alerts = await qAll(`SELECT id FROM family_agent_alerts WHERE household_id = ?`, HOUSEHOLD_ID);
+    expect(alerts.length).toBe(0);
+  });
+
+  it("extracts a financial-notice payment_due item as calendar-actionable with urgent digest_priority", async () => {
     primeOneMessage({
       messageId: "<msg-payment@examplebank.example>",
       from: { text: "statements@examplebank.example" },
@@ -334,14 +365,44 @@ describe("FIX #215 — household inbox email ingestion", () => {
 
     await pollHouseholdInboxForAllHouseholds();
 
-    const alert = await qGet<{ action_type: string | null }>(
-      `SELECT action_type FROM family_agent_alerts WHERE household_id = ?`,
+    const alert = await qGet<{ action_type: string | null; digest_priority: string }>(
+      `SELECT action_type, digest_priority FROM family_agent_alerts WHERE household_id = ?`,
       HOUSEHOLD_ID
     );
     expect(alert?.action_type).toBe("create_gcal_event");
+    expect(alert?.digest_priority).toBe("urgent");
   });
 
-  it("keeps a financial-notice fraud alert as info with no calendar action even when dated, and tags urgency", async () => {
+  it("gives a deadline item urgent digest_priority", async () => {
+    primeOneMessage({
+      messageId: "<msg-deadline@school.example>",
+      subject: "Reminder: library books due",
+      text: "Overdue library books are due back July 20."
+    });
+    mockComplete.mockResolvedValue(
+      extractionResponse([
+        {
+          kind: "deadline",
+          title: "Library books due",
+          date: "2026-07-20",
+          time: null,
+          who: null,
+          actionRequired: "Return the overdue library books.",
+          sourceQuote: "Overdue library books are due back July 20."
+        }
+      ])
+    );
+
+    await pollHouseholdInboxForAllHouseholds();
+
+    const alert = await qGet<{ digest_priority: string }>(
+      `SELECT digest_priority FROM family_agent_alerts WHERE household_id = ?`,
+      HOUSEHOLD_ID
+    );
+    expect(alert?.digest_priority).toBe("urgent");
+  });
+
+  it("keeps a financial-notice fraud alert as info with no calendar action even when dated, and tags urgency + urgent digest_priority", async () => {
     primeOneMessage({
       messageId: "<msg-fraud@examplebank.example>",
       from: { text: "alerts@examplebank.example" },
@@ -365,12 +426,13 @@ describe("FIX #215 — household inbox email ingestion", () => {
 
     await pollHouseholdInboxForAllHouseholds();
 
-    const alert = await qGet<{ action_type: string | null; reason: string }>(
-      `SELECT action_type, reason FROM family_agent_alerts WHERE household_id = ?`,
+    const alert = await qGet<{ action_type: string | null; reason: string; digest_priority: string }>(
+      `SELECT action_type, reason, digest_priority FROM family_agent_alerts WHERE household_id = ?`,
       HOUSEHOLD_ID
     );
     expect(alert?.action_type).toBeNull();
     expect(alert?.reason).toContain("[EMAIL] [URGENT]");
+    expect(alert?.digest_priority).toBe("urgent");
   });
 
   it("extracts an appointment/medical item as calendar-actionable with a time", async () => {

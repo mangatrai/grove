@@ -669,6 +669,57 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
     expect(result.parentADigest?.subject).toBe("This week in the Test household — highlight A");
     expect(result.parentBDigest?.subject).toBe("This week in the Test household");
   });
+
+  it("GH #250: daily_delta with no domain output still skips (returns null digests) when there's no pending email backlog either", async () => {
+    const emptyDomain: PipelineOutputs = {
+      coverageGaps: { hasOutput: false, gaps: [] },
+      nannyCoord: { hasOutput: false, items: [] },
+      research: { hasOutput: false, items: [] },
+      deadlines: { hasOutput: false, alerts: [] },
+      occasions: { hasOutput: false, alerts: [] },
+    };
+    const parents: ConnectedParent[] = [
+      { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
+    ];
+
+    const result = await synthesizeDigest(childCtx(), emptyDomain, "daily_delta", parents, "no finance context", "Test");
+
+    expect(mockComplete).not.toHaveBeenCalled();
+    expect(result.hasOutput).toBe(false);
+    expect(result.parentADigest).toBeNull();
+    expect(result.parentBDigest).toBeNull();
+  });
+
+  it("GH #250: daily_delta with no domain output but hasPendingEmailAlerts=true still composes a digest (does not early-return null)", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summaryText: "Nothing new from calendar/deadline domains today.",
+        parentADigest: { subjectHighlight: "", sections: [] },
+        parentBDigest: { subjectHighlight: "", sections: [] },
+      }),
+      usage: {},
+    });
+
+    const emptyDomain: PipelineOutputs = {
+      coverageGaps: { hasOutput: false, gaps: [] },
+      nannyCoord: { hasOutput: false, items: [] },
+      research: { hasOutput: false, items: [] },
+      deadlines: { hasOutput: false, alerts: [] },
+      occasions: { hasOutput: false, alerts: [] },
+    };
+    const parents: ConnectedParent[] = [
+      { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
+    ];
+
+    const result = await synthesizeDigest(
+      childCtx(), emptyDomain, "daily_delta", parents, "no finance context", "Test",
+      /* hasPendingEmailAlerts */ true
+    );
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(result.parentADigest).not.toBeNull();
+    expect(result.parentBDigest).not.toBeNull();
+  });
 });
 
 // #214: parseJsonResponse() (L537) strips code fences before JSON.parse and is used at every LLM
