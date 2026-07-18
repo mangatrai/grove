@@ -533,6 +533,7 @@ export function FamilyAgentPage() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
+  const [resolvingAll, setResolvingAll] = useState(false);
   const [expandedRunKey, setExpandedRunKey] = useState<string | null>(null);
 
   // Quick capture
@@ -662,6 +663,22 @@ export function FamilyAgentPage() {
       setAlerts(prev => prev.filter(a => a.id !== id));
     } else {
       setAlerts(prev => prev.map(a => a.id === id ? { ...a, isResolved: true } : a));
+    }
+  }
+
+  async function handleResolveAll() {
+    if (activeAlerts.length === 0) return;
+    if (!window.confirm(`Resolve all ${activeAlerts.length} active alerts?`)) return;
+    setResolvingAll(true);
+    try {
+      await apiJson<{ ok: boolean; resolvedCount: number }>("/api/family/alerts/resolve-all", { method: "POST" });
+      if (!showResolved) {
+        setAlerts(prev => prev.filter(a => a.isResolved));
+      } else {
+        setAlerts(prev => prev.map(a => ({ ...a, isResolved: true })));
+      }
+    } finally {
+      setResolvingAll(false);
     }
   }
 
@@ -905,14 +922,27 @@ export function FamilyAgentPage() {
               <Badge size="sm" color="red" variant="filled">{activeAlerts.length}</Badge>
             ) : null}
           </Group>
-          <Button
-            size="xs"
-            variant="subtle"
-            color="gray"
-            onClick={() => setShowResolved(v => !v)}
-          >
-            {showResolved ? "Hide resolved" : `Show resolved (${resolvedAlerts.length})`}
-          </Button>
+          <Group gap="xs">
+            {activeAlerts.length > 0 ? (
+              <Button
+                size="xs"
+                variant="subtle"
+                color="red"
+                loading={resolvingAll}
+                onClick={() => void handleResolveAll()}
+              >
+                Resolve all
+              </Button>
+            ) : null}
+            <Button
+              size="xs"
+              variant="subtle"
+              color="gray"
+              onClick={() => setShowResolved(v => !v)}
+            >
+              {showResolved ? "Hide resolved" : `Show resolved (${resolvedAlerts.length})`}
+            </Button>
+          </Group>
         </Group>
 
         {alertsLoading ? (

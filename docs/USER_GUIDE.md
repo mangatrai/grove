@@ -835,6 +835,8 @@ The **Family** page's Alerts panel lists conflicts, coverage gaps, deadlines, an
 
 This feedback only changes which *categories* of alert the agent produces (e.g. it may stop suggesting restaurants if you've dismissed several as not relevant) — it never turns into spending or lifestyle advice.
 
+When there are active alerts, a **Resolve all** button appears next to **Show resolved** at the top of the panel (GH #251). It clears every active alert for your household in one action after a confirmation prompt — useful for catching up on a backlog instead of clicking through alerts one at a time. Resolved-all alerts get a neutral (no-feedback) disposition, same as **Dismiss**.
+
 ### Email suggestions (school, bills, appointments, invitations, and more)
 
 If the household admin has configured a dedicated household Gmail account for inbox ingestion (see `ADMIN_GUIDE.md` §"Household inbox email ingestion"), the agent polls that inbox once a day and turns actionable emails — permission slips, bill due dates, appointment confirmations, party invitations/RSVPs, subscription renewals — into suggestion alerts, tagged `[EMAIL]` in the alert text (`[EMAIL] [URGENT]` for a fraud alert or a same-week deadline). Each one shows the verbatim line from the email it was extracted from ("From the email") so you can sanity-check it before acting. Routine transactional notices (package delivery/shipping updates, low-value account confirmations) are filtered out and never become an alert (GH #250) — they'd otherwise vastly outnumber the items actually worth your attention.

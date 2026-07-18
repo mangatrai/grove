@@ -62,6 +62,35 @@ tests in `backend/tests/email-ingest.test.ts` and a `synthesizeDigest`/skip-guar
 
 ---
 
+## FIX — #251: no way to clear a large alert backlog except one at a time (2026-07-18)
+
+**What changed:** With #250's noise filter now catching future noise, the household still had a
+backlog of dozens of pre-existing alerts (mostly noise from before the filter shipped) and the
+only way to clear them was `PATCH /family/alerts/:id/resolve` one at a time. Added
+`resolveAllAlerts(householdId, userId)` (`family-agent.service.ts`) — a single `UPDATE ...
+WHERE household_id = ? AND is_resolved = FALSE RETURNING id`, scoped to the caller's household —
+and a new `POST /family/alerts/resolve-all` route (`requireRole(["owner", "admin"])`) returning
+`{ ok: true, resolvedCount }`. Frontend: a "Resolve all" button next to "Show resolved" on the
+Family Planner page, visible whenever there are active alerts, confirms via `window.confirm`
+before calling the endpoint.
+
+**Why:** Clicking through 34+ individual alerts to catch up on a backlog is unworkable; a bulk
+clear-out is the only reasonable way to reset to zero once, after which the noise filter (#250)
+keeps the queue small going forward.
+
+**Verification:** `npm run test -w backend` (825/825, incl. new household-isolation test in
+`backend/tests/family-agent.test.ts` confirming only the calling household's unresolved alerts
+are touched). `npx tsc --noEmit` clean on both workspaces. Manual: "Resolve all" in the Family
+Planner UI cleared every active alert in one click.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`,
+`backend/src/modules/family/family-events.routes.ts`, `frontend/src/pages/FamilyAgentPage.tsx`,
+`backend/tests/family-agent.test.ts`.
+
+**GitHub:** closes [#251](https://github.com/mangatrai/grove/issues/251).
+
+---
+
 ## FIX — #249: Anthropic financial-health insight generation returns non-JSON, fails in prod (2026-07-16)
 
 **What changed:** Production log showed `insight generation failed { jobId, err: 'LLM returned

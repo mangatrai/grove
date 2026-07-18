@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { qExec, qGet } from "../src/db/query.js";
+import { qAll, qExec, qGet } from "../src/db/query.js";
 import * as dbQuery from "../src/db/query.js";
 import { env } from "../src/config/env.js";
 
@@ -73,6 +73,7 @@ import {
   computeTodayIso,
   processCaptureNote,
   resolveAlert,
+  resolveAllAlerts,
   runFamilyAgent,
   runProactiveResearch,
   startDateForFreshness,
@@ -1215,6 +1216,70 @@ describe("FIX #208 — alert feedback loop (disposition capture + calibration)",
     const [messages] = mockComplete.mock.calls[0];
     const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user")!;
     expect(userMessage.content).toContain("Deprioritize/avoid: restaurant (3x not relevant).");
+  });
+});
+
+describe("resolveAllAlerts (GH #251 bulk resolve)", () => {
+  const RESOLVE_ALL_HOUSEHOLD_ID = "99990000-test-0000-0000-resolveallhh1";
+  const OTHER_HOUSEHOLD_ID = "99990000-test-0000-0000-resolveallhh2";
+  const RESOLVE_ALL_USER_ID = "99990000-test-0000-0000-resolvealluser";
+
+  beforeAll(async () => {
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, RESOLVE_ALL_HOUSEHOLD_ID, "GH-251 Test Household");
+    await qExec(`INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`, OTHER_HOUSEHOLD_ID, "GH-251 Other Household");
+    await qExec(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', 'x', 'own') ON CONFLICT (id) DO NOTHING`,
+      RESOLVE_ALL_USER_ID, RESOLVE_ALL_HOUSEHOLD_ID, "gh251@example.com"
+    );
+  });
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM family_agent_alerts WHERE household_id IN (?, ?)`, RESOLVE_ALL_HOUSEHOLD_ID, OTHER_HOUSEHOLD_ID);
+    await qExec(`DELETE FROM app_user WHERE id = ?`, RESOLVE_ALL_USER_ID);
+    await qExec(`DELETE FROM household WHERE id IN (?, ?)`, RESOLVE_ALL_HOUSEHOLD_ID, OTHER_HOUSEHOLD_ID);
+  });
+
+  it("resolves every unresolved alert for the household and leaves already-resolved rows and other households untouched", async () => {
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason) VALUES (?, ?, 'suggestion', ?)`,
+      "99990000-test-0000-0000-resolveall001", RESOLVE_ALL_HOUSEHOLD_ID, "[EMAIL] Item one"
+    );
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason) VALUES (?, ?, 'suggestion', ?)`,
+      "99990000-test-0000-0000-resolveall002", RESOLVE_ALL_HOUSEHOLD_ID, "[EMAIL] Item two"
+    );
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason, is_resolved, resolved_at)
+       VALUES (?, ?, 'suggestion', ?, TRUE, NOW())`,
+      "99990000-test-0000-0000-resolveall003", RESOLVE_ALL_HOUSEHOLD_ID, "[EMAIL] Already resolved"
+    );
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason) VALUES (?, ?, 'suggestion', ?)`,
+      "99990000-test-0000-0000-resolveall004", OTHER_HOUSEHOLD_ID, "[EMAIL] Belongs to a different household"
+    );
+
+    const resolvedCount = await resolveAllAlerts(RESOLVE_ALL_HOUSEHOLD_ID, RESOLVE_ALL_USER_ID);
+
+    expect(resolvedCount).toBe(2);
+
+    const stillOpen = await qAll(
+      `SELECT id FROM family_agent_alerts WHERE household_id = ? AND is_resolved = FALSE`,
+      RESOLVE_ALL_HOUSEHOLD_ID
+    );
+    expect(stillOpen.length).toBe(0);
+
+    const resolvedRows = await qAll<{ resolved_by_user_id: string | null }>(
+      `SELECT resolved_by_user_id FROM family_agent_alerts WHERE household_id = ? AND id IN (?, ?)`,
+      RESOLVE_ALL_HOUSEHOLD_ID, "99990000-test-0000-0000-resolveall001", "99990000-test-0000-0000-resolveall002"
+    );
+    expect(resolvedRows.every(r => r.resolved_by_user_id === RESOLVE_ALL_USER_ID)).toBe(true);
+
+    const otherHouseholdAlert = await qGet<{ is_resolved: boolean }>(
+      `SELECT is_resolved FROM family_agent_alerts WHERE id = ?`,
+      "99990000-test-0000-0000-resolveall004"
+    );
+    expect(otherHouseholdAlert?.is_resolved).toBe(false);
   });
 });
 

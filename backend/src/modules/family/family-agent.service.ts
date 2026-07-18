@@ -2010,6 +2010,19 @@ export async function resolveAlert(
   return row !== null;
 }
 
+// GH #251: bulk-resolve so a household isn't forced to clear alerts one at a time.
+export async function resolveAllAlerts(householdId: string, userId: string): Promise<number> {
+  const rows = await qAll<{ id: string }>(
+    `UPDATE family_agent_alerts
+     SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ?
+     WHERE household_id = ? AND is_resolved = FALSE
+     RETURNING id`,
+    userId,
+    householdId
+  );
+  return rows.length;
+}
+
 // FIX #208: aggregate resolved-alert dispositions from the last 60 days into a compact,
 // category-level calibration block (never raw alert text) injected into Domain 3/5 prompts.
 // Suggestion-type alerts embed their category as a leading "[CATEGORY]" tag in `reason`

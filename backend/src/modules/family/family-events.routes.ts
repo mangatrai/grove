@@ -17,6 +17,7 @@ import {
   listDigestLog,
   processCaptureNote,
   resolveAlert,
+  resolveAllAlerts,
   runFamilyAgent,
 } from "./family-agent.service.js";
 import { listTaskRunHistory, recordOneShotCapture, runPATask } from "./pa-task-runner.js";
@@ -118,6 +119,16 @@ familyEventsRouter.patch(
     );
     if (!ok) { res.status(404).json({ message: "Alert not found or already resolved." }); return; }
     res.json({ ok: true });
+  }
+);
+
+/** POST /family/alerts/resolve-all — GH #251: clear every unresolved alert for the household in one action */
+familyEventsRouter.post(
+  "/alerts/resolve-all",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const resolvedCount = await resolveAllAlerts(req.authUser!.householdId, req.authUser!.userId);
+    res.json({ ok: true, resolvedCount });
   }
 );
 

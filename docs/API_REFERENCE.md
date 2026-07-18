@@ -4257,6 +4257,18 @@ Marks an alert resolved. Requires `owner | admin`.
 
 ---
 
+### `POST /api/family/alerts/resolve-all` (GH #251)
+
+Bulk-resolves every unresolved alert for the caller's household in one action. Requires `owner | admin`.
+
+**Request body:** none.
+
+**Response `200`:** `{ "ok": true, "resolvedCount": number }`
+
+Resolves with a neutral (no-feedback) disposition, same as omitting `kind` on the single-alert resolve endpoint above — bulk resolution doesn't feed the not-relevant calibration summary. Scoped strictly to `household_id`; alerts belonging to other households are never touched.
+
+---
+
 ### Household inbox email ingestion (FIX #215, broadened CR-224, noise filter GH #250)
 
 No new endpoints. A daily background poll (not an HTTP route) reads the dedicated household Gmail account over IMAP, identifies each email's genre (school/activity, order/delivery, financial notice, appointment/medical, invitation/social, utility/service/government, or promotional/newsletter) and extracts actionable items via a tool-less LLM call, then writes `alert_type = 'suggestion'` rows into `family_agent_alerts` — reusing the existing `POST /api/family/alerts/:alertId/approve` and `PATCH /api/family/alerts/:id/resolve` endpoints documented above for the approve/dismiss review flow. No suggestion is ever auto-written to `family_events` or Google Calendar without explicit approval.

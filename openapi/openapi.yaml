@@ -4868,6 +4868,29 @@ paths:
                 properties:
                   message: { type: string }
 
+  /api/family/alerts/resolve-all:
+    post:
+      tags: [family]
+      summary: Resolve every unresolved alert for the household in one action (GH #251)
+      description: |
+        Bulk resolve — clears every open alert for the caller's household with a single call,
+        rather than requiring one `PATCH /alerts/{id}/resolve` per alert. Resolved rows get a
+        neutral (no-feedback) disposition, same as omitting `kind` on the single-alert resolve
+        endpoint. Requires `owner | admin`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: All open alerts resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+                  resolvedCount: { type: integer, example: 12 }
+        "401": { description: Unauthorized }
+        "403": { description: Requires owner or admin role }
+
   /api/family/occasion-settings:
     get:
       tags: [family]
