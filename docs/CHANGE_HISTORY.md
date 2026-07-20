@@ -14,6 +14,55 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #254: DCAD comp enrichment collision left comps with blank CAD values; `/dcad/appeal` false-alarm 404 (2026-07-20)
+
+**What changed:** Prod repro — refreshing comps on 7070 Coulter Lake Rd, Frisco TX 75036
+surfaced a new redfin comp ("7462 Peace Maker Dr") with blank CAD Assessed/Land/Impr values
+in the Market Value / Unequal Appraisal tables.
+
+1. **Root cause (`runDcadBackfill` Step C, `protest-worksheet.service.ts`):** the
+   merge/collision check before writing `cad_property_id` onto a comp only looked for an
+   existing collision among `source = 'dcad_search'` rows. When two non-`dcad_search` comps
+   (e.g. two redfin rows) resolved to the same real-world DCAD parcel, the check missed it,
+   the `UPDATE ... cad_property_id = COALESCE(...)` threw a unique-violation on
+   `protest_comp_by_cad_pid`, and the catch block silently stamped `cad_enriched_at = NOW()`
+   with `cad_property_id` still `NULL` — permanently blank in the UI. Separately, the SELECT
+   choosing comps to (re)process had no filter excluding already-succeeded comps, so every
+   "Refresh Comps" click reprocessed every non-`dcad_search` comp from scratch (visible in
+   prod logs as repeated `duplicate key value violates unique constraint
+   "protest_comp_by_cad_pid"` WARNs for the same ~5 compIds across two batches).
+2. **`/dcad/appeal` 404:** returned 404 when `cadAccountId` wasn't set yet — a normal timing
+   race (`runDcadBackfill` runs fire-and-forget from `refresh-comps`), not a real error.
+   Frontend already swallows this via a bare `catch {}`, so it was pure ERROR-level log noise.
+
+**Fix:**
+1. Widened the Step C merge-collision query to match any existing comp row with the same
+   `cad_property_id`, not just `dcad_search`-sourced ones.
+2. Added `AND cad_property_id IS NULL` to the Step C reprocessing SELECT — already-enriched
+   comps stop being reprocessed, and previously-failed comps (like 7462 Peace Maker Dr)
+   self-heal on the next refresh with no manual DB repair needed.
+3. `/dcad/appeal` now returns `200 { appeals: [], pending: true }` instead of 404 when
+   `cadAccountId` isn't resolved yet. The "property not found" and "no CAD adapter
+   registered" branches are still genuine 404s.
+
+**Out of scope (known/expected, confirmed by user):** the DCAD search "Unexpected end of
+JSON input" exception for addresses with no DCAD search response (e.g. 7050 Hayseed Dr) —
+separate, pre-existing, not addressed here.
+
+**Verification:** New regression test in `backend/tests/protest-service.test.ts` seeds two
+redfin comps that resolve to the same `cad_property_id` and asserts they merge into one row
+instead of throwing. `npm run test -w backend` (825/826 passing; 1 pre-existing flaky test
+in `payslip-upload.test.ts` — an HTTP parse error unrelated to this change, confirmed
+passing in isolation).
+
+**Files:** `backend/src/modules/protest/protest-worksheet.service.ts`,
+`backend/src/modules/protest/protest.routes.ts`, `backend/tests/protest-service.test.ts`,
+`docs/API_REFERENCE.md`, `openapi/openapi.yaml`.
+
+**GitHub:** closes [#254](https://github.com/mangatrai/grove/issues/254).
+
+---
+
 ## FIX — #252: Domain 5 digest synthesis truncates mid-JSON, parse fails in prod (2026-07-19)
 
 **What changed:** `synthesizeDigest()` (`family-agent.service.ts`) was calling the LLM with

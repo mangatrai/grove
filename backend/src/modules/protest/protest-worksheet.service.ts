@@ -903,6 +903,7 @@ export async function runDcadBackfill(
        FROM protest_comp
       WHERE property_id = ? AND household_id = ? AND tax_year = ?
         AND source != 'dcad_search'
+        AND cad_property_id IS NULL
       LIMIT 10`,
     propertyId, householdId, taxYear
   );
@@ -926,11 +927,12 @@ export async function runDcadBackfill(
         continue;
       }
 
-      // If a dcad_search row already exists for this property, merge sold data into it and drop this row.
+      // If any other comp (any source) already claimed this cad_property_id, merge
+      // sold data into it and drop this row instead of colliding on the unique index.
       const existingDcad = await qGet<{ id: string }>(
         `SELECT id FROM protest_comp
           WHERE property_id = ? AND tax_year = ? AND cad_property_id = ?
-            AND source = 'dcad_search' AND id != ?`,
+            AND id != ?`,
         propertyId, taxYear, canonical.cadPropertyId, comp.id
       );
 

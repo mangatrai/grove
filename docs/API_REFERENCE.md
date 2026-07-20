@@ -517,7 +517,9 @@ Returns live protest/appeal status from DCAD for the subject property.
 }
 ```
 
-**404:** Property not found, or DCAD account ID not on file.
+If the DCAD account ID hasn't been resolved yet (the background comps backfill that populates it may still be running), returns `200` with `{ "appeals": [], "pending": true }` instead of a 404 — this is a normal timing state, not an error.
+
+**404:** Property not found, or no CAD adapter registered for the property's state.
 
 ---
 

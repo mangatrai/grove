@@ -1448,7 +1448,10 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Current protest/appeal records from DCAD
+          description: >
+            Current protest/appeal records from DCAD. If the DCAD account ID hasn't
+            been resolved yet (background comps backfill may still be running), returns
+            an empty `appeals` array with `pending: true` instead of a 404.
           content:
             application/json:
               schema:
@@ -1464,7 +1467,8 @@ paths:
                         status: { type: string, nullable: true, description: "e.g. REJECTED means informal rejected → ARB" }
                         hearingDate: { type: string, nullable: true, description: "ARB docket date/time from docketDt field" }
                         filedDate: { type: string, nullable: true, description: "Informal hearing date from informalDt field" }
-        "404": { description: Property not found or DCAD account ID not on file }
+                  pending: { type: boolean, description: "True when DCAD account ID isn't resolved yet" }
+        "404": { description: Property not found or no CAD adapter registered for the property's state }
   /api/protest/{propertyId}/appraisal-notice-link:
     get:
       tags: [protest]

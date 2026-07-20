@@ -4,6 +4,13 @@ vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({
   extractPdfText: (buf: Buffer) => Promise.resolve(buf.toString("utf-8")),
 }));
 
+vi.mock("../src/modules/protest/dcad-enrichment.service.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/modules/protest/dcad-enrichment.service.js")>(
+    "../src/modules/protest/dcad-enrichment.service.js"
+  );
+  return { ...actual, fetchDcadCanonical: vi.fn(), searchDcadComps: vi.fn() };
+});
+
 import { parseCadEvidencePdf } from "../src/modules/protest/cad-evidence-parser.service.js";
 import {
   addManualComp,
@@ -12,13 +19,20 @@ import {
   getOrCreateWorksheet,
   getWorksheet,
   listWorksheetComps,
+  runDcadBackfill,
   saveRedfinComps,
   saveCycleSummary,
   updateSummarizationState,
   updateWorksheetStatus,
   type ConversationTurn,
 } from "../src/modules/protest/protest-worksheet.service.js";
+import {
+  fetchDcadCanonical,
+  searchDcadComps,
+  type DcadCanonicalProperty,
+} from "../src/modules/protest/dcad-enrichment.service.js";
 import { checkProtestDeadlines } from "../src/modules/notifications/notification.service.js";
+import { log } from "../src/logger.js";
 import { sqlStmt } from "./pg-stmt.js";
 
 const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
@@ -258,6 +272,89 @@ describe("unified protest_comp CRUD", () => {
     });
     const rfCount = dedupe.filter((c) => c.addressLine1?.includes("300 Redfin Ave")).length;
     expect(rfCount).toBe(1);
+  });
+});
+
+describe("runDcadBackfill Step C — comp enrichment collisions", () => {
+  afterEach(() => {
+    vi.mocked(fetchDcadCanonical).mockReset();
+    vi.mocked(searchDcadComps).mockReset();
+  });
+
+  function canonical(overrides: Partial<DcadCanonicalProperty>): DcadCanonicalProperty {
+    return {
+      cadPropertyId: "CAD-DEFAULT",
+      cadAccountId: 1,
+      taxYear: SERVICE_TAX_YEAR,
+      addressLine1: null,
+      city: null,
+      state: null,
+      zip: null,
+      latitude: null,
+      longitude: null,
+      legalAcreage: null,
+      landValueUsd: null,
+      improvementValueUsd: null,
+      marketValueUsd: null,
+      appraisedValueUsd: null,
+      deedDate: null,
+      taxLimitationValueUsd: null,
+      netAppraisedValueUsd: null,
+      suExclusionValueUsd: null,
+      valueHistoryJson: null,
+      taxableJson: null,
+      sqft: null,
+      grossBuildingArea: null,
+      beds: null,
+      baths: null,
+      yearBuilt: null,
+      hasPool: false,
+      miscImprovements: [],
+      rawSearchJson: null,
+      ...overrides,
+    };
+  }
+
+  it("merges two non-dcad_search comps that resolve to the same cad_property_id instead of throwing a unique-violation", async () => {
+    // Two redfin comps whose raw address strings differ but resolve to the same
+    // real-world DCAD parcel — reproduces the prod bug (7462 Peace Maker Dr).
+    await saveRedfinComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, [
+      { address: "111 Collide St, Frisco TX 75036", city: "Frisco", state: "TX", zip: "75036",
+        sqft: 4000, beds: 4, baths: 4, soldPrice: 900_000, soldDate: "2026-06-01",
+        pricePerSqft: 225, raw: {} },
+      { address: "222 Collide St, Frisco TX 75036", city: "Frisco", state: "TX", zip: "75036",
+        sqft: 4100, beds: 4, baths: 4, soldPrice: 910_000, soldDate: "2026-06-05",
+        pricePerSqft: 222, raw: {} },
+    ]);
+
+    vi.mocked(searchDcadComps).mockResolvedValue([]);
+    vi.mocked(fetchDcadCanonical).mockImplementation(async (opts) => {
+      if (opts.address === "Subject Address, Frisco TX 75036") {
+        return canonical({ cadPropertyId: "SUBJECT-PID", cadAccountId: 100 });
+      }
+      if (opts.address?.startsWith("111 Collide St") || opts.address?.startsWith("222 Collide St")) {
+        return canonical({ cadPropertyId: "SHARED-PID", cadAccountId: 200 });
+      }
+      return null;
+    });
+
+    const warnSpy = vi.spyOn(log, "warn");
+
+    await runDcadBackfill(PROPERTY_ID, HOUSEHOLD_ID, "Subject Address, Frisco TX 75036", SERVICE_TAX_YEAR, null);
+
+    const collisionWarnings = warnSpy.mock.calls.filter(([, meta]) => {
+      const err = (meta as { err?: unknown } | undefined)?.err;
+      return typeof err === "string" && err.includes("duplicate key");
+    });
+    expect(collisionWarnings).toHaveLength(0);
+
+    const remaining = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
+      sources: ["redfin"],
+    });
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].cadPropertyId).toBe("SHARED-PID");
+
+    warnSpy.mockRestore();
   });
 });
 

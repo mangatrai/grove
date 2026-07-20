@@ -504,7 +504,9 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
     return;
   }
   if (!property.cadAccountId) {
-    res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
+    // Not a real 404 — the DCAD backfill that populates cadAccountId runs
+    // fire-and-forget from refresh-comps and may not have finished yet.
+    res.status(200).json({ appeals: [], pending: true });
     return;
   }
   const provider = property.cadProvider ?? inferCadProvider(property.state);
