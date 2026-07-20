@@ -14,6 +14,30 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #252: Domain 5 digest synthesis truncates mid-JSON, parse fails in prod (2026-07-19)
+
+**What changed:** `synthesizeDigest()` (`family-agent.service.ts`) was calling the LLM with
+`maxTokens: 3500` — a ceiling set in FIX #209 for a smaller prompt. FIX #250 added an
+email-derived `alertSection` (up to 30+ items) to this same synthesis prompt, and in production
+the response now regularly hits the 3500-token ceiling mid-generation, truncating the JSON
+mid-string (e.g. `"...an evening fligh` with no closing quote/brace). `digestSynthesisSchema.parse()`
+then fails, and the digest silently falls back to `summaryText: "Digest synthesis failed — alerts
+were still generated."` with both parent digests null — no retry.
+
+**Fix:** Bumped `maxTokens` 3500 → 5500 to give headroom for larger alert sections.
+
+**Why:** Token ceiling wasn't revisited when FIX #250 grew the input prompt size; this is the same
+failure mode FIX #209 fixed once already, recurring because the two changes shipped separately.
+
+**Verification:** `npm run test -w backend` (824/825 passing; 1 pre-existing flaky timeout in
+`app.test.ts` unrelated to this change, confirmed passing in isolation).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`.
+
+**GitHub:** closes [#252](https://github.com/mangatrai/grove/issues/252).
+
+---
+
 ## FIX — #250: email-alert pipeline was pure noise and structurally invisible to the digest (2026-07-18)
 
 **What changed:** Three compounding bugs in the PA email-ingest → digest pipeline, found while

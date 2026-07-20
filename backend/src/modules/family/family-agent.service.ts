@@ -1645,9 +1645,11 @@ Respond with ONLY valid JSON:
 For "sections", use ONLY these headings, in this order, and only include a heading if that parent has content for it: "Coverage & Nanny" (childcare/scheduling + nanny coordination combined), "Deadlines", "Occasions", "Research finds". Do not invent other headings. Each item is one short bullet string — mobile-readable, specific, no filler.` },
     ],
     // FIX #211: formatting/summarization of already-vetted upstream content — cheap model tier.
+    // FIX #252: bumped 3500 -> 5500; FIX #250's email-derived alertSection can carry 30+ items,
+    // pushing summaryText + both parent digests past the old ceiling and truncating mid-JSON.
     {
       model: chatModel(),
-      maxTokens: 3500,
+      maxTokens: 5500,
       responseFormat: "json",
       jsonSchema: DIGEST_SYNTHESIS_JSON_SCHEMA,
       jsonSchemaName: "digest_synthesis",
