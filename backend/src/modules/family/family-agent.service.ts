@@ -1617,7 +1617,7 @@ export async function synthesizeDigest(
 
   const parentNames = parents.map((p, i) => `Parent ${String.fromCharCode(65 + i)}: ${p.email}`).join("; ");
 
-  const { content } = await getChatAdapter().complete(
+  const { content, usage } = await getChatAdapter().complete(
     [
       { role: "system", content: "You compose household digest emails. Concise, actionable per-parent content. Return valid JSON only." },
       { role: "user", content: `Today: ${ctx.today}. Run: ${runType}. Parents: ${parentNames}.
@@ -1673,8 +1673,13 @@ For "sections", use ONLY these headings, in this order, and only include a headi
       summaryText: parsed.summaryText,
       hasOutput: true,
     };
-  } catch {
-    log.warn("family-agent: Domain 5 synthesis parse failed", { raw: content.slice(0, 200) });
+  } catch (err) {
+    log.warn("family-agent: Domain 5 synthesis parse failed", {
+      err: String(err),
+      completionTokens: usage.completionTokens,
+      contentLength: content.length,
+      raw: content,
+    });
     return {
       conflicts: allAlerts,
       parentADigest: null,

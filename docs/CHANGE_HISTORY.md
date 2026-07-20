@@ -63,6 +63,32 @@ passing in isolation).
 
 ---
 
+## FIX — #255: Domain 5 digest synthesis failure swallows real error, add diagnostics (2026-07-20)
+
+**What changed:** #252's `maxTokens` bump (3500→5500) didn't stop the failure —
+it recurred ~8h after that fix went live. Root cause was unknowable because
+`synthesizeDigest()`'s catch block (`family-agent.service.ts`) discarded the actual
+exception (`catch { }`, no error binding) and only logged `content.slice(0, 200)`,
+which looks "truncated" regardless of whether the underlying JSON is actually valid.
+
+**Fix (diagnostics only, no behavior change):** catch block now logs `err: String(err)`,
+`usage.completionTokens` (to check against the 5500 ceiling), `contentLength`, and the
+full untruncated `raw` content.
+
+**Why:** Can't distinguish "still hitting the token ceiling" from "structurally
+valid-but-wrong response failing zod validation" (e.g. `DIGEST_SYNTHESIS_JSON_SCHEMA`
+has no `description` fields on `parentADigest`/`parentBDigest` — a known Anthropic
+forced-tool-use field-conflation risk) without the real error. This is the third
+time this function has hit this failure class (#181, #252, now) via ceiling-bumping
+without adding visibility.
+
+**Verification:** `npm run test -w backend` — 825/826 passing, 1 pre-existing
+unrelated flake (`ECONNRESET` in `app.test.ts` backup encryption test, noted in #252's
+own verification too).
+
+**GitHub:** [#255](https://github.com/mangatrai/grove/issues/255). Root cause still
+open pending next failure's log output.
+
 ## FIX — #252: Domain 5 digest synthesis truncates mid-JSON, parse fails in prod (2026-07-19)
 
 **What changed:** `synthesizeDigest()` (`family-agent.service.ts`) was calling the LLM with
