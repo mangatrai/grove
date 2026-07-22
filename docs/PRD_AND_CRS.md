@@ -706,6 +706,19 @@ Staff is a restricted role seeing only **My Timesheet**, **My Expenses**, and **
 **Context:** Cloud servers (Koyeb) default to UTC. The stock quote scheduler used a narrow 5-minute UTC-window `setInterval` check that silently missed the window when the heartbeat misaligned with the start time. `TZ` env var anchors `new Date()` locale methods and log timestamps to CT. `node-cron` with explicit timezone handles DST transitions automatically with no UTC offset math.  
 **Consequence:** NYSE close (4 PM ET / 3 PM CT) is expressed as `15 16 * * 1-5` with `timezone: 'America/New_York'` in `node-cron` — New York tz is correct since market hours are defined in ET regardless of where the app is hosted. OPS-1/2/3/4 backlog items will migrate remaining interval schedulers to node-cron with CT-anchored times.
 
+### D-023: Database Architecture Decisions
+
+**Date:** 2026-07-22 (DOC, #256)
+**Decision:** Consolidate the underlying rationale for the schema's core design choices into one place, `docs/DATABASE_ARCHITECTURE.md` — full catalog/ERD/index detail lives there rather than duplicated here. The four decisions worth naming explicitly:
+
+- **Multi-tenancy via `household_id` column scoping, not schema-per-tenant or RLS.** Every table hangs off `household(id)`, and isolation is enforced by the application query layer (every service function filters by `household_id`) rather than Postgres Row-Level Security policies. Simpler to build and reason about for a self-hosted, single-deployment app; RLS is the natural next hardening step if this ever became a shared multi-tenant SaaS (see `docs/MULTI_HOUSEHOLD_BACKLOG.md`).
+- **Squashed-baseline migration strategy.** `0001_baseline.sql` merges the original 39 incremental migrations into one snapshot once the early schema stabilized, with per-feature files after it numbered onward. Keeps fresh-install migration time bounded and avoids replaying since-superseded intermediate states, at the cost of losing fine-grained history for that early period (preserved in `backend/db/migrations/archive/` and this doc's git history).
+- **pgvector over an external vector store** for protest-document RAG (`protest_document_chunks`, see D-019) — one database instead of two, works unmodified on both local Docker Postgres and Koyeb-managed Postgres.
+- **JSONB for newer AI/agent payloads** (`household_ai_insight.payload_json`, `protest_worksheet.conversation_json`, `family_agent_alerts.action_payload`) **vs. legacy TEXT-JSON on older columns** — inherited from the app's original SQLite schema (no native JSONB there), never backfilled since nothing queries into those columns; new tables default to JSONB.
+
+**Context:** These decisions were made incrementally across D-010, D-019, and various migrations; this entry exists so they're findable as a set rather than only recoverable by reading migration comments.
+**Consequence:** See `docs/DATABASE_ARCHITECTURE.md` for the full schema catalog, ER diagrams, and index/constraint rationale — that document is the canonical reference and must stay in sync with schema migrations (enforced via `CLAUDE.md` checklist).
+
 ---
 
 ## 5. Categorization System Design

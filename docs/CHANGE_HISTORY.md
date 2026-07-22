@@ -14,6 +14,41 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DOC — #256: Database architecture documentation — schema catalog, ERDs, index rationale (2026-07-22)
+
+**What changed:** New `docs/DATABASE_ARCHITECTURE.md` — a 7th canonical doc (explicit, approved
+exception to the "6 canonical files" rule in `CLAUDE.md`). Contains the full 46-table catalog
+(45 migration-created + `schema_migrations`), a domain-relationship overview diagram plus 6
+domain-grouped Mermaid ERDs (Core/Identity, Import & Ledger, Payslip & ESPP, Property & Tax
+Protest, Family Planner, AI Insights & Jobs/Ops), a Postgres-feature showcase (pgvector + HNSW
+for protest-document RAG, generated `tsvector` column + GIN index for ledger full-text search,
+5 partial-unique-index patterns, the `household`/`app_user`/`financial_account` circular-FK
+bootstrap, JSONB vs. legacy TEXT-JSON, CHECK-constraint enums over native `ENUM`, and an explicit
+no-RLS callout — tenancy isolation is 100% application-layer `household_id` filtering, named as
+a deliberate tradeoff not a gap), index/constraint strategy by purpose, migration strategy
+(squashed baseline rationale), backup/export coverage (`EXPORT_REGISTRY` 31 tables vs.
+`EXPORT_EPHEMERAL_TABLES` 15), and an interview-talking-points callout.
+
+`docs/ADMIN_GUIDE.md` §5.1 trimmed from an inline ~15-table list to a pointer at the new doc
+(also fixed a pre-existing duplicate-numbering bug — two `### 5.2` headers — while in there).
+`docs/PRD_AND_CRS.md` gained **D-023: Database Architecture Decisions**, consolidating the *why*
+behind multi-tenancy-via-column-scoping (no RLS), the squashed-baseline migration strategy,
+pgvector-over-external-vector-store, and JSONB-for-newer-payloads — all previously scattered
+across D-010/D-019 and migration comments, now findable as one set. `CLAUDE.md` updated: the new
+doc added as a 7th row in the canonical-docs table, plus a checklist rule that any migration
+adding/dropping/altering a table must update it in the same commit.
+
+**Why:** Owner is interviewing at a Postgres managed-service company and wants a document to pull
+up cold and walk an interviewer through. Prior state (`ADMIN_GUIDE.md` §5) was a thin table list
+with no diagram; the app has genuine interview-worthy Postgres depth (pgvector RAG, generated-
+column FTS, partial unique indexes, a deliberate no-RLS multi-tenancy design) that was buried in
+migration comments with no narrative anywhere in the repo.
+
+**Files:** `docs/DATABASE_ARCHITECTURE.md` (new), `docs/ADMIN_GUIDE.md`, `docs/PRD_AND_CRS.md`,
+`CLAUDE.md`, `docs/CHANGE_HISTORY.md`.
+
+**GitHub:** closes [#256](https://github.com/mangatrai/grove/issues/256).
+
 ## FIX — #254: DCAD comp enrichment collision left comps with blank CAD values; `/dcad/appeal` false-alarm 404 (2026-07-20)
 
 **What changed:** Prod repro — refreshing comps on 7070 Coulter Lake Rd, Frisco TX 75036

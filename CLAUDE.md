@@ -63,7 +63,7 @@ Task needs reading >2-3 files to find a root cause or trace a data flow? Spawn a
 
 Any `Promise.all` branch (agent domains, batch jobs), poll/scheduler tick, or cron job must catch its own errors and return the type's safe empty value — never throw uncaught, or one failing branch takes down its siblings. `log.warn`/`log.error` with entity ID + `String(err)` on catch. Precedent: `family-agent.service.ts` domain functions.
 
-## Docs — 6 canonical files, never add new ones under `docs/`
+## Docs — 7 canonical files, never add new ones under `docs/`
 
 | File | Content |
 |------|---------|
@@ -73,13 +73,15 @@ Any `Promise.all` branch (agent domains, batch jobs), poll/scheduler tick, or cr
 | `PRD_AND_CRS.md` | product requirements, architecture decisions |
 | `API_REFERENCE.md` | HTTP endpoint request/response/errors |
 | `CHANGE_HISTORY.md` | append-only shipped-change log (CR-/FIX-/UX-/DB-/DOC-) |
+| `DATABASE_ARCHITECTURE.md` | schema catalog, ER diagrams (Mermaid), index/constraint rationale, Postgres-feature usage |
 
 ## Mandatory Per-Change Checklist
 
 1. `CHANGE_HISTORY.md` entry (CR-/FIX-/UX-/DB- prefix)
 2. `API_REFERENCE.md` + `openapi/openapi.yaml` for any new/changed endpoint
-3. `npm run test -w backend` must pass before commit; add tests for new logic. Frontend Vitest for pure logic; Playwright E2E (`e2e/`) for new pages/critical flows — `e2e@example.com`/`ChangeMe123!`, navigate via sidebar clicks, never `page.goto()` for Vite-proxied routes.
-4. One commit per logical concern, `feat(scope/ID):`/`fix(scope/ID):`. Doc changes ship in the **same commit** as code.
-5. Version bump (`package.json` × 3) in a separate commit right after: patch=fix, minor=feature, major=breaking. Never ship without one.
-6. GitHub issue per shipped item, on the matching milestone; `closes #N` in the commit message. Open issues for backlog items too, not just shipped work.
-7. Update `USER_GUIDE.md` / `ADMIN_GUIDE.md` if user-facing pages or ops/env/schema changed.
+3. Any migration that adds, drops, or alters a table → update `docs/DATABASE_ARCHITECTURE.md` (catalog row + relevant ERD) in the same commit
+4. `npm run test -w backend` must pass before commit; add tests for new logic. Frontend Vitest for pure logic; Playwright E2E (`e2e/`) for new pages/critical flows — `e2e@example.com`/`ChangeMe123!`, navigate via sidebar clicks, never `page.goto()` for Vite-proxied routes.
+5. One commit per logical concern, `feat(scope/ID):`/`fix(scope/ID):`. Doc changes ship in the **same commit** as code.
+6. Version bump (`package.json` × 3) in a separate commit right after: patch=fix, minor=feature, major=breaking. Never ship without one.
+7. GitHub issue per shipped item, on the matching milestone; `closes #N` in the commit message. Open issues for backlog items too, not just shipped work.
+8. Update `USER_GUIDE.md` / `ADMIN_GUIDE.md` if user-facing pages or ops/env/schema changed.
