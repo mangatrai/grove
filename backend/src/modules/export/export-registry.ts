@@ -285,8 +285,6 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   "backup_job",
   // Infrastructure — not user data
   "schema_migrations",
-  // Seeded global data — restored from seeds, not from backups
-  "category_rule_global",
   // OAuth tokens — credentials that must never appear in .hfb backups; users re-connect after restore
   "oauth_integrations",
   // Notification rows are transient UI state — not restored from backups

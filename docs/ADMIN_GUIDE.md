@@ -758,8 +758,8 @@ When statements are imported, the system classifies transactions via rule matchi
 1. **Parser adapter** reads CSV/PDF, outputs **`transaction_raw`** rows (amount, date, description, etc.)
 2. **Canonicalize** service converts raw → `transaction_canonical` and runs classification
 3. **Rules matching** (in order):
-   - Household **`category_rule`** rows (per-household, user-created or imported)
-   - Installation **`category_rule_global`** rows (default built-in rules)
+   - Household **`category_rule`** rows (`household_id = <household>`, user-created or imported)
+   - Installation-wide **`category_rule`** rows (`household_id IS NULL`, default built-in rules)
 4. **First match wins;** if no rule matches, **`category_id = NULL`** and **`unknown_category`** resolution item is created
 5. User resolves unknowns in **Transactions → Needs review**
 

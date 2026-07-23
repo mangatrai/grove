@@ -18,11 +18,11 @@ relevant section here in the same commit (see `CLAUDE.md` checklist).
   either directly (`household_id` FK) or transitively. There is no schema-per-tenant and no
   Postgres Row-Level Security — isolation is enforced at the application query layer, where every
   service-layer query filters by `household_id` (see §5, "No RLS").
-- **Scale**: 45 physical tables — 44 created via SQL migration files, plus `schema_migrations`
+- **Scale**: 44 physical tables — 43 created via SQL migration files, plus `schema_migrations`
   (created programmatically by the migration runner itself, not a `.sql` file). Grouped below into
   9 functional domains.
 - **Migration strategy**: `backend/db/migrations/` holds `0001_baseline.sql` (a squashed snapshot
-  of migrations 0001–0039) followed by incremental, feature-scoped files (`0041`...`0089`,
+  of migrations 0001–0039) followed by incremental, feature-scoped files (`0041`...`0090`,
   numbering not contiguous — some numbers were retired as dead/no-op and folded into the
   baseline). The migration runner (`backend/src/db/apply-pg-migrations.ts`) applies any file not
   yet recorded in `schema_migrations`, tracked by filename, on backend startup. See §7 for why the
@@ -57,7 +57,7 @@ Domains, table counts, and their role:
 | Domain | Tables | Role |
 |---|---|---|
 | Core/Identity | 6 | Household, users, people, accounts — the tenancy root |
-| Import & Ledger | 11 | CSV/OFX import pipeline, categorization, the transaction ledger |
+| Import & Ledger | 10 | CSV/OFX import pipeline, categorization, the transaction ledger |
 | Payslip & ESPP | 5 | Payslip PDF extraction, deposit matching, employee stock purchase tracking |
 | Property & Tax Protest | 5 | Real estate value tracking, DCAD property-tax protest workflow, RAG document store |
 | Family Planner | 8 | Calendar sync, AI agent alerts/digests, household help scheduling, agent memory |
@@ -133,7 +133,6 @@ erDiagram
     CATEGORY |o--o{ TRANSACTION_CANONICAL : classifies
     CATEGORY ||--o{ CATEGORY : "parent_id (self-FK)"
     CATEGORY ||--o{ CATEGORY_RULE : "matched by"
-    CATEGORY ||--o{ CATEGORY_RULE_GLOBAL : "matched by"
     TRANSACTION_CANONICAL ||--o{ RESOLUTION_ITEM : flags
     FINANCIAL_ACCOUNT ||--o{ ACCOUNT_BALANCE_SNAPSHOT : "tracked over time"
     CATEGORY ||--o{ BUDGET_CATEGORY : budgets
@@ -154,6 +153,12 @@ erDiagram
         text household_id FK "nullable = system default"
         text parent_id FK "self-referencing"
     }
+    CATEGORY_RULE {
+        text id PK
+        text household_id FK "nullable = global/built-in rule"
+        text rule_key "set only when household_id IS NULL, unique among global rows"
+        text category_id FK
+    }
     RESOLUTION_ITEM {
         text id PK
         text household_id FK
@@ -162,6 +167,14 @@ erDiagram
         text status
     }
 ```
+
+Note: `category_rule.household_id` is nullable, mirroring the `category` table's
+system-default convention — `household_id IS NULL` rows are global/built-in rules visible to
+every household; `household_id = <household>` rows are user-created/imported rules for that
+household only. `rule_key` is only populated on global rows and has a partial unique index
+(`category_rule_rule_key_global_unique ... WHERE household_id IS NULL`) to keep built-in rule
+keys unique without constraining household rows, which don't use it. Folded from a separate
+`category_rule_global` table via migration `0090_merge_category_rule_global.sql` (DEBT #258).
 
 Note: `category_id` on `transaction_canonical` is nullable and **must be `LEFT JOIN`ed, never
 `INNER JOIN`ed** — after a `.hfb` restore, transactions can reference a custom category that no
@@ -312,7 +325,8 @@ erDiagram
 The Occasion Nudges on/off toggle (Settings → Family) is stored as a `household_pa_preferences`
 row (`category = 'settings'`, `topic_tag = 'occasion_nudges'`, `fact_text = 'true'|'false'`)
 rather than a dedicated table — folded from a single-boolean `family_occasion_settings` table via
-migration `0089_fold_family_occasion_settings.sql` (DEBT #259).
+migration `0089_fold_family_occasion_settings.sql` (DEBT #259), the same nullable-column-not-new-
+table instinct behind the `category_rule` merge above.
 
 `oauth_integrations` is a deliberately unified table for two different OAuth relationships: Google
 Drive is one connection *per household* (`user_id IS NULL`, enforced by a partial unique index),
@@ -380,7 +394,7 @@ data.
 | `financial_account` | Bank/brokerage/loan/property-linked accounts | `type` CHECK (8 values), `owner_scope`, `linked_account_id` self-FK, `property_id` FK | `idx_financial_account_household` |
 | `household_custom_institution` | User-defined bank names beyond the built-in adapter list | `display_name` | `UNIQUE(household_id, lower(display_name))` — case-insensitive functional index |
 
-### Import & Ledger (11)
+### Import & Ledger (10)
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
 |---|---|---|---|
@@ -388,8 +402,7 @@ data.
 | `import_file` | One row per file within a session | `checksum`, `status`, `payslip_async_provider` | `UNIQUE(session_id, checksum)` dedup |
 | `transaction_raw` | Pre-classification raw parsed rows | `extracted_payload_json`, `confidence` | `idx_transaction_raw_file_id` |
 | `category` | Hierarchical category taxonomy | `parent_id` self-FK, `household_id` nullable (NULL = system default) | — |
-| `category_rule` | Household auto-categorization rules | `pattern`, `match_type`, `confidence`, `priority` | `idx_category_rule_household_priority` |
-| `category_rule_global` | Seed/system-wide rules | `rule_key` UNIQUE | Ephemeral — reseeded, not backed up |
+| `category_rule` | Household + global auto-categorization rules | `pattern`, `match_type`, `confidence`, `priority`, `household_id` nullable (NULL = global/built-in), `rule_key` (global rows only) | `idx_category_rule_household_priority`; partial unique index `category_rule_rule_key_global_unique` on `rule_key WHERE household_id IS NULL`. Global rows ephemeral — reseeded, not backed up (naturally excluded from per-household `.hfb` exports by `WHERE household_id = ?`) |
 | `transaction_canonical` | **The ledger.** Central fact table | `txn_date` TEXT ISO, `fingerprint`, `status`, `search_document` GENERATED tsvector | 2 partial unique indexes (fingerprint dedup; OFX FITID dedup) + GIN FTS index + 4 compound perf indexes |
 | `resolution_item` | Human-in-the-loop review queue | `type` CHECK (4 values), `target_id` polymorphic (no FK) | `idx_ri_household_status_type`, `idx_ri_household_target` |
 | `account_balance_snapshot` | Point-in-time account balances | `as_of_date` **real DATE**, `source` CHECK(manual/import) | 2 partial unique indexes — one per source, so manual and import balances can coexist same-day |
@@ -425,7 +438,7 @@ data.
 | `family_digest_log` | One row per agent digest run | `run_type` CHECK (4 values), `status` CHECK(sent/skipped/error) | `family_digest_log_household` |
 | `household_help_availability` | Unified schedule roster for nanny/babysitter/cleaner/tutor/etc. | `slot_type` × `service_type` (orthogonal dimensions), `day_of_week` or `specific_date` | 3 indexes incl. `(household_id, is_active, slot_type)` |
 | `pa_task_run` | Agent task-loop run history (BabyAGI-style loop) | `iterations_used`, `findings_json`, `estimated_cost_usd`, `capture_mode` | Ephemeral — operational, not user data |
-| `household_pa_preferences` | Agent long-term memory store, plus per-household settings (e.g. Occasion Nudges toggle) | `category` CHECK(preference/discovered_fact/decision_history/settings), `topic_tag` (bounded enum, widened three times — see `0085`/`0086`/`0089`), `fact_text` | `(household_id, category, topic_tag)` index; partial unique `household_pa_preferences_settings_unique ON (household_id, topic_tag) WHERE category = 'settings'` |
+| `household_pa_preferences` | Agent long-term memory store + household settings (incl. Occasion Nudges on/off) | `category` CHECK(preference/discovered_fact/decision_history/settings), `topic_tag` (bounded enum, widened three times — see `0085`/`0086`/`0089`) | `(household_id, category, topic_tag)` index; partial unique index `household_pa_preferences_settings_unique` on `(household_id, topic_tag) WHERE category = 'settings'` |
 | `email_ingest_log` | Household inbox ingestion (shared mailbox, IMAP + app password) | `message_id`, `items_json` JSONB, `status` CHECK (4 values) | `UNIQUE(household_id, message_id)` |
 | `oauth_integrations` | Unified Google OAuth store — Drive (household-scoped) + Calendar (user-scoped) | `provider` CHECK, `calendar_roles`, `selected_calendar_ids`, `gcal_last_synced_at` | 2 partial unique indexes (see §3.5); ephemeral — credentials never appear in `.hfb` backups |
 
@@ -517,14 +530,16 @@ excluded from `.hfb` backups (there's a `[export-coverage]` startup warning that
   the encrypted DOB column on export (instance-bound encryption key won't match on restore),
   `household` nulls out its circular-FK columns and is restored with `skipInsert` (the row already
   exists from account creation), `app_user.token_version` is bumped on restore to force
-  re-authentication.
-- **`EXPORT_EPHEMERAL_TABLES`** (15 tables) — explicitly *not* backed up: import/export/insight/
+  re-authentication. `category_rule`'s registry entry exports `WHERE household_id = ?`, which by
+  standard SQL NULL semantics naturally excludes global/built-in rows (`household_id IS NULL`)
+  from per-household `.hfb` backups with no extra filter logic needed.
+- **`EXPORT_EPHEMERAL_TABLES`** (14 tables) — explicitly *not* backed up: import/export/insight/
   backup job logs (operational history), `transaction_raw`/`import_session`/`import_file` (staging
   data superseded once promoted to `transaction_canonical`), `oauth_integrations` (credentials —
   users re-connect after restore rather than have tokens round-trip through a backup file),
-  `notification`/`notification_preference` (transient UI state), `category_rule_global` (reseeded,
-  not household data), `protest_document_chunks` (regenerable from source PDFs), `pa_task_run`
-  (agent run log), `password_reset_token`, `schema_migrations`.
+  `notification`/`notification_preference` (transient UI state), `protest_document_chunks`
+  (regenerable from source PDFs), `pa_task_run` (agent run log), `password_reset_token`,
+  `schema_migrations`.
 
 ---
 

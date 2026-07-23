@@ -120,45 +120,16 @@ export async function listCategoryRulesForHousehold(householdId: string): Promis
 export async function listEnabledDbRulesForClassification(householdId: string): Promise<DbCategoryRule[]> {
   const rows = await qAll<DbCategoryRule>(
     `SELECT
-         m.id AS id,
-         m.pattern AS pattern,
-         m.match_type AS "matchType",
-         m.category_id AS "categoryId",
-         m.confidence AS confidence,
-         m.amount_scope AS "amountScope",
-         m.rule_origin AS "ruleOrigin"
-       FROM (
-         SELECT
-           id,
-           pattern,
-           match_type,
-           category_id,
-           confidence,
-           amount_scope,
-           'household' AS rule_origin,
-           0 AS seg,
-           priority,
-           created_at,
-           id AS sid
-         FROM category_rule
-         WHERE household_id = ? AND enabled = 1
-         UNION ALL
-         SELECT
-           id,
-           pattern,
-           match_type,
-           category_id,
-           confidence,
-           amount_scope,
-           'global' AS rule_origin,
-           1 AS seg,
-           priority,
-           created_at,
-           id AS sid
-         FROM category_rule_global
-         WHERE enabled = 1
-       ) AS m
-       ORDER BY m.seg ASC, m.priority ASC, m.created_at ASC, m.sid ASC`,
+         id,
+         pattern,
+         match_type AS "matchType",
+         category_id AS "categoryId",
+         confidence,
+         amount_scope AS "amountScope",
+         CASE WHEN household_id IS NULL THEN 'global' ELSE 'household' END AS "ruleOrigin"
+       FROM category_rule
+       WHERE enabled = 1 AND (household_id = ? OR household_id IS NULL)
+       ORDER BY (household_id IS NULL) ASC, priority ASC, created_at ASC, id ASC`,
     householdId
   );
   return rows;
@@ -222,7 +193,8 @@ export async function listGlobalCategoryRules(): Promise<GlobalCategoryRuleRow[]
          enabled,
          created_at AS "createdAt",
          updated_at AS "updatedAt"
-       FROM category_rule_global
+       FROM category_rule
+       WHERE household_id IS NULL
        ORDER BY enabled DESC, priority ASC, created_at ASC, id ASC`
   );
 
@@ -266,9 +238,9 @@ export async function createGlobalCategoryRule(
   const id = crypto.randomUUID();
   try {
     await qExec(
-      `INSERT INTO category_rule_global (
-         id, rule_key, pattern, match_type, category_id, amount_scope, confidence, priority, enabled, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO category_rule (
+         id, household_id, rule_key, pattern, match_type, category_id, amount_scope, confidence, priority, enabled, created_at, updated_at
+       ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       id,
       rk,
       pattern,
@@ -299,8 +271,8 @@ export async function createGlobalCategoryRule(
          enabled,
          created_at AS "createdAt",
          updated_at AS "updatedAt"
-       FROM category_rule_global
-       WHERE id = ?`,
+       FROM category_rule
+       WHERE id = ? AND household_id IS NULL`,
     id
   ))!;
   return { ok: true, data: mapGlobalRule(row) };
@@ -332,8 +304,8 @@ export async function updateGlobalCategoryRule(
          enabled,
          created_at AS "createdAt",
          updated_at AS "updatedAt"
-       FROM category_rule_global
-       WHERE id = ?`,
+       FROM category_rule
+       WHERE id = ? AND household_id IS NULL`,
     ruleId
   );
   if (!existing) {
@@ -367,10 +339,10 @@ export async function updateGlobalCategoryRule(
 
   try {
     await qExec(
-      `UPDATE category_rule_global
+      `UPDATE category_rule
        SET rule_key = ?, pattern = ?, match_type = ?, category_id = ?, amount_scope = ?,
            confidence = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? AND household_id IS NULL`,
       nextKeyRaw,
       nextPattern,
       nextMatchType,
@@ -401,8 +373,8 @@ export async function updateGlobalCategoryRule(
          enabled,
          created_at AS "createdAt",
          updated_at AS "updatedAt"
-       FROM category_rule_global
-       WHERE id = ?`,
+       FROM category_rule
+       WHERE id = ? AND household_id IS NULL`,
     ruleId
   ))!;
   return { ok: true, data: mapGlobalRule(row) };
@@ -411,7 +383,10 @@ export async function updateGlobalCategoryRule(
 export async function deleteGlobalCategoryRule(
   ruleId: string
 ): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
-  const del = await qGet<{ id: string }>(`DELETE FROM category_rule_global WHERE id = ? RETURNING id`, ruleId);
+  const del = await qGet<{ id: string }>(
+    `DELETE FROM category_rule WHERE id = ? AND household_id IS NULL RETURNING id`,
+    ruleId
+  );
   if (!del) {
     return { ok: false, code: "NOT_FOUND" };
   }

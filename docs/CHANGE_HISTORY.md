@@ -14,6 +14,60 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DB — #258: Merge `category_rule_global` into `category_rule` (2026-07-23)
+
+**What changed:** Dropped the dedicated `category_rule_global` table; global/built-in
+category rules now live in `category_rule` as `household_id IS NULL` rows, mirroring the
+nullable-`household_id`-means-system-default convention `category` already used. Migration
+`0090_merge_category_rule_global.sql`: drops the `NOT NULL` constraint on
+`category_rule.household_id`, adds a `rule_key TEXT` column (populated only on global rows),
+adds partial unique index `category_rule_rule_key_global_unique ON category_rule (rule_key)
+WHERE household_id IS NULL`, backfills the old table's rows with `household_id = NULL`, drops
+`category_rule_global`.
+
+`backend/src/modules/category/category-rules.service.ts`: `listGlobalCategoryRules`/
+`createGlobalCategoryRule`/`updateGlobalCategoryRule`/`deleteGlobalCategoryRule` repointed at
+`category_rule` with a `household_id IS NULL` predicate; API shapes and route surface
+(`/categories/rules/builtin/*`) unchanged. `listEnabledDbRulesForClassification` — the
+classification hot-path query — collapsed from a `UNION ALL` of the two tables into a single
+`category_rule` query filtered on `household_id = ? OR household_id IS NULL`, ordered
+household-first via `(household_id IS NULL) ASC`.
+
+`backend/scripts/gen-0026-migration.mjs` (the built-in-rule seed generator) and
+`backend/db/seeds/0001_bootstrap.sql`'s generated block updated to target `category_rule` with
+`household_id` literal `NULL` — this seed applies before every backend test run
+(`preset-pg-test.mjs`), so it's a hard prerequisite for the merge, not optional cleanup. Row
+content in the seed (rule keys, patterns, category IDs) is byte-identical to before; only the
+table name, column list, and the added `NULL` literal changed — verified by diff. Note: the
+generator script's own hardcoded row list was found to be **stale** as of migration
+`0044_i3_rule_taxonomy_fix.sql` (which hand-patched fuel/parking rules directly into the seed
+without updating the generator) — a warning comment was added to the script; its output must be
+diffed against the current seed before ever being trusted again, independent of this change.
+`category_rule_global` removed from `EXPORT_EPHEMERAL_TABLES`; `category_rule`'s existing
+`EXPORT_REGISTRY` entry (`WHERE household_id = ?`) naturally excludes global rows from
+per-household `.hfb` backups via standard SQL NULL semantics, no new filter needed.
+
+`backend/tests/family-agent.test.ts` had a latent direct dependency unrelated to this table
+(see DB-259 below) caught during the same pass.
+
+**Why:** Filed as DEBT #258 during the 2026-07-22 `docs/DATABASE_ARCHITECTURE.md` audit —
+`category_rule`/`category_rule_global` duplicated a shape (`category` already does global-vs-
+household via a nullable FK) instead of reusing it. Picked up as a low-risk, single-domain
+cleanup. Initial investigation pass under-checked blast radius (missed the seed/generator-script
+dependency); user pushed back explicitly asking for more due diligence before approving — see
+[[feedback_table_reuse_before_new_table]] memory for the full correction. Verified before
+implementing that the two things the user specifically flagged — UI segregation of global vs.
+household rules, and CSV import/export — ride on the stable service-function API surface and
+were not put at risk by the table swap.
+
+**Files:** `backend/db/migrations/0090_merge_category_rule_global.sql`,
+`backend/src/modules/category/category-rules.service.ts`,
+`backend/scripts/gen-0026-migration.mjs`, `backend/db/seeds/0001_bootstrap.sql`,
+`backend/src/modules/export/export-registry.ts`, `backend/db/README.md`,
+`docs/DATABASE_ARCHITECTURE.md`, `docs/ADMIN_GUIDE.md`, `docs/PRD_AND_CRS.md`.
+
+**GitHub:** closes #258.
+
 ## DB — #259: Fold `family_occasion_settings` into `household_pa_preferences` (2026-07-23)
 
 **What changed:** Dropped the single-boolean `family_occasion_settings` table (one row per

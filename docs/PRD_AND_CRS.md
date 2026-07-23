@@ -756,8 +756,8 @@ Staff is a restricted role seeing only **My Timesheet**, **My Expenses**, and **
 ### Rule Learning and Improvement
 
 #### At canonicalize time
-1. **Load household rules** (`category_rule` table) in priority order.
-2. **Load global defaults** (`category_rule_global` table).
+1. **Load household rules** (`category_rule` table, `household_id = <household>`) in priority order.
+2. **Load global defaults** (`category_rule` table, `household_id IS NULL`).
 3. **Normalize description** (whitespace, case, punctuation).
 4. **First match wins** — apply first matching rule's category.
 5. If no match → insert with null category + `resolution_item(unknown_category)`.
@@ -937,7 +937,7 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 
 ### Category System
 - Default taxonomy (13 parents, ~50 leaves).
-- DB rules (`category_rule_global` + `category_rule`).
+- DB rules (`category_rule` — global rows have `household_id IS NULL`, household rows scope to a household).
 - Category Rules UI (`/categories/rules`): browse, test, add/edit, session preview, recategorize.
 - Hierarchical picker on Ledger (inline, no page nav).
 
