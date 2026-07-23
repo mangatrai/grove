@@ -14,6 +14,40 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DB — #259: Fold `family_occasion_settings` into `household_pa_preferences` (2026-07-23)
+
+**What changed:** Dropped the single-boolean `family_occasion_settings` table (one row per
+household, `enabled BOOLEAN`). The Occasion Nudges on/off setting now lives in
+`household_pa_preferences` as a row with `category = 'settings'`, `topic_tag =
+'occasion_nudges'`, `fact_text = 'true'|'false'`. Migration
+`0089_fold_family_occasion_settings.sql`: widens the `category` and `topic_tag` CHECK
+constraints to allow `'settings'`/`'occasion_nudges'`, adds partial unique index
+`household_pa_preferences_settings_unique ON household_pa_preferences (household_id, topic_tag)
+WHERE category = 'settings'` (needed for an idempotent upsert), backfills from the old table,
+drops it.
+
+`backend/src/modules/family/family-occasion-settings.service.ts` rewritten internally to query/
+upsert `household_pa_preferences`; exported `OccasionSettings`/`getOccasionSettings`/
+`setOccasionSettings` interface unchanged, so `family-events.routes.ts` and
+`family-agent.service.ts` needed no changes. `family_occasion_settings` entry removed from
+`EXPORT_REGISTRY` — already covered by the existing `household_pa_preferences` entry.
+`backend/tests/family-agent.test.ts` had direct `family_occasion_settings` queries in test
+setup/teardown (missed by an initial grep that only checked for imports, not raw SQL) — updated
+to use `setOccasionSettings()` and query `household_pa_preferences` directly.
+
+**Why:** Filed as DEBT #259 during the 2026-07-22 `docs/DATABASE_ARCHITECTURE.md` audit — a
+single-row-per-household boolean toggle is a column/row, not a table, and
+`household_pa_preferences` already exists for exactly this shape of small per-household setting.
+Lowest-risk of the three schema-sprawl findings from that audit (#257 job-queue unification
+remains deferred as medium effort). See [[feedback_table_reuse_before_new_table]].
+
+**Files:** `backend/db/migrations/0089_fold_family_occasion_settings.sql`,
+`backend/src/modules/family/family-occasion-settings.service.ts`,
+`backend/src/modules/export/export-registry.ts`, `backend/tests/family-agent.test.ts`,
+`docs/DATABASE_ARCHITECTURE.md`, `docs/ADMIN_GUIDE.md`.
+
+**GitHub:** closes #259.
+
 ## DOC — #256: Database architecture documentation — schema catalog, ERDs, index rationale (2026-07-22)
 
 **What changed:** New `docs/DATABASE_ARCHITECTURE.md` — a 7th canonical doc (explicit, approved

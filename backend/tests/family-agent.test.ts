@@ -88,6 +88,7 @@ import {
   type PipelineOutputs,
 } from "../src/modules/family/family-agent.service.js";
 import { heuristicCalendarRole } from "../src/modules/gcal/gcal.service.js";
+import { setOccasionSettings } from "../src/modules/family/family-occasion-settings.service.js";
 import { encryptDob } from "../src/modules/household/dob-crypto.js";
 import type { FamilyEvent, HelpAvailabilitySlot } from "../src/modules/family/family.types.js";
 
@@ -1344,7 +1345,10 @@ describe("detectOccasions (#223 occasion nudge tiers)", () => {
       `DELETE FROM person_profile WHERE id IN (?, ?, ?, ?)`,
       TIER21_PROFILE_ID, TIER5_PROFILE_ID, FAR_PROFILE_ID, YEAR_BOUNDARY_PROFILE_ID
     );
-    await qExec(`DELETE FROM family_occasion_settings WHERE household_id = ?`, OCCASION_HOUSEHOLD_ID);
+    await qExec(
+      `DELETE FROM household_pa_preferences WHERE household_id = ? AND category = 'settings' AND topic_tag = 'occasion_nudges'`,
+      OCCASION_HOUSEHOLD_ID
+    );
     await qExec(`DELETE FROM household WHERE id = ?`, OCCASION_HOUSEHOLD_ID);
   });
 
@@ -1407,17 +1411,16 @@ describe("detectOccasions (#223 occasion nudge tiers)", () => {
   });
 
   it("settings toggle: disabling occasion nudges suppresses all output even with qualifying birthdays", async () => {
-    await qExec(
-      `INSERT INTO family_occasion_settings (household_id, enabled) VALUES (?, FALSE)
-       ON CONFLICT (household_id) DO UPDATE SET enabled = FALSE`,
-      OCCASION_HOUSEHOLD_ID
-    );
+    await setOccasionSettings(OCCASION_HOUSEHOLD_ID, false);
     try {
       const result = await detectOccasions(dbCtx(), "manual");
       expect(result.hasOutput).toBe(false);
       expect(result.alerts).toEqual([]);
     } finally {
-      await qExec(`DELETE FROM family_occasion_settings WHERE household_id = ?`, OCCASION_HOUSEHOLD_ID);
+      await qExec(
+        `DELETE FROM household_pa_preferences WHERE household_id = ? AND category = 'settings' AND topic_tag = 'occasion_nudges'`,
+        OCCASION_HOUSEHOLD_ID
+      );
     }
   });
 

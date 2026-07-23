@@ -266,13 +266,6 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     memberScopeInclude: false
   },
   {
-    tableKey: "family_occasion_settings",
-    tableName: "family_occasion_settings",
-    restoreOrder: 30,
-    householdIdColumn: "household_id",
-    memberScopeInclude: false
-  },
-  {
     tableKey: "household_pa_preferences",
     tableName: "household_pa_preferences",
     restoreOrder: 31,

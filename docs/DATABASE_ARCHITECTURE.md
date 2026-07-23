@@ -18,11 +18,11 @@ relevant section here in the same commit (see `CLAUDE.md` checklist).
   either directly (`household_id` FK) or transitively. There is no schema-per-tenant and no
   Postgres Row-Level Security — isolation is enforced at the application query layer, where every
   service-layer query filters by `household_id` (see §5, "No RLS").
-- **Scale**: 46 physical tables — 45 created via SQL migration files, plus `schema_migrations`
+- **Scale**: 45 physical tables — 44 created via SQL migration files, plus `schema_migrations`
   (created programmatically by the migration runner itself, not a `.sql` file). Grouped below into
   9 functional domains.
 - **Migration strategy**: `backend/db/migrations/` holds `0001_baseline.sql` (a squashed snapshot
-  of migrations 0001–0039) followed by incremental, feature-scoped files (`0041`...`0088`,
+  of migrations 0001–0039) followed by incremental, feature-scoped files (`0041`...`0089`,
   numbering not contiguous — some numbers were retired as dead/no-op and folded into the
   baseline). The migration runner (`backend/src/db/apply-pg-migrations.ts`) applies any file not
   yet recorded in `schema_migrations`, tracked by filename, on backend startup. See §7 for why the
@@ -60,7 +60,7 @@ Domains, table counts, and their role:
 | Import & Ledger | 11 | CSV/OFX import pipeline, categorization, the transaction ledger |
 | Payslip & ESPP | 5 | Payslip PDF extraction, deposit matching, employee stock purchase tracking |
 | Property & Tax Protest | 5 | Real estate value tracking, DCAD property-tax protest workflow, RAG document store |
-| Family Planner | 9 | Calendar sync, AI agent alerts/digests, household help scheduling, agent memory |
+| Family Planner | 8 | Calendar sync, AI agent alerts/digests, household help scheduling, agent memory |
 | AI Insights & Jobs/Ops | 10 | Async job queues, AI-generated insights, notifications, auth tokens |
 
 ---
@@ -303,10 +303,16 @@ erDiagram
     HOUSEHOLD_PA_PREFERENCES {
         serial id PK
         text household_id FK
-        text category "preference|discovered_fact|decision_history"
+        text category "preference|discovered_fact|decision_history|settings"
         text topic_tag
+        text fact_text "e.g. 'true'/'false' for category='settings' rows"
     }
 ```
+
+The Occasion Nudges on/off toggle (Settings → Family) is stored as a `household_pa_preferences`
+row (`category = 'settings'`, `topic_tag = 'occasion_nudges'`, `fact_text = 'true'|'false'`)
+rather than a dedicated table — folded from a single-boolean `family_occasion_settings` table via
+migration `0089_fold_family_occasion_settings.sql` (DEBT #259).
 
 `oauth_integrations` is a deliberately unified table for two different OAuth relationships: Google
 Drive is one connection *per household* (`user_id IS NULL`, enforced by a partial unique index),
@@ -410,7 +416,7 @@ data.
 | `protest_comp` | Unified comparable-properties table (replaced `protest_comp_cad`, see §3.4) | `source` CHECK (4 values: dcad_search/redfin/manual/cad_evidence) | 2 partial unique indexes split on whether `cad_property_id IS NOT NULL` |
 | `protest_document_chunks` | pgvector RAG store for uploaded CAD evidence PDFs | `embedding vector(1536)`, `document_key`, `chunk_index` | HNSW index (`vector_cosine_ops`), `UNIQUE(property_id, tax_year, document_key, chunk_index)` |
 
-### Family Planner (9)
+### Family Planner (8)
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
 |---|---|---|---|
@@ -418,9 +424,8 @@ data.
 | `family_agent_alerts` | Agent-detected conflicts (Owner reviews in Agent tab) | `alert_type`, `digest_priority`, `action_payload` JSONB (GCal write-back), `copy_paste_text` | `family_agent_alerts_household` |
 | `family_digest_log` | One row per agent digest run | `run_type` CHECK (4 values), `status` CHECK(sent/skipped/error) | `family_digest_log_household` |
 | `household_help_availability` | Unified schedule roster for nanny/babysitter/cleaner/tutor/etc. | `slot_type` × `service_type` (orthogonal dimensions), `day_of_week` or `specific_date` | 3 indexes incl. `(household_id, is_active, slot_type)` |
-| `family_occasion_settings` | Per-household on/off toggle for birthday/holiday nudges | `enabled` | `household_id` is the PK — one row per household |
 | `pa_task_run` | Agent task-loop run history (BabyAGI-style loop) | `iterations_used`, `findings_json`, `estimated_cost_usd`, `capture_mode` | Ephemeral — operational, not user data |
-| `household_pa_preferences` | Agent long-term memory store | `category` CHECK(preference/discovered_fact/decision_history), `topic_tag` (bounded enum, widened twice — see `0085`/`0086`) | `(household_id, category, topic_tag)` index |
+| `household_pa_preferences` | Agent long-term memory store, plus per-household settings (e.g. Occasion Nudges toggle) | `category` CHECK(preference/discovered_fact/decision_history/settings), `topic_tag` (bounded enum, widened three times — see `0085`/`0086`/`0089`), `fact_text` | `(household_id, category, topic_tag)` index; partial unique `household_pa_preferences_settings_unique ON (household_id, topic_tag) WHERE category = 'settings'` |
 | `email_ingest_log` | Household inbox ingestion (shared mailbox, IMAP + app password) | `message_id`, `items_json` JSONB, `status` CHECK (4 values) | `UNIQUE(household_id, message_id)` |
 | `oauth_integrations` | Unified Google OAuth store — Drive (household-scoped) + Calendar (user-scoped) | `provider` CHECK, `calendar_roles`, `selected_calendar_ids`, `gcal_last_synced_at` | 2 partial unique indexes (see §3.5); ephemeral — credentials never appear in `.hfb` backups |
 
@@ -506,7 +511,7 @@ Every table falls into exactly one of two buckets in
 `backend/src/modules/export/export-registry.ts` — a table that isn't in either is silently
 excluded from `.hfb` backups (there's a `[export-coverage]` startup warning that catches this).
 
-- **`EXPORT_REGISTRY`** (31 tables) — user data, restored in `restoreOrder` to satisfy FK
+- **`EXPORT_REGISTRY`** (30 tables) — user data, restored in `restoreOrder` to satisfy FK
   dependencies (e.g. `property` before `financial_account`, since `financial_account.property_id`
   references it). Some entries carry an `onExport`/`onRestore` transform — `person_profile` strips
   the encrypted DOB column on export (instance-bound encryption key won't match on restore),
