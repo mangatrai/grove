@@ -5,6 +5,7 @@ import { Alert, Group, Paper, Stack, Tabs, Text, Title } from "@mantine/core";
 import { apiJson } from "../api";
 import { GroveLoader } from "../components/GroveLoader";
 import { formatUsd } from "../utils/format";
+import { MyTimesheetPanel } from "./staff/MyTimesheetPanel";
 
 type StaffProfile = {
   id: string;
@@ -88,7 +89,7 @@ export function StaffPortalPage() {
                 <Tabs.Tab value="pay">My Pay</Tabs.Tab>
               </Tabs.List>
               <Tabs.Panel value="timesheet" pt="md">
-                <Text c="dimmed" size="sm">Weekly timesheet entry is coming soon.</Text>
+                <MyTimesheetPanel regularSchedule={profile.regularScheduleJson} />
               </Tabs.Panel>
               <Tabs.Panel value="expenses" pt="md">
                 <Text c="dimmed" size="sm">Expense claims are coming soon.</Text>

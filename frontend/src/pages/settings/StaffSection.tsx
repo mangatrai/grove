@@ -71,6 +71,161 @@ function scheduleSummary(schedule: Record<string, number>): string {
   return entries.map((d) => `${d.label} ${schedule[d.key]}h`).join(", ");
 }
 
+type PendingTimesheet = {
+  id: string;
+  staffProfileId: string;
+  staffFullName: string;
+  weekStartDate: string;
+  submittedAt: string | null;
+  totalHours: number;
+};
+
+function TimesheetApprovalQueue() {
+  const [periods, setPeriods] = useState<PendingTimesheet[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiJson<{ periods: PendingTimesheet[] }>("/staff/timesheets/pending");
+      setPeriods(res.periods);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load timesheets");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function approve(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await apiJson(`/staff/timesheets/${encodeURIComponent(id)}/approve`, { method: "POST" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not approve timesheet");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmReject(id: string) {
+    if (!reviewNote.trim()) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      await apiJson(`/staff/timesheets/${encodeURIComponent(id)}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reviewNote: reviewNote.trim() }),
+      });
+      setRejectingId(null);
+      setReviewNote("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reject timesheet");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Stack mt="lg">
+      <Title order={4}>Timesheets awaiting approval</Title>
+      {error ? <Alert color="red">{error}</Alert> : null}
+      {loading ? (
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading…</Text>
+        </Group>
+      ) : null}
+      {!loading && periods.length === 0 ? (
+        <Text size="sm" c="dimmed">No timesheets awaiting approval.</Text>
+      ) : null}
+      {!loading && periods.length > 0 ? (
+        <Table withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Staff</Table.Th>
+              <Table.Th>Week of</Table.Th>
+              <Table.Th>Hours</Table.Th>
+              <Table.Th>Actions</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {periods.map((p) => (
+              <Table.Tr key={p.id}>
+                <Table.Td>{p.staffFullName}</Table.Td>
+                <Table.Td>{p.weekStartDate}</Table.Td>
+                <Table.Td>{p.totalHours}h</Table.Td>
+                <Table.Td>
+                  {rejectingId === p.id ? (
+                    <Group gap="xs" wrap="nowrap">
+                      <TextInput
+                        size="xs"
+                        placeholder="Reason for rejecting"
+                        value={reviewNote}
+                        onChange={(e) => setReviewNote(e.currentTarget.value)}
+                        disabled={busyId === p.id}
+                      />
+                      <Button
+                        size="xs"
+                        color="red"
+                        disabled={!reviewNote.trim()}
+                        loading={busyId === p.id}
+                        onClick={() => void confirmReject(p.id)}
+                      >
+                        Confirm
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        disabled={busyId === p.id}
+                        onClick={() => {
+                          setRejectingId(null);
+                          setReviewNote("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Group gap="xs">
+                      <Button size="xs" loading={busyId === p.id} onClick={() => void approve(p.id)}>
+                        Approve
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        color="red"
+                        disabled={busyId === p.id}
+                        onClick={() => {
+                          setRejectingId(p.id);
+                          setReviewNote("");
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </Group>
+                  )}
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : null}
+    </Stack>
+  );
+}
+
 type StaffSectionProps = { active: boolean };
 
 export function StaffSection({ active }: StaffSectionProps) {
@@ -216,6 +371,8 @@ export function StaffSection({ active }: StaffSectionProps) {
       {!loading && members.length === 0 ? (
         <Text size="sm" c="dimmed">No staff members added yet.</Text>
       ) : null}
+
+      <TimesheetApprovalQueue />
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">

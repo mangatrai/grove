@@ -985,6 +985,145 @@ Updates schedule, active status, and/or records a new effective-dated pay rate. 
 
 ---
 
+### Timesheets (STAFF-3, GH #264)
+
+Weekly timesheet entry (staff self-service) and owner/admin approval queue, mounted under `/staff/timesheets`. Status machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is a distinct, editable state (not folded back into `draft`) so the employee can see why a period bounced. `EDITABLE_STATUSES = ["draft", "rejected"]`.
+
+#### `GET /staff/timesheets/me`
+
+**Auth:** Role: staff only.
+
+Returns the caller's timesheet period for the given week, creating an empty `draft` row on first access if none exists. No entries are persisted until `PUT /staff/timesheets/me` is called — prefill from `regular_schedule_json` is a frontend-only convenience.
+
+**Query params:** `weekStart` (optional, `YYYY-MM-DD`; defaults to the current household-local week's Monday).
+
+**Response 200:**
+```json
+{
+  "period": {
+    "id": "uuid",
+    "householdId": "uuid",
+    "staffProfileId": "uuid",
+    "weekStartDate": "2026-08-10",
+    "status": "draft",
+    "submittedAt": null,
+    "reviewedByUserId": null,
+    "reviewedAt": null,
+    "reviewNote": null,
+    "entries": [{ "id": "uuid", "workDate": "2026-08-10", "hoursWorked": 8, "note": "Full day" }],
+    "totalHours": 8
+  }
+}
+```
+
+**Errors:**
+- **400** — `weekStart` present but not `YYYY-MM-DD`.
+- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+
+---
+
+#### `PUT /staff/timesheets/me`
+
+**Auth:** Role: staff only.
+
+Full-replace: deletes all existing `timesheet_entry` rows for the period and re-inserts the posted set in one transaction. Only allowed while the period is `draft` or `rejected`.
+
+**Request body:**
+```json
+{
+  "weekStartDate": "2026-08-10",
+  "entries": [{ "workDate": "2026-08-10", "hoursWorked": 8, "note": "string (optional)" }]
+}
+```
+Max 7 entries; `hoursWorked` must be `> 0` and `<= 24`.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod } }`
+
+**Errors:**
+- **400** — validation failure, or `code: "INVALID_DATE"` — an entry's `workDate` falls outside the given week.
+- **404** — no matching `staff_profile` row.
+- **409** — `code: "NOT_EDITABLE"` — period is `submitted` or `approved`.
+
+---
+
+#### `POST /staff/timesheets/me/submit`
+
+**Auth:** Role: staff only.
+
+Moves the period to `submitted` for owner/admin review. Clears any prior `reviewNote`.
+
+**Request body:** `{ "weekStartDate": "2026-08-10" }`
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "submitted" } }`
+
+**Errors:**
+- **400** — validation failure.
+- **404** — no matching `staff_profile` row.
+- **409** — `code: "EMPTY"` — no entries with hours logged; `code: "NOT_EDITABLE"` — period is not `draft`/`rejected`.
+
+---
+
+#### `GET /staff/timesheets/pending`
+
+**Auth:** Role: owner or admin.
+
+Lists all `submitted` periods across the household's staff, for the approval queue. Registered before `/:periodId` in the router so the literal path isn't swallowed by the param route.
+
+**Response 200:**
+```json
+{
+  "periods": [
+    { "id": "uuid", "staffProfileId": "uuid", "staffFullName": "Jamie Rivera", "weekStartDate": "2026-08-10", "status": "submitted", "submittedAt": "2026-08-10T12:00:00.000Z", "totalHours": 14.5 }
+  ]
+}
+```
+
+---
+
+#### `GET /staff/timesheets/:periodId`
+
+**Auth:** Role: owner or admin.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID.
+- **404** — no period with that ID in the household.
+
+---
+
+#### `POST /staff/timesheets/:periodId/approve`
+
+**Auth:** Role: owner or admin.
+
+Moves a `submitted` period to `approved`; records `reviewedByUserId`/`reviewedAt`.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "approved" } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_SUBMITTED"` — period is not currently `submitted` (e.g. already approved).
+
+---
+
+#### `POST /staff/timesheets/:periodId/reject`
+
+**Auth:** Role: owner or admin.
+
+Moves a `submitted` period to `rejected`; requires a `reviewNote` so the employee knows what to fix, then edits and resubmits from the same period.
+
+**Request body:** `{ "reviewNote": "string, 1-1000 chars, required" }`
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "rejected", "reviewNote": "..." } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID, or `reviewNote` missing/empty.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_SUBMITTED"`.
+
+---
+
 ### Properties
 
 #### `GET /household/properties`

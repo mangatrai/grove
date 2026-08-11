@@ -26,6 +26,7 @@ tags:
   - name: gcal
   - name: protest
   - name: espp
+  - name: staff
 paths:
   /health:
     get:
@@ -5135,6 +5136,189 @@ paths:
                   error: { type: string, example: NOT_FOUND }
                   message: { type: string }
 
+  /staff/timesheets/me:
+    get:
+      tags: [staff]
+      summary: Get (or lazily create as draft) the caller's timesheet period for a week
+      description: Role staff only. Entries are not persisted until PUT is called.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: weekStart
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Defaults to the current household-local week's Monday
+      responses:
+        "200":
+          description: Timesheet period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: weekStart present but not YYYY-MM-DD }
+        "404": { description: Caller has no staff_profile }
+    put:
+      tags: [staff]
+      summary: Full-replace the caller's entries for a week
+      description: Role staff only. Only allowed while the period is draft or rejected.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekStartDate, entries]
+              properties:
+                weekStartDate: { type: string, format: date }
+                entries:
+                  type: array
+                  maxItems: 7
+                  items:
+                    type: object
+                    required: [workDate, hoursWorked]
+                    properties:
+                      workDate: { type: string, format: date }
+                      hoursWorked: { type: number, minimum: 0.01, maximum: 24 }
+                      note: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Updated period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400":
+          description: Validation failure, or code INVALID_DATE (workDate outside the given week)
+        "404": { description: Caller has no staff_profile }
+        "409": { description: "code NOT_EDITABLE — period is submitted or approved" }
+  /staff/timesheets/me/submit:
+    post:
+      tags: [staff]
+      summary: Submit the caller's timesheet period for owner/admin review
+      description: Role staff only. Clears any prior reviewNote.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekStartDate]
+              properties:
+                weekStartDate: { type: string, format: date }
+      responses:
+        "200":
+          description: Submitted period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: Validation failure }
+        "404": { description: Caller has no staff_profile }
+        "409":
+          description: "code EMPTY (no entries with hours logged) or NOT_EDITABLE"
+  /staff/timesheets/pending:
+    get:
+      tags: [staff]
+      summary: List all submitted timesheet periods for the household (approval queue)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Pending periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/TimesheetPeriodSummary' }
+        "403": { description: Requires owner or admin role }
+  /staff/timesheets/{periodId}:
+    get:
+      tags: [staff]
+      summary: Get a timesheet period by id
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Timesheet period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: No period with that id in the household }
+  /staff/timesheets/{periodId}/approve:
+    post:
+      tags: [staff]
+      summary: Approve a submitted timesheet period
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Approved period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_SUBMITTED — period is not currently submitted" }
+  /staff/timesheets/{periodId}/reject:
+    post:
+      tags: [staff]
+      summary: Reject a submitted timesheet period with a comment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewNote]
+              properties:
+                reviewNote: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        "200":
+          description: Rejected period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID, or reviewNote missing/empty }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_SUBMITTED" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -6152,4 +6336,40 @@ components:
         label: { type: string, nullable: true }
         notes: { type: string, nullable: true }
         isActive: { type: boolean }
+
+    TimesheetEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workDate: { type: string, format: date }
+        hoursWorked: { type: number }
+        note: { type: string, nullable: true }
+
+    TimesheetPeriod:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        weekStartDate: { type: string, format: date }
+        status: { type: string, enum: [draft, submitted, approved, rejected] }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        reviewedByUserId: { type: string, format: uuid, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/TimesheetEntry' }
+        totalHours: { type: number }
+
+    TimesheetPeriodSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        staffFullName: { type: string }
+        weekStartDate: { type: string, format: date }
+        status: { type: string, enum: [draft, submitted, approved, rejected] }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        totalHours: { type: number }
         createdAt: { type: string, format: date-time }

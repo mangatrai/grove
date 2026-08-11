@@ -724,6 +724,8 @@ On submit, the app creates a restricted login for the employee (`staff` role —
 
 A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member — tag payment transactions with it later to track what's actually been paid against what's owed (see Pay Summary, coming in a future release).
 
+**Timesheet approvals** — below the staff roster, a queue lists every timesheet week an employee has submitted, showing their name, the week, and total hours. **Approve** moves the week to approved; **Reject** requires a comment explaining what needs to change, which the employee sees on their own timesheet and can then edit and resubmit.
+
 ### Accounts Tab
 
 Add and manage financial accounts (banks, credit cards, investment accounts, etc.):
@@ -901,7 +903,7 @@ Household employees (e.g. a nanny) log in with the account credentials set up fo
 
 My Portal shows your employment start date, current hourly rate, and regular schedule at a glance, followed by three tabs:
 
-- **My Timesheet** — weekly hours entry (coming in a future release).
+- **My Timesheet** — enter hours for the current week (defaults on load), navigate to prior/future weeks with the arrows or jump to any date, and log up to 7 days per week. Rows are prefilled from your regular schedule the first time you open a fresh week; edit any day's hours or add an optional note. **Save draft** stores your entries without submitting them; **Submit for approval** sends the week to your household's owner/admin for review. A running weekly total is shown at the bottom. Once submitted, the week is locked until it's approved or rejected — a rejected week shows the reviewer's comment and reopens for editing and resubmission.
 - **My Expenses** — reimbursable expense claims (coming in a future release).
 - **My Pay** — earned/paid/balance summary and downloadable reports (coming in a future release).
 

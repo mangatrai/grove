@@ -14,6 +14,38 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #264: Timesheet entry + weekly approval workflow (2026-08-11)
+
+**What changed:** Staff self-service weekly timesheet (`GET/PUT /staff/timesheets/me`,
+`POST /staff/timesheets/me/submit`) plus an owner/admin approval queue
+(`GET /staff/timesheets/pending`, `GET /staff/timesheets/:periodId`,
+`POST /staff/timesheets/:periodId/approve`, `POST /staff/timesheets/:periodId/reject`)
+(`backend/src/modules/staff/timesheet.service.ts`, `timesheet.routes.ts`). Status
+machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is kept as its own
+status (not folded back into `draft`) so the employee's portal can display the
+reviewer's comment, using the schema's already-explicit CHECK-constraint enum value.
+`PUT /me` is full-replace (deletes and re-inserts the week's `timesheet_entry` rows in
+one transaction) rather than diffing/upserting. `GET /me` lazily creates an empty draft
+period on first access per week; nothing is persisted until the client calls `PUT`.
+
+Frontend: `MyTimesheetPanel.tsx` replaces the "My Timesheet" tab placeholder in
+`StaffPortalPage.tsx` — week nav (prev/next + date-jump), a 7-row table prefilled from
+`regular_schedule_json` on a fresh week, running total, Save draft / Submit for approval.
+`StaffSection.tsx` (Settings → Staff) gains a `TimesheetApprovalQueue` below the roster —
+approve, or reject with a required comment.
+
+**Why:** Item 2–3 of the household employee time & expense capture MVP (nanny start
+date 2026-08-17). No overtime premium, no clock-in/out — plain hours-per-day entry, per
+the MVP decisions confirmed with the user (see `BACKLOG.md` FR-15 v2 entry for the full
+future-state payroll scope this MVP intentionally narrows).
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` (5 tests) — prefill-is-empty-until-saved,
+staff-role RBAC rejection on owner/admin routes, `INVALID_DATE`/`EMPTY`/successful-save,
+full submit → pending queue → approve → re-approve-fails(`NOT_SUBMITTED`), and
+reject-with-comment → edit-while-rejected → resubmit-clears-note.
+
+GitHub: closes #264 (epic #121, milestone V7).
+
 ## CR — #263: Staff onboarding + invite email + staff portal shell (2026-08-11)
 
 **What changed:** Settings → **Staff** tab (owner/admin only): form to onboard a household
