@@ -14,6 +14,39 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #263: Staff onboarding + invite email + staff portal shell (2026-08-11)
+
+**What changed:** Settings → **Staff** tab (owner/admin only): form to onboard a household
+employee (first/last name, email, phone, DOB, employment start date, regular
+days/hours, hourly rate). On submit, creates `person_profile` (`relationship=employee`) +
+`household_membership` (`role=member`, `relationship=employee`) + `app_user`
+(`role=staff`) + `staff_profile` + an initial `staff_rate`, all in one transaction
+(`backend/src/modules/staff/staff.service.ts`: `createStaffMember`). Idempotently
+ensures the household's "Employee" category tree (Salary/Bonus/Reimbursement children,
+`ensureEmployeeCategoryTree`, reusing `createHouseholdCategory`) exists.
+
+Sends an invite email reusing the existing password-reset-token mechanism
+(`createPasswordResetToken` + `renderMemberInviteTemplate` + `sendMail`) when SMTP is
+configured; falls back to a fixed default password (`ChangeMe123!`, matching the
+`DEFAULT_MEMBER_PASSWORD` pattern already used for regular member logins) shown on
+screen to the admin when it isn't. New routes: `GET/POST /staff`, `GET /staff/me`
+(staff role, self-serve), `GET/PATCH /staff/:staffId` (`backend/src/modules/staff/staff.routes.ts`).
+
+Frontend: staff-role logins render a minimal restricted shell instead of the normal app —
+`StaffPortalPage.tsx` at `/staff` (profile summary + three placeholder tabs: My
+Timesheet / My Expenses / My Pay, populated in STAFF-3/4/5) is the *only* reachable
+route. `RequireNotStaffLayout` (redirects staff away from every other authenticated
+route to `/staff`) and `RequireStaff` (redirects non-staff away from `/staff`) added to
+`App.tsx`'s route tree. `AppSidebar.tsx` collapses to a single "My Portal" nav item for
+staff; `AppTopBar.tsx` hides Import, Notifications, and the Settings link.
+
+**Why:** Second slice of the STAFF-1..7 MVP track (epic #121, milestone V7) — closes
+scope items 1 ("onboard employee via email invite") and 11 ("nanny/employee should have
+restricted access") from the original ask. Depends on STAFF-1 (#262, data model) which
+shipped first in this track.
+
+GitHub: closes #263 (epic #121, milestone V7).
+
 ## CR — #268: Household "Permission Level" control, separate from Household Role (2026-08-11)
 
 **What changed:** Settings → Household previously had one dropdown (Head/Member) that only

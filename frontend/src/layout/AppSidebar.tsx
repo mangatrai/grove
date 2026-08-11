@@ -18,6 +18,7 @@ import {
   IconRobot,
   IconChevronLeft,
   IconChevronRight,
+  IconClipboardList,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
 
@@ -27,6 +28,14 @@ type NavItem = {
   label: string;
   Icon: TablerIcon;
 };
+
+/** Staff logins get a single-item minimal nav — no access to household finance screens. */
+const STAFF_NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Portal",
+    items: [{ to: "/staff", end: true, label: "My Portal", Icon: IconClipboardList }],
+  },
+];
 
 const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
@@ -90,9 +99,11 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { role } = useCurrentUser();
   const isCollapsed = collapsed && !mobileOpen;
-  const visibleGroups = role === "member"
-    ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
-    : NAV_GROUPS;
+  const visibleGroups = role === "staff"
+    ? STAFF_NAV_GROUPS
+    : role === "member"
+      ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
+      : NAV_GROUPS;
 
   return (
     <>

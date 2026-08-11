@@ -40,6 +40,7 @@ import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 import { FamilySection } from "./settings/FamilySection";
+import { StaffSection } from "./settings/StaffSection";
 import { GroveLoader } from "../components/GroveLoader";
 import { AddPropertyModal } from "../components/AddPropertyModal";
 
@@ -50,7 +51,7 @@ function localDateStr(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications", "family"] as const;
+const TABS = ["profile", "household", "staff", "accounts", "recurring", "data", "notifications", "family"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -1137,7 +1138,10 @@ export function SettingsPage() {
 
   const visibleTabs = useMemo(
     () => TABS.filter(
-      (id) => (id !== "household" || canManageHousehold) && (id !== "family" || canManageHousehold)
+      (id) =>
+        (id !== "household" || canManageHousehold) &&
+        (id !== "family" || canManageHousehold) &&
+        (id !== "staff" || canManageHousehold)
     ),
     [canManageHousehold]
   );
@@ -1169,15 +1173,17 @@ export function SettingsPage() {
                   ? "Profile"
                   : id === "household"
                     ? "Household"
-                    : id === "accounts"
-                      ? "Accounts"
-                      : id === "recurring"
-                        ? "Recurring"
-                        : id === "data"
-                          ? "Data & Backup"
-                          : id === "notifications"
-                            ? "Notifications"
-                            : "Family"}
+                    : id === "staff"
+                      ? "Staff"
+                      : id === "accounts"
+                        ? "Accounts"
+                        : id === "recurring"
+                          ? "Recurring"
+                          : id === "data"
+                            ? "Data & Backup"
+                            : id === "notifications"
+                              ? "Notifications"
+                              : "Family"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -2369,6 +2375,8 @@ export function SettingsPage() {
             })()}
           </Stack>
         ) : null}
+
+        <StaffSection active={tab === "staff"} />
 
         <FamilySection active={tab === "family"} />
 

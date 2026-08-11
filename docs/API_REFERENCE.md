@@ -882,6 +882,109 @@ Updates the signed-in user's `person_profile`. Send at least one field.
 
 ---
 
+### Staff (Household Employees) (STAFF-2, GH #263)
+
+MVP household-employee (e.g. nanny) onboarding. `GET`/`POST /staff` and `GET /staff/:staffId` require **owner or admin**; `GET /staff/me` requires the **staff** role and returns the caller's own profile. No route lists `"staff"` in `requireRole()`, so a staff login is rejected by every other endpoint in the app by default.
+
+#### `GET /staff`
+
+**Response 200:**
+```json
+{
+  "members": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "personProfileId": "uuid",
+      "fullName": "Jamie Rivera",
+      "email": "jamie@example.com",
+      "phoneNumber": "555-0100",
+      "employmentStartDate": "2026-08-17",
+      "regularScheduleJson": { "mon": 8, "tue": 8, "wed": 8, "thu": 8, "fri": 8 },
+      "isActive": true,
+      "hourlyRateCents": 2500,
+      "hasLogin": true
+    }
+  ]
+}
+```
+
+`hourlyRateCents` reflects the current effective `staff_rate` row (`effective_date <= today`, most recent). `hasLogin` is `false` only if the `app_user` row is somehow missing — every staff member created through `POST /staff` has one.
+
+---
+
+#### `POST /staff`
+
+Creates a household employee: `person_profile` (`relationship=employee`) + `household_membership` (`role=member`, `relationship=employee`) + `app_user` (`role=staff`) + `staff_profile` + an initial `staff_rate`. Idempotently ensures the household has an "Employee" category (with **Salary** / **Bonus** / **Reimbursement** children) for tagging payment transactions later — see [Pay Summary](#pay-summary), not yet shipped.
+
+If SMTP is configured (`isEmailConfigured()`), sends an invite email (reused password-reset-token template) so the employee can set their own password. If not configured, the account is created with a default password (`ChangeMe123!`, `force_password_change` semantics not yet applied) that the admin must share directly — surfaced via `inviteSent: false` in the response.
+
+**Request body:**
+```json
+{
+  "firstName": "string",
+  "lastName": "string (optional)",
+  "email": "string",
+  "phoneNumber": "string (optional)",
+  "dateOfBirth": "YYYY-MM-DD (optional)",
+  "employmentStartDate": "YYYY-MM-DD",
+  "regularScheduleJson": { "mon": 8, "...": "0-24 hours per day key (optional)" },
+  "hourlyRateCents": 2500
+}
+```
+
+**Response 201:** `{ "member": { ...StaffProfile }, "inviteSent": boolean }`
+
+**Errors:**
+- **400** — validation failure (`{ "errors": z.issues }`), or `EMAIL_REQUIRED`.
+- **409** — `EMAIL_CONFLICT` — email already in use by another `person_profile` or `app_user`.
+
+---
+
+#### `GET /staff/me`
+
+**Auth:** Role: staff only.
+
+Returns the calling staff member's own profile, resolved from `req.authUser.personProfileId`.
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+
+---
+
+#### `GET /staff/:staffId`
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **404** — no staff member with that ID in the household.
+
+---
+
+#### `PATCH /staff/:staffId`
+
+Updates schedule, active status, and/or records a new effective-dated pay rate. At least one field required; `newHourlyRateCents` and `newRateEffectiveDate` must be supplied together (a new `staff_rate` row is inserted rather than mutating the current one, preserving history for future pay-summary calculations).
+
+**Request body:** any subset of:
+```json
+{
+  "regularScheduleJson": { "mon": 8 },
+  "isActive": false,
+  "newHourlyRateCents": 2600,
+  "newRateEffectiveDate": "2026-09-01"
+}
+```
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **400** — validation failure, or `newHourlyRateCents`/`newRateEffectiveDate` provided without its pair.
+- **404** — staff member not found.
+
+---
+
 ### Properties
 
 #### `GET /household/properties`

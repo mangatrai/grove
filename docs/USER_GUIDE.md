@@ -707,6 +707,23 @@ Manage household members and settings:
 - **Create login** (owners/admins) — generates a login account with a temporary password; the member must change it on first login.
 - **Reset password** (owners/admins) — generates a new temporary password and invalidates the member's current session. Share the temporary password with them out-of-band; they will be prompted to change it on next login.
 
+### Staff Tab
+
+Available to owners and admins. Onboard and manage household employees (e.g. a nanny) — MVP time & expense tracking, no tax withholding this pass.
+
+**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, regular schedule summary, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history).
+
+**Add staff member** — form fields:
+
+- **First / last name, email, phone, date of birth** — email is required (used for the invite); the rest are optional.
+- **Employment start date** — required.
+- **Hourly rate** — used for both timesheet pay calculations and the pay summary.
+- **Regular schedule** — default hours per day (Mon–Sun); prefills their weekly timesheet, editable per-week by the employee.
+
+On submit, the app creates a restricted login for the employee (`staff` role — see [Staff Portal](#staff-portal) below) and, if email is configured on this instance, sends an invite email so they can set their own password. If email isn't configured, you'll see a default temporary password on screen to share with them directly.
+
+A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member — tag payment transactions with it later to track what's actually been paid against what's owed (see Pay Summary, coming in a future release).
+
 ### Accounts Tab
 
 Add and manage financial accounts (banks, credit cards, investment accounts, etc.):
@@ -877,6 +894,16 @@ Any result — quick ask or research — has a **Save as preference** button. It
 The Family page's **Run history** table shows the last 30 agent runs, newest first — both Quick Capture asks (Source: **Quick capture**) and the scheduled daily digest (Source: **Digest**) in one combined timeline. Click a row to expand its full summary; use the refresh icon to pull in a run submitted moments ago.
 
 The digest email itself (sent to both parents on the schedule set in Settings → Family) is organized into a handful of named sections — **Coverage & Nanny**, **Deadlines**, **Occasions**, **Research finds** — each shown only when it has something to report, rather than one flat list of bullets. The subject line follows a fixed pattern ("Today/This week in the &lt;household&gt; household — &lt;highlight&gt;") so digest emails are easy to scan and search in your inbox.
+
+## Staff Portal
+
+Household employees (e.g. a nanny) log in with the account credentials set up for them in Settings → Staff (see above) and land on a dedicated **My Portal** page instead of the regular dashboard — there is no sidebar navigation beyond this one page, and no access to household finance screens, imports, or settings.
+
+My Portal shows your employment start date, current hourly rate, and regular schedule at a glance, followed by three tabs:
+
+- **My Timesheet** — weekly hours entry (coming in a future release).
+- **My Expenses** — reimbursable expense claims (coming in a future release).
+- **My Pay** — earned/paid/balance summary and downloadable reports (coming in a future release).
 
 ## Year-in-Review
 
