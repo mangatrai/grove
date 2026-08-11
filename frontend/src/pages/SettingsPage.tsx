@@ -1585,21 +1585,59 @@ export function SettingsPage() {
                           }}
                           disabled={savingMemberIndex !== null}
                         />
-                        <Select
-                          label="Role"
-                          value={member.role}
-                          onChange={(value) => {
-                            const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], role: value ?? "member" };
-                            setMemberDrafts(next);
-                          }}
-                          disabled={savingMemberIndex !== null}
-                          allowDeselect={false}
-                          data={[
-                            { value: "head", label: "Head" },
-                            { value: "member", label: "Member" }
-                          ]}
-                        />
+                        <Tooltip
+                          label={
+                            !member.id
+                              ? "Save this member, then set up a login to assign a role"
+                              : !member.linkedUserId
+                              ? "Available once a login account is set up"
+                              : member.appUserRole === "owner"
+                              ? "The owner role cannot be changed"
+                              : member.appUserRole === "staff"
+                              ? "Staff role is assigned during onboarding"
+                              : authRole !== "owner"
+                              ? "Only the owner can change roles"
+                              : ""
+                          }
+                          disabled={
+                            Boolean(member.id) &&
+                            Boolean(member.linkedUserId) &&
+                            authRole === "owner" &&
+                            member.appUserRole !== "owner" &&
+                            member.appUserRole !== "staff"
+                          }
+                          withArrow
+                        >
+                          <Select
+                            label="Role"
+                            value={
+                              member.appUserRole === "owner"
+                                ? "owner"
+                                : member.appUserRole === "staff"
+                                ? "staff"
+                                : member.appUserRole ?? "member"
+                            }
+                            onChange={(value) => {
+                              if (!member.id || (value !== "admin" && value !== "member")) return;
+                              void changeMemberPermission(member.id, value);
+                            }}
+                            disabled={
+                              !member.id ||
+                              !member.linkedUserId ||
+                              member.appUserRole === "owner" ||
+                              member.appUserRole === "staff" ||
+                              authRole !== "owner" ||
+                              changingPermissionForId === member.id
+                            }
+                            allowDeselect={false}
+                            data={[
+                              { value: "owner", label: "Owner" },
+                              { value: "admin", label: "Admin" },
+                              { value: "member", label: "Member" },
+                              { value: "staff", label: "Staff" }
+                            ]}
+                          />
+                        </Tooltip>
                         <Select
                           label="Relationship"
                           value={member.relationship}
@@ -1669,33 +1707,6 @@ export function SettingsPage() {
                               >
                                 Reset password
                               </Button>
-                              {member.appUserRole === "owner" || member.appUserRole === "staff" ? (
-                                <Text size="sm" c="dimmed">
-                                  {member.appUserRole === "owner" ? "Owner" : "Staff account"}
-                                </Text>
-                              ) : member.appUserRole && authRole === "owner" ? (
-                                <Select
-                                  label="Permission level"
-                                  value={member.appUserRole}
-                                  onChange={(value) => {
-                                    if (value === "admin" || value === "member") {
-                                      void changeMemberPermission(member.id!, value);
-                                    }
-                                  }}
-                                  disabled={changingPermissionForId === member.id}
-                                  allowDeselect={false}
-                                  size="xs"
-                                  w={140}
-                                  data={[
-                                    { value: "admin", label: "Admin" },
-                                    { value: "member", label: "Member" }
-                                  ]}
-                                />
-                              ) : member.appUserRole ? (
-                                <Text size="sm" c="dimmed">
-                                  Permission: {member.appUserRole === "admin" ? "Admin" : "Member"}
-                                </Text>
-                              ) : null}
                             </Group>
                           ) : (
                             <>

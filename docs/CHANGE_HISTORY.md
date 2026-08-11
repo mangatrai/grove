@@ -14,6 +14,30 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #269: Merge Household Role and Permission Level into a single Role select (2026-08-11)
+
+**What changed:** `Settings > Household` previously showed two separate dropdowns per member
+— "Household Role" (Head/Member, just a household-position label) and "Permission Level"
+(Admin/Member, the actual `app_user.role` gate) — which is exactly the conflation that
+motivated splitting them apart in the first place (#268/STAFF-7). In practice, having two
+role-shaped controls next to each other was confusing. Replaced with one **Role** select
+showing `owner`/`admin`/`member`/`staff`, wrapped in a `Tooltip` explaining why it's disabled
+(no login yet, owner/staff roles are not reassignable here, or the caller isn't the owner).
+Selecting `admin` or `member` calls the existing `changeMemberPermission` PATCH; `owner` and
+`staff` are display-only entries (not selectable — `owner` can't be reassigned, `staff` is
+set at onboarding, not here).
+
+**Why:** The two-dropdown layout still let an owner glance at "Role: Head" and reasonably
+assume that controlled access, when it never did. One select showing the value that actually
+gates `requireRole()` removes the ambiguity.
+
+**Tests:** No backend change — `changeMemberPermission`'s PATCH endpoint and RBAC gating are
+unchanged (see #268/STAFF-7). Manually verified in the browser: owner sees all four values
+with `admin`/`member` selectable for linked non-owner/non-staff members; non-owner sees the
+select disabled.
+
+**GitHub:** closes #269 (epic #121, milestone V7).
+
 ## CR — #267: PDF hours & payment reports (2026-08-11)
 
 **What changed:** Two new PDF-download endpoints, mounted alongside the existing
