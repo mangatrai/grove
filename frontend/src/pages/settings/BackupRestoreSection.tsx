@@ -113,7 +113,7 @@ function fmtKb(bytes: number | null | undefined): string {
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface BackupRestoreSectionProps {
-  authRole: "owner" | "admin" | "member" | null;
+  authRole: "owner" | "admin" | "member" | "staff" | null;
   /** Whether the data tab is currently active — gates API calls. */
   active: boolean;
 }

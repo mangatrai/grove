@@ -271,6 +271,69 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 31,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "staff_profile",
+    tableName: "staff_profile",
+    restoreOrder: 32,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({ sql: "person_profile_id = ?", params: [profileId] })
+  },
+  {
+    tableKey: "staff_rate",
+    tableName: "staff_rate",
+    restoreOrder: 33,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "staff_profile_id IN (SELECT id FROM staff_profile WHERE person_profile_id = ?)",
+      params: [profileId]
+    })
+  },
+  {
+    tableKey: "timesheet_period",
+    tableName: "timesheet_period",
+    restoreOrder: 34,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "staff_profile_id IN (SELECT id FROM staff_profile WHERE household_id = timesheet_period.household_id AND person_profile_id = ?)",
+      params: [profileId]
+    })
+  },
+  {
+    tableKey: "timesheet_entry",
+    tableName: "timesheet_entry",
+    restoreOrder: 35,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "timesheet_period_id IN (SELECT tp.id FROM timesheet_period tp JOIN staff_profile sp ON sp.id = tp.staff_profile_id WHERE tp.household_id = timesheet_entry.household_id AND sp.person_profile_id = ?)",
+      params: [profileId]
+    })
+  },
+  {
+    tableKey: "staff_expense",
+    tableName: "staff_expense",
+    restoreOrder: 36,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "staff_profile_id IN (SELECT id FROM staff_profile WHERE household_id = staff_expense.household_id AND person_profile_id = ?)",
+      params: [profileId]
+    })
+  },
+  {
+    tableKey: "staff_pay_adjustment",
+    tableName: "staff_pay_adjustment",
+    restoreOrder: 37,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "staff_profile_id IN (SELECT id FROM staff_profile WHERE household_id = staff_pay_adjustment.household_id AND person_profile_id = ?)",
+      params: [profileId]
+    })
   }
 ];
 

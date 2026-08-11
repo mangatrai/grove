@@ -767,6 +767,25 @@ Creates login credentials for an existing member profile.
 
 ---
 
+#### `PATCH /household/members/:memberId/permission` (STAFF-7, GH #268)
+
+**Auth:** Bearer JWT. **Role:** owner only.
+
+Updates `app_user.role` (the field `requireRole()` actually gates on) for a member's linked login — distinct from `PATCH /household/members/:memberId`, which only touches `household_membership.role` (head/member, a household-position label with no bearing on permissions). Use this to promote a member to `admin` (e.g. so a spouse can approve staff timesheets/expenses) or demote back to `member`. Granting `admin` gives full admin rights app-wide, not a scoped subset.
+
+**Request body:**
+```json
+{ "appUserRole": "admin | member" }
+```
+
+**Response 200:** `{ "member": { ...HouseholdMemberProfile, "appUserRole": "owner|admin|member|staff|null" } }`
+
+**Errors:**
+- **400** — validation failure, or `NO_LOGIN` (member has no linked login account), or `IS_OWNER` (the owner's permission level cannot be reassigned through this endpoint).
+- **404** — member not found.
+
+---
+
 #### `GET /household/members/:memberId/data-count`
 
 Returns transaction and payslip counts for a member (used in delete confirmation).

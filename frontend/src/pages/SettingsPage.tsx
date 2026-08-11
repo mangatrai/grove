@@ -261,6 +261,7 @@ type HouseholdMemberResponse = {
   avatarKey: string | null;
   role: "head" | "member";
   relationship: "self" | "spouse" | "child" | "dependent" | "employee" | "other";
+  appUserRole: "owner" | "admin" | "member" | "staff" | null;
 };
 
 type HouseholdMembersPayload = {
@@ -304,9 +305,10 @@ type HouseholdMemberDraft = {
   linkedUserId?: string | null;
   createLogin?: boolean;
   notes?: string | null;
+  appUserRole?: "owner" | "admin" | "member" | "staff" | null;
 };
 
-type MeResponse = { user: { role: "owner" | "admin" | "member" } };
+type MeResponse = { user: { role: "owner" | "admin" | "member" | "staff" } };
 
 type InstitutionsResponse = {
   catalog: string[];
@@ -358,7 +360,8 @@ function normalizeMembersPayload(payload: HouseholdMembersPayload | HouseholdMem
     email: member.email ?? "",
     linkedUserId: member.linkedUserId,
     role: member.role,
-    relationship: member.relationship
+    relationship: member.relationship,
+    appUserRole: member.appUserRole ?? null
   }));
 }
 
@@ -420,6 +423,7 @@ export function SettingsPage() {
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
   const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
+  const [changingPermissionForId, setChangingPermissionForId] = useState<string | null>(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
@@ -436,7 +440,7 @@ export function SettingsPage() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
-  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
+  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | "staff" | null>(null);
   const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -998,6 +1002,24 @@ export function SettingsPage() {
       setMembersError(e instanceof Error ? e.message : "Could not create login");
     } finally {
       setCreatingLoginForId(null);
+    }
+  }
+
+  async function changeMemberPermission(memberId: string, appUserRole: "admin" | "member") {
+    setChangingPermissionForId(memberId);
+    setMembersError(null);
+    setMembersSuccess(null);
+    try {
+      await apiJson<{ member: HouseholdMemberResponse }>(
+        `/household/members/${encodeURIComponent(memberId)}/permission`,
+        { method: "PATCH", body: JSON.stringify({ appUserRole }) }
+      );
+      setMembersSuccess("Permission level updated.");
+      await loadMembers();
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not update permission level");
+    } finally {
+      setChangingPermissionForId(null);
     }
   }
 
@@ -1641,6 +1663,33 @@ export function SettingsPage() {
                               >
                                 Reset password
                               </Button>
+                              {member.appUserRole === "owner" || member.appUserRole === "staff" ? (
+                                <Text size="sm" c="dimmed">
+                                  {member.appUserRole === "owner" ? "Owner" : "Staff account"}
+                                </Text>
+                              ) : member.appUserRole && authRole === "owner" ? (
+                                <Select
+                                  label="Permission level"
+                                  value={member.appUserRole}
+                                  onChange={(value) => {
+                                    if (value === "admin" || value === "member") {
+                                      void changeMemberPermission(member.id!, value);
+                                    }
+                                  }}
+                                  disabled={changingPermissionForId === member.id}
+                                  allowDeselect={false}
+                                  size="xs"
+                                  w={140}
+                                  data={[
+                                    { value: "admin", label: "Admin" },
+                                    { value: "member", label: "Member" }
+                                  ]}
+                                />
+                              ) : member.appUserRole ? (
+                                <Text size="sm" c="dimmed">
+                                  Permission: {member.appUserRole === "admin" ? "Admin" : "Member"}
+                                </Text>
+                              ) : null}
                             </Group>
                           ) : (
                             <>

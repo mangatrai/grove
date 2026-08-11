@@ -14,6 +14,63 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #268: Household "Permission Level" control, separate from Household Role (2026-08-11)
+
+**What changed:** Settings → Household previously had one dropdown (Head/Member) that only
+edits `household_membership.role` — a household-position label with no bearing on what a
+member can actually do. There was no UI to grant a member `admin` in `app_user.role`, the field
+`requireRole()` actually checks. Added a distinct **Permission Level** control (owner-only,
+Owner/Admin/Member) next to it, deliberately not reusing the existing dropdown to avoid
+recreating the conflation.
+
+`backend/src/modules/household/household.service.ts`: new `patchHouseholdMemberPermission()` —
+updates `app_user.role` directly for a member's linked login, refuses `NO_LOGIN` (member has no
+account) and `IS_OWNER` (the owner's own level can't be reassigned this way). `HouseholdMemberProfile`
+/ `listHouseholdMembers` / `getCurrentUserProfile` / `patchCurrentUserProfile` now surface
+`appUserRole` alongside the existing `role` (household position) field, joined from `app_user`.
+
+New route `PATCH /household/members/:memberId/permission`, `requireRole(["owner"])`. Frontend:
+`SettingsPage.tsx` renders the new control (owner-only Select, read-only text for everyone else)
+in each member row; `BackupRestoreSection.tsx`'s `authRole` prop widened to match.
+
+Found and fixed while investigating this: an unrelated existence-check query in
+`deleteHouseholdMember` accidentally picked up a stray JOIN during a `replace_all` edit pass —
+caught via occurrence-count mismatch, removed before commit.
+
+**Why:** Prerequisite for STAFF-3/STAFF-4 approval workflows — a second approver (e.g. a spouse)
+needs a way to be promoted to `admin` without the owner hand-editing the database. Also closes a
+real RBAC gap that predates the staff feature.
+
+**Note:** granting Admin gives that person full admin rights app-wide, not staff-approval-scoped
+permissions — documented in `USER_GUIDE.md`.
+
+GitHub: closes #268 (epic #121, milestone V7).
+
+## DB — #262: Household staff (nanny/employee) timesheet + expense data model (2026-08-11)
+
+**What changed:** New migration `0091_staff_timesheet_expense_mvp.sql` adds the MVP data model
+for household-employee time & expense tracking (nanny starting 2026-08-17): `staff_profile`
+(1:1 with `person_profile`, reuses existing name/contact/DOB fields — no duplication),
+`staff_rate` (effective-dated hourly rate), `timesheet_period` (one row per staff member per
+week, draft/submitted/approved/rejected), `timesheet_entry` (hours per day), `staff_expense`
+(reimbursable claims, same approval states), `staff_pay_adjustment` (bonuses/extra pay, kept
+distinct from an "advance"). `app_user_role_check` widened to add `'staff'`
+(`backend/src/modules/auth/types.ts` `Role` type also widened) for the nanny's restricted
+portal-only login. All 6 tables registered in `EXPORT_REGISTRY`
+(`backend/src/modules/export/export-registry.ts`), verified no `[export-coverage]` WARN on
+startup.
+
+**Why:** First slice of a 7-issue MVP track (STAFF-1..7) under epic #121 ("FR-15 v2", milestone
+V7). Deliberately does **not** include tax withholding, FLSA overtime, or payroll compliance —
+PY-1..PY-9 (#199–#207, same epic) remain the untouched future full-compliance target; this MVP
+reuses the same core table shapes minus every tax-specific column, per user's explicit "no tax
+withholding this sprint" scope decision. No `staff_payment` table: a payment against the balance
+is any `transaction_canonical` row tagged `owner_person_profile_id` = the staff member under a
+new household-scoped "Employee" category tree (Salary/Bonus/Reimbursement, created at
+onboarding) — reuses existing transaction/category machinery instead of a linking UI.
+
+GitHub: closes #262 (epic #121, milestone V7).
+
 ## DB — #258: Merge `category_rule_global` into `category_rule` (2026-07-23)
 
 **What changed:** Dropped the dedicated `category_rule_global` table; global/built-in

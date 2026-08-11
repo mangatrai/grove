@@ -950,6 +950,18 @@ The review includes an AI-generated narrative summarizing financial highlights a
 4. A temporary password is generated. Share it with the member via a secure channel.
 5. On next login, they are forced to change it.
 
+### Changing a Member's Permission Level
+
+1. Go to **Settings > Household**.
+2. Find the member's row (they must already have a login account).
+3. Under **Permission Level** (owner only), choose **Admin** or **Member**.
+
+This is separate from the **Household Role** dropdown (Head/Member), which only labels a
+person's position in the household and does not affect what they can do in the app. Permission
+Level controls actual access — for example, promoting a member to **Admin** lets them approve
+staff timesheets and expenses. Granting Admin gives that person full admin access throughout the
+app, not just staff approvals. The owner's own permission level cannot be changed.
+
 ### Exporting and Restoring Backup
 
 **Export:**
