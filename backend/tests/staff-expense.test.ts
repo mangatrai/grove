@@ -18,6 +18,7 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
   let ownerAuth: string;
   let staffEmail: string;
   let staffAuth: string;
+  let staffId: string;
 
   beforeAll(async () => {
     ownerAuth = await ownerToken();
@@ -31,10 +32,11 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
         lastName: "Nanny",
         email: staffEmail,
         employmentStartDate: "2026-01-01",
-        regularScheduleJson: { mon: 8, tue: 8 },
+        schedule: { daysOfWeek: [1, 2], startTime: "09:00", endTime: "17:00" },
         hourlyRateCents: 2500
       });
     expect(create.status).toBe(201);
+    staffId = create.body.member.id as string;
 
     const login = await request(app).post("/auth/login").send({
       email: staffEmail,
@@ -135,5 +137,42 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
       .set("authorization", `Bearer ${ownerAuth}`);
     expect(reapprove.status).toBe(409);
     expect(reapprove.body.code).toBe("NOT_PENDING");
+  });
+
+  it("owner/admin can select a staff member via ?staffId= and submit a claim through the shared /me route", async () => {
+    const ownerMissingStaffId = await request(app)
+      .get("/staff/expenses/me")
+      .set("authorization", `Bearer ${ownerAuth}`);
+    expect(ownerMissingStaffId.status).toBe(404);
+
+    const submit = await request(app)
+      .post("/staff/expenses/me")
+      .set("authorization", `Bearer ${ownerAuth}`)
+      .send({ expenseDate: "2026-02-04", category: "Medical/First Aid", amountCents: 1200, description: "First-aid kit", staffId });
+    expect(submit.status).toBe(201);
+    expect(submit.body.expense.status).toBe("pending");
+
+    const fetch = await request(app)
+      .get(`/staff/expenses/me?staffId=${staffId}`)
+      .set("authorization", `Bearer ${ownerAuth}`);
+    expect(fetch.status).toBe(200);
+    expect(fetch.body.expenses.some((e: { id: string }) => e.id === submit.body.expense.id)).toBe(true);
+
+    const unknownStaff = await request(app)
+      .get("/staff/expenses/me?staffId=00000000-0000-0000-0000-000000000000")
+      .set("authorization", `Bearer ${ownerAuth}`);
+    expect(unknownStaff.status).toBe(404);
+  });
+
+  it("a staff-role token cannot select a different staffId than its own", async () => {
+    const foreignStaffId = await request(app)
+      .get("/staff/expenses/me?staffId=00000000-0000-0000-0000-000000000000")
+      .set("authorization", `Bearer ${staffAuth}`);
+    expect(foreignStaffId.status).toBe(404);
+
+    const ownStaffId = await request(app)
+      .get(`/staff/expenses/me?staffId=${staffId}`)
+      .set("authorization", `Bearer ${staffAuth}`);
+    expect(ownStaffId.status).toBe(200);
   });
 });

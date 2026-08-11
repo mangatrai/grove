@@ -31,7 +31,6 @@ describe("Staff PDF reports (STAFF-6)", () => {
         lastName: "Reports",
         email: staffEmail,
         employmentStartDate: "2026-01-01",
-        regularScheduleJson: { mon: 8 },
         hourlyRateCents: 2000
       });
     expect(create.status).toBe(201);

@@ -5,7 +5,7 @@ import {
   Badge,
   Button,
   Group,
-  NumberInput,
+  MultiSelect,
   Paper,
   Stack,
   Switch,
@@ -27,20 +27,19 @@ type StaffMember = {
   email: string | null;
   phoneNumber: string | null;
   employmentStartDate: string;
-  regularScheduleJson: Record<string, number>;
   isActive: boolean;
   hourlyRateCents: number;
   hasLogin: boolean;
 };
 
-const DAYS: Array<{ key: string; label: string }> = [
-  { key: "mon", label: "Mon" },
-  { key: "tue", label: "Tue" },
-  { key: "wed", label: "Wed" },
-  { key: "thu", label: "Thu" },
-  { key: "fri", label: "Fri" },
-  { key: "sat", label: "Sat" },
-  { key: "sun", label: "Sun" },
+const DAY_SELECT_DATA = [
+  { value: "0", label: "Sunday" },
+  { value: "1", label: "Monday" },
+  { value: "2", label: "Tuesday" },
+  { value: "3", label: "Wednesday" },
+  { value: "4", label: "Thursday" },
+  { value: "5", label: "Friday" },
+  { value: "6", label: "Saturday" },
 ];
 
 type NewStaffDraft = {
@@ -51,7 +50,7 @@ type NewStaffDraft = {
   dateOfBirth: string;
   employmentStartDate: string;
   hourlyRateUsd: number | undefined;
-  schedule: Record<string, number>;
+  schedule: { daysOfWeek: string[]; startTime: string; endTime: string };
 };
 
 const EMPTY_DRAFT: NewStaffDraft = {
@@ -62,14 +61,8 @@ const EMPTY_DRAFT: NewStaffDraft = {
   dateOfBirth: "",
   employmentStartDate: "",
   hourlyRateUsd: undefined,
-  schedule: {},
+  schedule: { daysOfWeek: [], startTime: "", endTime: "" },
 };
-
-function scheduleSummary(schedule: Record<string, number>): string {
-  const entries = DAYS.filter((d) => (schedule[d.key] ?? 0) > 0);
-  if (entries.length === 0) return "No regular schedule set";
-  return entries.map((d) => `${d.label} ${schedule[d.key]}h`).join(", ");
-}
 
 type PendingTimesheet = {
   id: string;
@@ -80,7 +73,7 @@ type PendingTimesheet = {
   totalHours: number;
 };
 
-function TimesheetApprovalQueue() {
+export function TimesheetApprovalQueue() {
   const [periods, setPeriods] = useState<PendingTimesheet[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,7 +229,7 @@ type PendingExpense = {
   description: string | null;
 };
 
-function ExpenseApprovalQueue() {
+export function ExpenseApprovalQueue() {
   const [expenses, setExpenses] = useState<PendingExpense[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,9 +379,9 @@ function ExpenseApprovalQueue() {
   );
 }
 
-type StaffSectionProps = { active: boolean };
+type StaffDirectoryProps = { active: boolean };
 
-export function StaffSection({ active }: StaffSectionProps) {
+export function StaffDirectory({ active }: StaffDirectoryProps) {
   const [members, setMembers] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -443,7 +436,14 @@ export function StaffSection({ active }: StaffSectionProps) {
           phoneNumber: draft.phoneNumber.trim() || null,
           dateOfBirth: draft.dateOfBirth || null,
           employmentStartDate: draft.employmentStartDate,
-          regularScheduleJson: draft.schedule,
+          schedule:
+            draft.schedule.daysOfWeek.length > 0 && draft.schedule.startTime && draft.schedule.endTime
+              ? {
+                  daysOfWeek: draft.schedule.daysOfWeek.map(Number),
+                  startTime: draft.schedule.startTime,
+                  endTime: draft.schedule.endTime,
+                }
+              : null,
           hourlyRateCents: Math.round(draft.hourlyRateUsd * 100),
         }),
       });
@@ -512,7 +512,7 @@ export function StaffSection({ active }: StaffSectionProps) {
 
   return (
     <Stack mt="md">
-      <Title order={3}>Household Staff</Title>
+      <Title order={2}>Household Staff</Title>
       <Text c="dimmed" size="sm">
         Onboard nannies or household employees for timesheet, expense, and pay tracking. No tax
         withholding is calculated — see the Admin Guide for details.
@@ -547,7 +547,7 @@ export function StaffSection({ active }: StaffSectionProps) {
                 <Table.Td>{m.employmentStartDate}</Table.Td>
                 <Table.Td>{formatUsd(m.hourlyRateCents / 100)}/hr</Table.Td>
                 <Table.Td>
-                  <Text size="xs" c="dimmed">{scheduleSummary(m.regularScheduleJson)}</Text>
+                  <Text size="xs" c="dimmed">See Family → Care &amp; Help Schedule</Text>
                 </Table.Td>
                 <Table.Td>
                   {m.hasLogin ? (
@@ -619,9 +619,6 @@ export function StaffSection({ active }: StaffSectionProps) {
         <Text size="sm" c="dimmed">No staff members added yet.</Text>
       ) : null}
 
-      <TimesheetApprovalQueue />
-      <ExpenseApprovalQueue />
-
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
           <Group gap="xs" align="center">
@@ -683,25 +680,29 @@ export function StaffSection({ active }: StaffSectionProps) {
               disabled={adding}
             />
           </Group>
-          <Text size="sm" fw={500}>Regular schedule (hours per day)</Text>
+          <Text size="sm" fw={500}>Regular schedule (optional)</Text>
           <Group align="end" grow>
-            {DAYS.map((d) => (
-              <NumberInput
-                key={d.key}
-                label={d.label}
-                min={0}
-                max={24}
-                step={0.5}
-                value={draft.schedule[d.key] ?? 0}
-                onChange={(value) =>
-                  setDraft((p) => ({
-                    ...p,
-                    schedule: { ...p.schedule, [d.key]: typeof value === "number" ? value : 0 },
-                  }))
-                }
-                disabled={adding}
-              />
-            ))}
+            <MultiSelect
+              label="Days of week"
+              data={DAY_SELECT_DATA}
+              value={draft.schedule.daysOfWeek}
+              onChange={(value) => setDraft((p) => ({ ...p, schedule: { ...p.schedule, daysOfWeek: value } }))}
+              disabled={adding}
+            />
+            <TextInput
+              label="Start time"
+              type="time"
+              value={draft.schedule.startTime}
+              onChange={(e) => setDraft((p) => ({ ...p, schedule: { ...p.schedule, startTime: e.currentTarget.value } }))}
+              disabled={adding}
+            />
+            <TextInput
+              label="End time"
+              type="time"
+              value={draft.schedule.endTime}
+              onChange={(e) => setDraft((p) => ({ ...p, schedule: { ...p.schedule, endTime: e.currentTarget.value } }))}
+              disabled={adding}
+            />
           </Group>
           {addError ? <Alert color="red" p="xs">{addError}</Alert> : null}
           {addSuccess ? <Alert color="green" p="xs">{addSuccess}</Alert> : null}

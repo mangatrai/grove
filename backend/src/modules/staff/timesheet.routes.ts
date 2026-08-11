@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
-import { getStaffMemberForUser } from "./staff.service.js";
+import { resolveAccessibleStaffMember } from "./staff.service.js";
 import {
   approvePeriod,
+  computeScheduledHours,
   currentWeekStart,
   getOrCreateDraftPeriod,
   getPeriodById,
@@ -30,20 +31,22 @@ const saveEntriesSchema = z.object({
   entries: z.array(entrySchema).max(7)
 });
 
-async function requireStaffContext(
-  req: AuthenticatedRequest
-): Promise<{ householdId: string; staffProfileId: string } | null> {
-  const { householdId, personProfileId } = req.authUser!;
-  if (!personProfileId) return null;
-  const member = await getStaffMemberForUser(householdId, personProfileId);
-  if (!member) return null;
-  return { householdId, staffProfileId: member.id };
-}
+const staffIdQuerySchema = z.object({ staffId: z.string().uuid().optional() });
+const staffIdBodySchema = z.object({ staffId: z.string().uuid().optional() });
 
-timesheetRouter.get("/me", requireRole(["staff"]), async (req: AuthenticatedRequest, res) => {
-  const ctx = await requireStaffContext(req);
-  if (!ctx) {
-    res.status(404).json({ message: "Staff profile not found" });
+/**
+ * GET/PUT/POST /me[?staffId=]: staff callers always get their own timesheet (staffId ignored/self-only);
+ * owner/admin callers must supply staffId to select which household staff member's timesheet to view/edit.
+ */
+timesheetRouter.get("/me", requireRole(["staff", "owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const query = staffIdQuerySchema.safeParse(req.query);
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const member = await resolveAccessibleStaffMember(req, query.data.staffId);
+  if (!member) {
+    res.status(404).json({ message: "Staff member not found" });
     return;
   }
   const weekStartParam = typeof req.query.weekStart === "string" ? req.query.weekStart : undefined;
@@ -51,23 +54,26 @@ timesheetRouter.get("/me", requireRole(["staff"]), async (req: AuthenticatedRequ
     res.status(400).json({ message: "weekStart must be YYYY-MM-DD" });
     return;
   }
+  const householdId = req.authUser!.householdId;
   const weekStartDate = weekStartParam ?? currentWeekStart();
-  const period = await getOrCreateDraftPeriod(ctx.householdId, ctx.staffProfileId, weekStartDate);
-  res.status(200).json({ period });
+  const period = await getOrCreateDraftPeriod(householdId, member.id, weekStartDate);
+  const scheduledHours = await computeScheduledHours(householdId, member.personProfileId, weekStartDate);
+  res.status(200).json({ period, scheduledHours });
 });
 
-timesheetRouter.put("/me", requireRole(["staff"]), async (req: AuthenticatedRequest, res) => {
-  const ctx = await requireStaffContext(req);
-  if (!ctx) {
-    res.status(404).json({ message: "Staff profile not found" });
-    return;
-  }
-  const parsed = saveEntriesSchema.safeParse(req.body ?? {});
+timesheetRouter.put("/me", requireRole(["staff", "owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const parsed = saveEntriesSchema.merge(staffIdBodySchema).safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ errors: parsed.error.issues });
     return;
   }
-  const out = await saveEntries(ctx.householdId, ctx.staffProfileId, parsed.data.weekStartDate, parsed.data.entries);
+  const member = await resolveAccessibleStaffMember(req, parsed.data.staffId);
+  if (!member) {
+    res.status(404).json({ message: "Staff member not found" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await saveEntries(householdId, member.id, parsed.data.weekStartDate, parsed.data.entries);
   if (!out.ok) {
     if (out.code === "INVALID_DATE") {
       res.status(400).json({ message: "Each entry's workDate must fall within the given week", code: out.code });
@@ -79,18 +85,18 @@ timesheetRouter.put("/me", requireRole(["staff"]), async (req: AuthenticatedRequ
   res.status(200).json({ period: out.period });
 });
 
-timesheetRouter.post("/me/submit", requireRole(["staff"]), async (req: AuthenticatedRequest, res) => {
-  const ctx = await requireStaffContext(req);
-  if (!ctx) {
-    res.status(404).json({ message: "Staff profile not found" });
-    return;
-  }
-  const parsed = z.object({ weekStartDate: dateSchema }).safeParse(req.body ?? {});
+timesheetRouter.post("/me/submit", requireRole(["staff", "owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const parsed = z.object({ weekStartDate: dateSchema }).merge(staffIdBodySchema).safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ errors: parsed.error.issues });
     return;
   }
-  const out = await submitPeriod(ctx.householdId, ctx.staffProfileId, parsed.data.weekStartDate);
+  const member = await resolveAccessibleStaffMember(req, parsed.data.staffId);
+  if (!member) {
+    res.status(404).json({ message: "Staff member not found" });
+    return;
+  }
+  const out = await submitPeriod(req.authUser!.householdId, member.id, parsed.data.weekStartDate);
   if (!out.ok) {
     const message = out.code === "EMPTY" ? "Add hours before submitting" : "Timesheet is not editable";
     res.status(409).json({ message, code: out.code });

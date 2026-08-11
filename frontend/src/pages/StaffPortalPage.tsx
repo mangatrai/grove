@@ -13,20 +13,9 @@ type StaffProfile = {
   id: string;
   fullName: string;
   employmentStartDate: string;
-  regularScheduleJson: Record<string, number>;
   hourlyRateCents: number;
   isActive: boolean;
 };
-
-const DAY_LABELS: Array<{ key: string; label: string }> = [
-  { key: "mon", label: "Mon" },
-  { key: "tue", label: "Tue" },
-  { key: "wed", label: "Wed" },
-  { key: "thu", label: "Thu" },
-  { key: "fri", label: "Fri" },
-  { key: "sat", label: "Sat" },
-  { key: "sun", label: "Sun" },
-];
 
 export function StaffPortalPage() {
   const [profile, setProfile] = useState<StaffProfile | null>(null);
@@ -73,15 +62,6 @@ export function StaffPortalPage() {
                 <Text size="xs" c="dimmed">Hourly rate</Text>
                 <Text fw={600}>{formatUsd(profile.hourlyRateCents / 100)}/hr</Text>
               </div>
-              <div>
-                <Text size="xs" c="dimmed">Regular schedule</Text>
-                <Text fw={600}>
-                  {DAY_LABELS
-                    .filter((d) => (profile.regularScheduleJson[d.key] ?? 0) > 0)
-                    .map((d) => `${d.label} ${profile.regularScheduleJson[d.key]}h`)
-                    .join(", ") || "Not set"}
-                </Text>
-              </div>
             </Group>
 
             <Tabs defaultValue="timesheet" mt="lg" variant="pills" radius="xl" color="gray">
@@ -91,7 +71,7 @@ export function StaffPortalPage() {
                 <Tabs.Tab value="pay">My Pay</Tabs.Tab>
               </Tabs.List>
               <Tabs.Panel value="timesheet" pt="md">
-                <MyTimesheetPanel regularSchedule={profile.regularScheduleJson} />
+                <MyTimesheetPanel />
               </Tabs.Panel>
               <Tabs.Panel value="expenses" pt="md">
                 <MyExpensesPanel />

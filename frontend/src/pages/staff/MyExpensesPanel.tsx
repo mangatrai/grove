@@ -38,7 +38,12 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function MyExpensesPanel() {
+type MyExpensesPanelProps = {
+  /** Omit for self-service (staff role, locked to own record). Owner/admin must pass the selected staff member's id. */
+  staffId?: string;
+};
+
+export function MyExpensesPanel({ staffId }: MyExpensesPanelProps) {
   const [expenses, setExpenses] = useState<StaffExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,14 +59,17 @@ export function MyExpensesPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiJson<{ expenses: StaffExpense[] }>("/staff/expenses/me");
+      const params = new URLSearchParams();
+      if (staffId) params.set("staffId", staffId);
+      const qs = params.toString();
+      const res = await apiJson<{ expenses: StaffExpense[] }>(`/staff/expenses/me${qs ? `?${qs}` : ""}`);
       setExpenses(res.expenses);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load expenses");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [staffId]);
 
   useEffect(() => {
     void load();
@@ -82,6 +90,7 @@ export function MyExpensesPanel() {
           category,
           amountCents: Math.round(amountUsd * 100),
           description: description.trim() || null,
+          staffId,
         }),
       });
       setCategory(null);

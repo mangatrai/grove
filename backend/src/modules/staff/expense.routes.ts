@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
-import { getStaffMemberForUser } from "./staff.service.js";
+import { resolveAccessibleStaffMember } from "./staff.service.js";
 import { EXPENSE_CATEGORIES } from "./expense.types.js";
 import { approveExpense, createExpense, listMyExpenses, listPendingExpenses, rejectExpense } from "./expense.service.js";
 
@@ -18,38 +18,39 @@ const createExpenseSchema = z.object({
   description: z.string().max(500).nullable().optional()
 });
 
-async function requireStaffContext(
-  req: AuthenticatedRequest
-): Promise<{ householdId: string; staffProfileId: string } | null> {
-  const { householdId, personProfileId } = req.authUser!;
-  if (!personProfileId) return null;
-  const member = await getStaffMemberForUser(householdId, personProfileId);
-  if (!member) return null;
-  return { householdId, staffProfileId: member.id };
-}
+const staffIdQuerySchema = z.object({ staffId: z.string().uuid().optional() });
 
-expenseRouter.get("/me", requireRole(["staff"]), async (req: AuthenticatedRequest, res) => {
-  const ctx = await requireStaffContext(req);
-  if (!ctx) {
-    res.status(404).json({ message: "Staff profile not found" });
+/**
+ * GET/POST /me[?staffId=]: staff callers always get their own expenses (staffId ignored/self-only);
+ * owner/admin callers must supply staffId to select which household staff member's expenses to view/submit.
+ */
+expenseRouter.get("/me", requireRole(["staff", "owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const query = staffIdQuerySchema.safeParse(req.query);
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
     return;
   }
-  const expenses = await listMyExpenses(ctx.householdId, ctx.staffProfileId);
+  const member = await resolveAccessibleStaffMember(req, query.data.staffId);
+  if (!member) {
+    res.status(404).json({ message: "Staff member not found" });
+    return;
+  }
+  const expenses = await listMyExpenses(req.authUser!.householdId, member.id);
   res.status(200).json({ expenses });
 });
 
-expenseRouter.post("/me", requireRole(["staff"]), async (req: AuthenticatedRequest, res) => {
-  const ctx = await requireStaffContext(req);
-  if (!ctx) {
-    res.status(404).json({ message: "Staff profile not found" });
-    return;
-  }
-  const parsed = createExpenseSchema.safeParse(req.body ?? {});
+expenseRouter.post("/me", requireRole(["staff", "owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const parsed = createExpenseSchema.merge(staffIdQuerySchema).safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ errors: parsed.error.issues });
     return;
   }
-  const expense = await createExpense(ctx.householdId, ctx.staffProfileId, parsed.data);
+  const member = await resolveAccessibleStaffMember(req, parsed.data.staffId);
+  if (!member) {
+    res.status(404).json({ message: "Staff member not found" });
+    return;
+  }
+  const expense = await createExpense(req.authUser!.householdId, member.id, parsed.data);
   res.status(201).json({ expense });
 });
 

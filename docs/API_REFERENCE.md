@@ -987,15 +987,17 @@ Updates schedule, active status, and/or records a new effective-dated pay rate. 
 
 ### Timesheets (STAFF-3, GH #264)
 
-Weekly timesheet entry (staff self-service) and owner/admin approval queue, mounted under `/staff/timesheets`. Status machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is a distinct, editable state (not folded back into `draft`) so the employee can see why a period bounced. `EDITABLE_STATUSES = ["draft", "rejected"]`.
+Weekly timesheet entry — same `/me` route set for both staff self-service and owner/admin submit-on-behalf, mounted under `/staff/timesheets`. Status machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is a distinct, editable state (not folded back into `draft`) so the employee can see why a period bounced. `EDITABLE_STATUSES = ["draft", "rejected"]`.
+
+**Access control (all `/me` routes):** staff-role callers are always locked to their own `staff_profile` row — an optional `staffId` is accepted but rejected (404) if it doesn't match their own. Owner/admin callers must supply `staffId` (any household staff member) — omitting it is a 404. Resolved via `resolveAccessibleStaffMember()` (`staff.service.ts`); there is no separate `/for/:staffId` route.
 
 #### `GET /staff/timesheets/me`
 
-**Auth:** Role: staff only.
+**Auth:** Role: staff, owner, or admin.
 
-Returns the caller's timesheet period for the given week, creating an empty `draft` row on first access if none exists. No entries are persisted until `PUT /staff/timesheets/me` is called — prefill from `regular_schedule_json` is a frontend-only convenience.
+Returns the selected staff member's timesheet period for the given week, creating an empty `draft` row on first access if none exists. No entries are persisted until `PUT /staff/timesheets/me` is called — prefill from `household_help_availability` is a frontend-only convenience.
 
-**Query params:** `weekStart` (optional, `YYYY-MM-DD`; defaults to the current household-local week's Monday).
+**Query params:** `weekStart` (optional, `YYYY-MM-DD`; defaults to the current household-local week's Monday). `staffId` (optional for staff role, required for owner/admin).
 
 **Response 200:**
 ```json
@@ -1017,14 +1019,14 @@ Returns the caller's timesheet period for the given week, creating an empty `dra
 ```
 
 **Errors:**
-- **400** — `weekStart` present but not `YYYY-MM-DD`.
-- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+- **400** — `weekStart` or `staffId` present but malformed.
+- **404** — no accessible staff member (staff self-lookup failed, staff selected a foreign `staffId`, or owner/admin omitted `staffId`/selected an unknown one).
 
 ---
 
 #### `PUT /staff/timesheets/me`
 
-**Auth:** Role: staff only.
+**Auth:** Role: staff, owner, or admin.
 
 Full-replace: deletes all existing `timesheet_entry` rows for the period and re-inserts the posted set in one transaction. Only allowed while the period is `draft` or `rejected`.
 
@@ -1032,7 +1034,8 @@ Full-replace: deletes all existing `timesheet_entry` rows for the period and re-
 ```json
 {
   "weekStartDate": "2026-08-10",
-  "entries": [{ "workDate": "2026-08-10", "hoursWorked": 8, "note": "string (optional)" }]
+  "entries": [{ "workDate": "2026-08-10", "hoursWorked": 8, "note": "string (optional)" }],
+  "staffId": "uuid (optional for staff role, required for owner/admin)"
 }
 ```
 Max 7 entries; `hoursWorked` must be `> 0` and `<= 24`.
@@ -1041,24 +1044,24 @@ Max 7 entries; `hoursWorked` must be `> 0` and `<= 24`.
 
 **Errors:**
 - **400** — validation failure, or `code: "INVALID_DATE"` — an entry's `workDate` falls outside the given week.
-- **404** — no matching `staff_profile` row.
+- **404** — no accessible staff member (see access control above).
 - **409** — `code: "NOT_EDITABLE"` — period is `submitted` or `approved`.
 
 ---
 
 #### `POST /staff/timesheets/me/submit`
 
-**Auth:** Role: staff only.
+**Auth:** Role: staff, owner, or admin.
 
 Moves the period to `submitted` for owner/admin review. Clears any prior `reviewNote`.
 
-**Request body:** `{ "weekStartDate": "2026-08-10" }`
+**Request body:** `{ "weekStartDate": "2026-08-10", "staffId": "uuid (optional for staff role, required for owner/admin)" }`
 
 **Response 200:** `{ "period": { ...TimesheetPeriod, "status": "submitted" } }`
 
 **Errors:**
 - **400** — validation failure.
-- **404** — no matching `staff_profile` row.
+- **404** — no accessible staff member (see access control above).
 - **409** — `code: "EMPTY"` — no entries with hours logged; `code: "NOT_EDITABLE"` — period is not `draft`/`rejected`.
 
 ---
@@ -1126,13 +1129,17 @@ Moves a `submitted` period to `rejected`; requires a `reviewNote` so the employe
 
 ### Staff Expenses (STAFF-4, GH #265)
 
-Reimbursable expense claim entry (staff self-service) and owner/admin approval queue, mounted under `/staff/expenses`. Status is `pending` | `approved` | `rejected` — no `draft` state (unlike timesheets): a submitted claim is created directly as `pending`, and `rejected` is terminal/view-only with no edit-and-resubmit path.
+Reimbursable expense claim entry — same `/me` route set for both staff self-service and owner/admin submit-on-behalf, mounted under `/staff/expenses`. Status is `pending` | `approved` | `rejected` — no `draft` state (unlike timesheets): a submitted claim is created directly as `pending`, and `rejected` is terminal/view-only with no edit-and-resubmit path.
+
+**Access control (all `/me` routes):** staff-role callers are always locked to their own `staff_profile` row — an optional `staffId` is accepted but rejected (404) if it doesn't match their own. Owner/admin callers must supply `staffId` (any household staff member) — omitting it is a 404. Resolved via `resolveAccessibleStaffMember()` (`staff.service.ts`); there is no separate `/for/:staffId` route.
 
 #### `GET /staff/expenses/me`
 
-**Auth:** Role: staff only.
+**Auth:** Role: staff, owner, or admin.
 
-Lists the caller's own expense claims, newest first (`expenseDate DESC, createdAt DESC`).
+Lists the selected staff member's expense claims, newest first (`expenseDate DESC, createdAt DESC`).
+
+**Query params:** `staffId` (optional for staff role, required for owner/admin).
 
 **Response 200:**
 ```json
@@ -1144,19 +1151,20 @@ Lists the caller's own expense claims, newest first (`expenseDate DESC, createdA
 ```
 
 **Errors:**
-- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+- **400** — `staffId` present but malformed.
+- **404** — no accessible staff member (see access control above).
 
 ---
 
 #### `POST /staff/expenses/me`
 
-**Auth:** Role: staff only.
+**Auth:** Role: staff, owner, or admin.
 
 Creates a new claim, immediately `pending` for owner/admin review.
 
 **Request body:**
 ```json
-{ "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "string (optional)" }
+{ "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "string (optional)", "staffId": "uuid (optional for staff role, required for owner/admin)" }
 ```
 `category` must be one of `EXPENSE_CATEGORIES` (`Transportation/Mileage`, `Groceries & Kids' Supplies`, `Activities & Outings`, `Parking & Tolls`, `Medical/First Aid`, `Other`); `amountCents` must be a positive integer.
 
@@ -1164,7 +1172,7 @@ Creates a new claim, immediately `pending` for owner/admin review.
 
 **Errors:**
 - **400** — validation failure (bad category, non-positive amount).
-- **404** — no matching `staff_profile` row.
+- **404** — no accessible staff member (see access control above).
 
 ---
 

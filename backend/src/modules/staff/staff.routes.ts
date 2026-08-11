@@ -9,6 +9,7 @@ import {
   getStaffMemberById,
   getStaffMemberForUser,
   listStaffMembers,
+  resolveAccessibleStaffMember,
   updateStaffMember
 } from "./staff.service.js";
 import { timesheetRouter } from "./timesheet.routes.js";
@@ -21,7 +22,11 @@ staffRouter.use(requireAuth);
 staffRouter.use("/timesheets", timesheetRouter);
 staffRouter.use("/expenses", expenseRouter);
 
-const scheduleSchema = z.record(z.string(), z.number().min(0).max(24));
+const scheduleSchema = z.object({
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1),
+  startTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Must be HH:MM"),
+  endTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Must be HH:MM")
+});
 
 const createStaffSchema = z.object({
   firstName: z.string().min(1).max(120),
@@ -30,7 +35,7 @@ const createStaffSchema = z.object({
   phoneNumber: z.string().max(30).nullable().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").nullable().optional(),
   employmentStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
-  regularScheduleJson: scheduleSchema.optional(),
+  schedule: scheduleSchema.nullable().optional(),
   hourlyRateCents: z.number().int().positive()
 });
 
@@ -91,7 +96,6 @@ staffRouter.get("/:staffId", requireRole(["owner", "admin"]), async (req: Authen
 
 const patchStaffSchema = z
   .object({
-    regularScheduleJson: scheduleSchema.optional(),
     isActive: z.boolean().optional(),
     newHourlyRateCents: z.number().int().positive().optional(),
     newRateEffectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional()
@@ -122,17 +126,6 @@ staffRouter.patch("/:staffId", requireRole(["owner", "admin"]), async (req: Auth
 });
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD");
-
-/** Staff may only view their own pay data; owner/admin may view any. Returns null on access denial. */
-async function resolveAccessibleStaffMember(req: AuthenticatedRequest, staffId: string) {
-  const { householdId, role, personProfileId } = req.authUser!;
-  const member = await getStaffMemberById(householdId, staffId);
-  if (!member) return null;
-  if (role === "staff") {
-    if (!personProfileId || member.personProfileId !== personProfileId) return null;
-  }
-  return member;
-}
 
 staffRouter.get(
   "/:staffId/pay-summary",

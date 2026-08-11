@@ -707,9 +707,11 @@ Manage household members and settings:
 - **Create login** (owners/admins) — generates a login account with a temporary password; the member must change it on first login.
 - **Reset password** (owners/admins) — generates a new temporary password and invalidates the member's current session. Share the temporary password with them out-of-band; they will be prompted to change it on next login.
 
-### Staff Tab
+### Staff (sidebar section)
 
-Available to owners and admins. Onboard and manage household employees (e.g. a nanny) — MVP time & expense tracking, no tax withholding this pass.
+Available to owners and admins as a top-level **Staff** sidebar group (not under Settings) — onboard and manage household employees (e.g. a nanny). MVP time & expense tracking, no tax withholding this pass. Four pages:
+
+#### Directory
 
 **Staff roster** — table of current staff members: name/email, employment start date, hourly rate, regular schedule summary, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history).
 
@@ -718,17 +720,29 @@ Available to owners and admins. Onboard and manage household employees (e.g. a n
 - **First / last name, email, phone, date of birth** — email is required (used for the invite); the rest are optional.
 - **Employment start date** — required.
 - **Hourly rate** — used for both timesheet pay calculations and the pay summary.
-- **Regular schedule** — default hours per day (Mon–Sun); prefills their weekly timesheet, editable per-week by the employee.
+- **Regular schedule** — default days/hours, entered as a Care & Help Schedule entry (Settings → Family); prefills their weekly timesheet, editable per-week by the employee.
 
 On submit, the app creates a restricted login for the employee (`staff` role — see [Staff Portal](#staff-portal) below) and, if email is configured on this instance, sends an invite email so they can set their own password. If email isn't configured, you'll see a default temporary password on screen to share with them directly.
 
 A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member. When you actually pay them, tag that transaction on the ledger (edit the transaction, set **Belongs to** to the staff member and its category to Salary/Bonus/Reimbursement under Employee) — anything so tagged is picked up as "paid" in their pay summary, no separate linking step needed.
 
-**Timesheet approvals** — below the staff roster, a queue lists every timesheet week an employee has submitted, showing their name, the week, and total hours. **Approve** moves the week to approved; **Reject** requires a comment explaining what needs to change, which the employee sees on their own timesheet and can then edit and resubmit.
-
-**Expense approvals** — below timesheet approvals, a second queue lists every pending expense claim, showing the employee's name, date, category, amount, and description. **Approve** or **Reject with a required comment** — unlike timesheets, a rejected expense claim is final; the employee sees the reviewer's comment but must file a new claim rather than editing the rejected one.
-
 **Record bonus** — a button on each staff member's roster row for recording a one-off bonus or extra pay (date, amount, reason). This is distinct from an advance: it adds to what they're owed (their "earned" total) rather than reducing it, and shows up in their own My Pay tab and in your pay-summary view for them.
+
+#### Timesheets
+
+**Submit or edit on a staff member's behalf** — pick anyone from the **Staff member** dropdown to view, save, or submit their current week's timesheet, using the same entry screen they see themselves (arrows/date-jump to navigate weeks, save draft, submit for approval). Useful when they missed the deadline or don't have device access — there's no separate "on behalf" form, just this same screen with a staff picker.
+
+**Approval queue** — below the picker, a queue lists every timesheet week an employee has submitted, showing their name, the week, and total hours. **Approve** moves the week to approved; **Reject** requires a comment explaining what needs to change, which the employee sees on their own timesheet and can then edit and resubmit.
+
+#### Expenses
+
+**Submit on a staff member's behalf** — pick anyone from the **Staff member** dropdown to key in a claim for them (e.g. a paper receipt), using the same claim form and claims list they see themselves.
+
+**Approval queue** — below the picker, a second queue lists every pending expense claim, showing the employee's name, date, category, amount, and description. **Approve** or **Reject with a required comment** — unlike timesheets, a rejected expense claim is final; the employee sees the reviewer's comment but must file a new claim rather than editing the rejected one.
+
+#### Pay & Reports
+
+Pick a staff member from the dropdown to see their earned/paid/balance summary and download hours/payment reports — the same view shown on their own My Pay tab (see [Staff Portal](#staff-portal) below).
 
 ### Accounts Tab
 

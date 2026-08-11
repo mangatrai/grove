@@ -207,7 +207,7 @@ export async function patchHouseholdSettings(
 }
 
 export type HouseholdMemberRole = "head" | "member";
-export type HouseholdRelationship = "self" | "spouse" | "child" | "dependent" | "other";
+export type HouseholdRelationship = "self" | "spouse" | "child" | "dependent" | "employee" | "other";
 
 export type HouseholdMemberProfile = {
   id: string;

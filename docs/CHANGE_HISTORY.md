@@ -14,6 +14,45 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #272 + #271: Staff moves to top-level sidebar; owner/admin submit-on-behalf (2026-08-11)
+
+**What changed:**
+- **Sidebar placement (#272):** Staff is no longer a Settings tab. New top-level sidebar
+  section with four pages — `StaffDirectoryPage` (roster + onboarding, was
+  `StaffSection.tsx`), `StaffTimesheetsPage`, `StaffExpensesPage`, `StaffPayPage` — routed
+  at `/staff-admin/{directory,timesheets,expenses,pay}`, all `RequireOwnerOrAdmin`. The
+  approval-queue components (`TimesheetApprovalQueue`, `ExpenseApprovalQueue`) that used to
+  live embedded inside the old Settings tab now render on their respective pages.
+  `frontend/vite.config.ts` gained a `/staff` dev-proxy entry (previously only reachable
+  through the Settings-tab fetch path).
+- **Submit-on-behalf via shared routes, not separate ones (#271):** rejected the initial
+  design of dedicated `/for/:staffId` routes + admin-only UI as unnecessary duplication.
+  Instead, `/staff/timesheets/me` and `/staff/expenses/me` (GET/PUT/POST) now accept an
+  optional `staffId` (query param on GET, body field on PUT/POST) and are open to
+  `staff`/`owner`/`admin` roles alike. New `resolveAccessibleStaffMember(req, staffId?)`
+  in `staff.service.ts` is the single access-control chokepoint: a `staff`-role caller
+  self-resolves and is rejected (`null`) if `staffId` is supplied and doesn't match their
+  own record; an `owner`/`admin` caller must supply `staffId` and may select any household
+  staff member via `getStaffMemberById`. `MyTimesheetPanel`/`MyExpensesPanel` both gained an
+  optional `staffId?: string` prop (undefined = self-service, set = viewing/editing on
+  behalf of that staff member) — same pattern `MyPayPanel` already used. New shared
+  `StaffPicker` component (`GET /staff`, filtered to `isActive`) feeds a Mantine `Select` on
+  `StaffTimesheetsPage`/`StaffExpensesPage` so owner/admin can choose who they're acting on
+  behalf of, in the same UI a staff member sees for themselves — no new routes, no new
+  admin-only UI.
+
+**Why:** The original `/for/:staffId` design duplicated an entire route + UI surface to
+gate by role, when the same result is achievable with role-aware access control on the
+existing self-service surface. See `[[feedback_no_speculative_infra]]`.
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` and `staff-expense.test.ts` — owner/admin
+selecting a staff member via `?staffId=`/body `staffId` can create/save/submit or list/submit
+through `/me`; missing `staffId` for owner/admin → 404; unknown `staffId` → 404; a staff-role
+token supplying a foreign `staffId` → 404 (own `staffId` still works). `npm run lint` and
+`npm test` pass across both workspaces.
+
+**GitHub:** closes #272 (epic #121, milestone V7), closes #271 (epic #121, milestone V7).
+
 ## CR — #269: Merge Household Role and Permission Level into a single Role select (2026-08-11)
 
 **What changed:** `Settings > Household` previously showed two separate dropdowns per member
@@ -37,6 +76,33 @@ with `admin`/`member` selectable for linked non-owner/non-staff members; non-own
 select disabled.
 
 **GitHub:** closes #269 (epic #121, milestone V7).
+
+## FIX — #270: household_help_availability as sole source of truth for staff schedules (2026-08-11)
+
+**What changed:** `staff_profile.regular_schedule_json` was a second, independent place to
+store a staff member's weekly schedule, duplicating `household_help_availability`
+(`slot_type='regular'`) — the table `family-agent.service.ts` already reads for the same
+person. Migration `0092_drop_staff_regular_schedule.sql` drops the column. Staff onboarding
+(`createStaffMember`) now writes the submitted schedule as a `household_help_availability`
+row instead. Timesheet prefill (`GET /staff/timesheets/me`) computes `scheduledHours` per day
+on the fly via a new `computeScheduledHours()` in `timesheet.service.ts`, reading
+`listAvailability()` and converting matching `regular` slots to hours with a new
+`timeRangeHours(start, end)` helper — nothing is persisted until the staff member actually
+submits real entries. `household.routes.ts`/`household.service.ts` gained an `"employee"`
+value on `HouseholdRelationship` so the onboarding-created `person_profile`/
+`household_membership` rows can be tagged correctly.
+
+**Why:** Two schedule sources for the same person invites drift (edit one, forget the
+other) — see `[[feedback_table_reuse_before_new_table]]`. `household_help_availability` was
+already the canonical schedule table; `staff_profile` should read it, not duplicate it.
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` — fresh-week `GET /me` returns
+`scheduledHours` computed from a `household_help_availability` row created at onboarding, and
+persisted `period.entries` stays empty until an explicit save (prefill is frontend-only).
+`staff-pay.test.ts`/`staff-reports.test.ts` updated to drop the now-removed
+`regularScheduleJson` field from onboarding payloads.
+
+**GitHub:** closes #270 (epic #121, milestone V7).
 
 ## CR — #267: PDF hours & payment reports (2026-08-11)
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -35,6 +37,7 @@ describe("Staff timesheet entry + approval workflow (STAFF-3)", () => {
   let ownerAuth: string;
   let staffEmail: string;
   let staffAuth: string;
+  let staffId: string;
 
   beforeAll(async () => {
     ownerAuth = await ownerToken();
@@ -48,11 +51,12 @@ describe("Staff timesheet entry + approval workflow (STAFF-3)", () => {
         lastName: "Nanny",
         email: staffEmail,
         employmentStartDate: "2026-01-01",
-        regularScheduleJson: { mon: 8, tue: 8 },
+        schedule: { daysOfWeek: [1, 2], startTime: "09:00", endTime: "17:00" },
         hourlyRateCents: 2500
       });
     expect(create.status).toBe(201);
     expect(create.body.inviteSent).toBe(false); // no SMTP configured in test env
+    staffId = create.body.member.id as string;
 
     const login = await request(app).post("/auth/login").send({
       email: staffEmail,
@@ -62,7 +66,7 @@ describe("Staff timesheet entry + approval workflow (STAFF-3)", () => {
     staffAuth = login.body.token as string;
   });
 
-  it("staff GET /staff/timesheets/me for a fresh week prefills hours from the regular schedule", async () => {
+  it("staff GET /staff/timesheets/me for a fresh week returns scheduledHours computed from household_help_availability", async () => {
     const res = await request(app)
       .get(`/staff/timesheets/me?weekStart=${THIS_WEEK}`)
       .set("authorization", `Bearer ${staffAuth}`);
@@ -70,6 +74,32 @@ describe("Staff timesheet entry + approval workflow (STAFF-3)", () => {
     expect(res.body.period.status).toBe("draft");
     expect(res.body.period.weekStartDate).toBe(THIS_WEEK);
     expect(res.body.period.entries).toEqual([]); // prefill is a frontend-only convenience; nothing persisted yet
+    expect(res.body.scheduledHours).toEqual({
+      [THIS_WEEK]: 8,
+      [addDays(THIS_WEEK, 1)]: 8
+    });
+  });
+
+  it("owner/admin GET /staff/timesheets/me?staffId= selects the given staff member's timesheet", async () => {
+    const res = await request(app)
+      .get(`/staff/timesheets/me?weekStart=${THIS_WEEK}&staffId=${staffId}`)
+      .set("authorization", `Bearer ${ownerAuth}`);
+    expect(res.status).toBe(200);
+    expect(res.body.period.weekStartDate).toBe(THIS_WEEK);
+  });
+
+  it("owner/admin GET /staff/timesheets/me without staffId is rejected", async () => {
+    const res = await request(app)
+      .get(`/staff/timesheets/me?weekStart=${THIS_WEEK}`)
+      .set("authorization", `Bearer ${ownerAuth}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("a staff-role token cannot select a different staffId than its own", async () => {
+    const res = await request(app)
+      .get(`/staff/timesheets/me?weekStart=${THIS_WEEK}&staffId=${randomUUID()}`)
+      .set("authorization", `Bearer ${staffAuth}`);
+    expect(res.status).toBe(404);
   });
 
   it("owner/admin routes reject a staff-role token", async () => {
@@ -184,4 +214,5 @@ describe("Staff timesheet entry + approval workflow (STAFF-3)", () => {
     expect(resubmit.body.period.status).toBe("submitted");
     expect(resubmit.body.period.reviewNote).toBeNull();
   });
+
 });

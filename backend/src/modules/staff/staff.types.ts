@@ -1,5 +1,3 @@
-export type RegularScheduleJson = Record<string, number>;
-
 export type StaffProfile = {
   id: string;
   householdId: string;
@@ -8,10 +6,16 @@ export type StaffProfile = {
   email: string | null;
   phoneNumber: string | null;
   employmentStartDate: string;
-  regularScheduleJson: RegularScheduleJson;
   isActive: boolean;
   hourlyRateCents: number;
   hasLogin: boolean;
+};
+
+/** Regular weekly schedule collected at onboarding; persisted as a household_help_availability slot (slot_type='regular'), not on staff_profile. */
+export type StaffScheduleInput = {
+  daysOfWeek: number[];
+  startTime: string;
+  endTime: string;
 };
 
 export type CreateStaffMemberInput = {
@@ -21,12 +25,11 @@ export type CreateStaffMemberInput = {
   phoneNumber?: string | null;
   dateOfBirth?: string | null;
   employmentStartDate: string;
-  regularScheduleJson?: RegularScheduleJson;
+  schedule?: StaffScheduleInput | null;
   hourlyRateCents: number;
 };
 
 export type UpdateStaffMemberInput = {
-  regularScheduleJson?: RegularScheduleJson;
   isActive?: boolean;
   /** Effective-dated: inserts a new staff_rate row rather than mutating history. */
   newHourlyRateCents?: number;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { qAll, qBegin, qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
+import { listAvailability } from "../family/family-profiles.service.js";
 import type {
   TimesheetEntry,
   TimesheetEntryInput,
@@ -36,6 +37,37 @@ export function currentWeekStart(): string {
 
 export function weekDates(weekStartDate: string): string[] {
   return Array.from({ length: 7 }, (_, i) => addDaysIso(weekStartDate, i));
+}
+
+function timeRangeHours(start: string, end: string): number {
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  const minutes = eh * 60 + em - (sh * 60 + sm);
+  return Math.max(0, Math.round((minutes / 60) * 100) / 100);
+}
+
+/** Prefill hint for the weekly timesheet grid — computed live from household_help_availability
+ * (slot_type='regular'), the same table the Family Planner agent reads for scheduling context. */
+export async function computeScheduledHours(
+  householdId: string,
+  personProfileId: string,
+  weekStartDate: string
+): Promise<Record<string, number>> {
+  const slots = await listAvailability(householdId);
+  const regularSlots = slots.filter(
+    (s) => s.slotType === "regular" && s.personProfileId === personProfileId && s.startTime && s.endTime
+  );
+  const result: Record<string, number> = {};
+  for (const date of weekDates(weekStartDate)) {
+    const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const hours = regularSlots
+      .filter((s) => s.daysOfWeek.includes(dayOfWeek))
+      .reduce((sum, s) => sum + timeRangeHours(s.startTime!, s.endTime!), 0);
+    if (hours > 0) {
+      result[date] = Math.round(hours * 100) / 100;
+    }
+  }
+  return result;
 }
 
 type PeriodRow = {

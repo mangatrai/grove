@@ -36,7 +36,6 @@ type TimesheetPeriod = {
   totalHours: number;
 };
 
-const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const STATUS_META: Record<TimesheetPeriodStatus, { label: string; color: string }> = {
@@ -68,9 +67,12 @@ function formatDayLabel(iso: string): string {
   });
 }
 
-type MyTimesheetPanelProps = { regularSchedule: Record<string, number> };
+type MyTimesheetPanelProps = {
+  /** Omit for self-service (staff role, locked to own record). Owner/admin must pass the selected staff member's id. */
+  staffId?: string;
+};
 
-export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
+export function MyTimesheetPanel({ staffId }: MyTimesheetPanelProps) {
   const [weekStart, setWeekStart] = useState(() => toMondayIso(new Date().toISOString().slice(0, 10)));
   const [period, setPeriod] = useState<TimesheetPeriod | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,8 +88,10 @@ export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiJson<{ period: TimesheetPeriod }>(
-        `/staff/timesheets/me?weekStart=${encodeURIComponent(weekStart)}`
+      const params = new URLSearchParams({ weekStart });
+      if (staffId) params.set("staffId", staffId);
+      const res = await apiJson<{ period: TimesheetPeriod; scheduledHours: Record<string, number> }>(
+        `/staff/timesheets/me?${params.toString()}`
       );
       setPeriod(res.period);
       const hours: Record<string, number | undefined> = {};
@@ -98,8 +102,8 @@ export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
           notes[e.workDate] = e.note ?? "";
         }
       } else {
-        weekDates.forEach((date, i) => {
-          const scheduled = regularSchedule[DAY_KEYS[i]] ?? 0;
+        weekDates.forEach((date) => {
+          const scheduled = res.scheduledHours[date] ?? 0;
           if (scheduled > 0) hours[date] = scheduled;
         });
       }
@@ -110,7 +114,7 @@ export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [weekStart, weekDates, regularSchedule]);
+  }, [weekStart, weekDates, staffId]);
 
   useEffect(() => {
     void load();
@@ -143,7 +147,7 @@ export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
     try {
       const res = await apiJson<{ period: TimesheetPeriod }>("/staff/timesheets/me", {
         method: "PUT",
-        body: JSON.stringify({ weekStartDate: weekStart, entries: entriesPayload }),
+        body: JSON.stringify({ weekStartDate: weekStart, entries: entriesPayload, staffId }),
       });
       setPeriod(res.period);
     } catch (e) {
@@ -159,11 +163,11 @@ export function MyTimesheetPanel({ regularSchedule }: MyTimesheetPanelProps) {
     try {
       await apiJson("/staff/timesheets/me", {
         method: "PUT",
-        body: JSON.stringify({ weekStartDate: weekStart, entries: entriesPayload }),
+        body: JSON.stringify({ weekStartDate: weekStart, entries: entriesPayload, staffId }),
       });
       const res = await apiJson<{ period: TimesheetPeriod }>("/staff/timesheets/me/submit", {
         method: "POST",
-        body: JSON.stringify({ weekStartDate: weekStart }),
+        body: JSON.stringify({ weekStartDate: weekStart, staffId }),
       });
       setPeriod(res.period);
     } catch (e) {

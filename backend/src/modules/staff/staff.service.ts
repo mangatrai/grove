@@ -3,15 +3,16 @@ import bcrypt from "bcryptjs";
 
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
+import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { createPasswordResetToken } from "../auth/auth.service.js";
 import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
 import { renderMemberInviteTemplate } from "../mailer/templates/member-invite.js";
 import { createHouseholdCategory } from "../category/categories.service.js";
 import { encryptDob } from "../household/dob-crypto.js";
+import { createAvailability } from "../family/family-profiles.service.js";
 import type {
   CreateStaffMemberInput,
   EmployeeCategoryIds,
-  RegularScheduleJson,
   StaffProfile,
   UpdateStaffMemberInput
 } from "./staff.types.js";
@@ -24,19 +25,12 @@ type StaffProfileRow = {
   email: string | null;
   phone_number: string | null;
   employment_start_date: string;
-  regular_schedule_json: string;
   is_active: boolean;
   linked_user_id: string | null;
   hourly_rate_cents: number | null;
 };
 
 function toStaffProfile(row: StaffProfileRow): StaffProfile {
-  let schedule: RegularScheduleJson = {};
-  try {
-    schedule = JSON.parse(row.regular_schedule_json) as RegularScheduleJson;
-  } catch {
-    schedule = {};
-  }
   return {
     id: row.id,
     householdId: row.household_id,
@@ -45,7 +39,6 @@ function toStaffProfile(row: StaffProfileRow): StaffProfile {
     email: row.email,
     phoneNumber: row.phone_number,
     employmentStartDate: row.employment_start_date,
-    regularScheduleJson: schedule,
     isActive: row.is_active,
     hourlyRateCents: row.hourly_rate_cents ?? 0,
     hasLogin: row.linked_user_id !== null
@@ -54,7 +47,7 @@ function toStaffProfile(row: StaffProfileRow): StaffProfile {
 
 const STAFF_PROFILE_SELECT = `
   SELECT sp.id, sp.household_id, sp.person_profile_id, p.full_name, p.email, p.phone_number,
-         sp.employment_start_date, sp.regular_schedule_json, sp.is_active, p.linked_user_id,
+         sp.employment_start_date, sp.is_active, p.linked_user_id,
          (SELECT r.hourly_rate_cents FROM staff_rate r
            WHERE r.staff_profile_id = sp.id AND r.effective_date <= to_char(NOW(), 'YYYY-MM-DD')
            ORDER BY r.effective_date DESC LIMIT 1) AS hourly_rate_cents
@@ -141,7 +134,6 @@ export async function createStaffMember(
   const fullName = [input.firstName.trim(), input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
   const phoneNumber = input.phoneNumber ?? null;
   const dobEncrypted = input.dateOfBirth ? encryptDob(input.dateOfBirth) : null;
-  const scheduleJson = JSON.stringify(input.regularScheduleJson ?? {});
   const emailConfigured = isEmailConfigured();
   const passwordHash = emailConfigured
     ? await bcrypt.hash(randomUUID(), 12)
@@ -166,9 +158,9 @@ export async function createStaffMember(
       );
       await tx.unsafe(`UPDATE person_profile SET linked_user_id = $1 WHERE id = $2`, [userId, profileId] as never[]);
       await tx.unsafe(
-        `INSERT INTO staff_profile (id, household_id, person_profile_id, employment_start_date, regular_schedule_json)
-  VALUES ($1, $2, $3, $4, $5)`,
-        [staffProfileId, householdId, profileId, input.employmentStartDate, scheduleJson] as never[]
+        `INSERT INTO staff_profile (id, household_id, person_profile_id, employment_start_date)
+  VALUES ($1, $2, $3, $4)`,
+        [staffProfileId, householdId, profileId, input.employmentStartDate] as never[]
       );
       await tx.unsafe(
         `INSERT INTO staff_rate (id, household_id, staff_profile_id, hourly_rate_cents, effective_date)
@@ -184,6 +176,17 @@ export async function createStaffMember(
   }
 
   await ensureEmployeeCategoryTree(householdId, createdByUserId);
+
+  if (input.schedule && input.schedule.daysOfWeek.length > 0) {
+    await createAvailability(householdId, {
+      personProfileId: profileId,
+      slotType: "regular",
+      serviceType: "nanny",
+      daysOfWeek: input.schedule.daysOfWeek,
+      startTime: input.schedule.startTime,
+      endTime: input.schedule.endTime
+    });
+  }
 
   const created = await getStaffMemberById(householdId, staffProfileId);
   if (!created) {
@@ -213,14 +216,6 @@ export async function updateStaffMember(
     return { ok: false, code: "NOT_FOUND" };
   }
 
-  if (input.regularScheduleJson !== undefined) {
-    await qExec(
-      `UPDATE staff_profile SET regular_schedule_json = ? WHERE household_id = ? AND id = ?`,
-      JSON.stringify(input.regularScheduleJson),
-      householdId,
-      staffProfileId
-    );
-  }
   if (input.isActive !== undefined) {
     await qExec(
       `UPDATE staff_profile SET is_active = ? WHERE household_id = ? AND id = ?`,
@@ -242,4 +237,23 @@ export async function updateStaffMember(
 
   const updated = await getStaffMemberById(householdId, staffProfileId);
   return { ok: true, member: updated! };
+}
+
+/**
+ * Staff callers are always locked to their own record (staffId, if given, must match).
+ * Owner/admin callers must supply staffId and may select any household staff member.
+ * Returns null on access denial.
+ */
+export async function resolveAccessibleStaffMember(req: AuthenticatedRequest, staffId?: string): Promise<StaffProfile | null> {
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "staff") {
+    if (!personProfileId) return null;
+    const own = await getStaffMemberForUser(householdId, personProfileId);
+    if (!own) return null;
+    if (staffId && staffId !== own.id) return null;
+    return own;
+  }
+  if (!staffId) return null;
+  const member = await getStaffMemberById(householdId, staffId);
+  return member ?? null;
 }

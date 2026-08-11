@@ -358,7 +358,6 @@ erDiagram
         text household_id FK
         text person_profile_id FK UNIQUE "1:1 with person_profile"
         text employment_start_date
-        text regular_schedule_json "prefills weekly timesheet"
         bool is_active
     }
     STAFF_RATE {
@@ -516,7 +515,7 @@ data.
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
 |---|---|---|---|
-| `staff_profile` | 1:1 employment record for a `person_profile` (nanny/employee) | `person_profile_id` FK UNIQUE, `employment_start_date`, `regular_schedule_json` | — |
+| `staff_profile` | 1:1 employment record for a `person_profile` (nanny/employee) | `person_profile_id` FK UNIQUE, `employment_start_date` | — |
 | `staff_rate` | Effective-dated hourly rate | `hourly_rate_cents` CHECK `> 0`, `effective_date` | `idx_staff_rate_staff_effective` |
 | `timesheet_period` | One row per staff member per week | `week_start_date`, `status` CHECK (4 values), `reviewed_by_user_id` FK | `UNIQUE(staff_profile_id, week_start_date)` |
 | `timesheet_entry` | Hours logged for one day within a period | `work_date`, `hours_worked` CHECK `0 < x <= 24` | `UNIQUE(timesheet_period_id, work_date)` |

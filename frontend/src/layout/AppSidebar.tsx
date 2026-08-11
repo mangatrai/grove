@@ -19,6 +19,10 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconClipboardList,
+  IconUsers,
+  IconClock,
+  IconWallet,
+  IconCash,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
 
@@ -78,6 +82,17 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   },
 ];
 
+/** Owner/admin-only group for managing household staff — appended after NAV_GROUPS for those roles. */
+const STAFF_ADMIN_NAV_GROUP: { label: string; items: NavItem[] } = {
+  label: "Staff",
+  items: [
+    { to: "/staff-admin/directory", end: false, label: "Directory", Icon: IconUsers },
+    { to: "/staff-admin/timesheets", end: false, label: "Timesheets", Icon: IconClock },
+    { to: "/staff-admin/expenses", end: false, label: "Expenses", Icon: IconWallet },
+    { to: "/staff-admin/pay", end: false, label: "Pay & Reports", Icon: IconCash },
+  ],
+};
+
 type AppSidebarProps = {
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -103,7 +118,7 @@ export function AppSidebar({
     ? STAFF_NAV_GROUPS
     : role === "member"
       ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
-      : NAV_GROUPS;
+      : [...NAV_GROUPS, STAFF_ADMIN_NAV_GROUP];
 
   return (
     <>

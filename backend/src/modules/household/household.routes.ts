@@ -98,7 +98,7 @@ householdRouter.patch("/settings", requireRole(["owner", "admin"]), async (req: 
 });
 
 const roleSchema = z.enum(["head", "member"]);
-const relationshipSchema = z.enum(["self", "spouse", "child", "dependent", "other"]);
+const relationshipSchema = z.enum(["self", "spouse", "child", "dependent", "employee", "other"]);
 
 const profilePatchSchema = z
   .object({
