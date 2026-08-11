@@ -14,6 +14,45 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #265: Expense entry + approval workflow (2026-08-11)
+
+**What changed:** Staff self-service expense claims (`GET/POST /staff/expenses/me`) plus
+an owner/admin approval queue (`GET /staff/expenses/pending`,
+`POST /staff/expenses/:expenseId/approve`, `POST /staff/expenses/:expenseId/reject`)
+(`backend/src/modules/staff/expense.service.ts`, `expense.routes.ts`). Category is one of
+a fixed set (`Transportation/Mileage`, `Groceries & Kids' Supplies`, `Activities &
+Outings`, `Parking & Tolls`, `Medical/First Aid`, `Other`) validated with `z.enum` at the
+route layer against `EXPENSE_CATEGORIES` in `expense.types.ts`; the DB column itself is
+plain `TEXT`, no constraint.
+
+Status machine is intentionally simpler than STAFF-3's timesheet: `staff_expense.status`
+has no `draft` value in its CHECK constraint, so a submitted expense is created
+directly as `pending` — there is no save-draft step, and a `rejected` expense is
+terminal/view-only (no edit-and-resubmit path, unlike a rejected timesheet which reverts
+to `draft`). This is a deliberate simplification for the MVP, not an oversight — filing
+one expense claim doesn't carry the same in-progress-editing need as a multi-day
+timesheet. No standalone `GET /:expenseId` detail route was added since the frontend
+only ever needs the list/pending views.
+
+Frontend: `MyExpensesPanel.tsx` replaces the "My Expenses" tab placeholder in
+`StaffPortalPage.tsx` — new-claim form (date, category, `CurrencyInput` amount,
+description) plus a table of the staff member's own claims with status badge and the
+reviewer's comment shown inline when rejected. `StaffSection.tsx` (Settings → Staff)
+gains an `ExpenseApprovalQueue` below `TimesheetApprovalQueue` — approve, or reject with
+a required comment, mirroring the timesheet review UI.
+
+**Why:** Item 5 of the household employee time & expense capture MVP — same
+owner/admin review pattern as STAFF-3 (timesheets), applied to reimbursable expense
+claims.
+
+**Tests:** `backend/tests/staff-expense.test.ts` (5 tests) — empty list on a fresh staff
+member, staff-role RBAC rejection on the owner/admin `/pending` route, bad-category and
+non-positive-amount 400s, full submit → pending queue → reject-without-note-400 →
+reject-with-comment → re-reject-fails (`NOT_PENDING`), and a second flow for approve →
+re-approve-fails (`NOT_PENDING`).
+
+GitHub: closes #265 (epic #121, milestone V7).
+
 ## CR — #264: Timesheet entry + weekly approval workflow (2026-08-11)
 
 **What changed:** Staff self-service weekly timesheet (`GET/PUT /staff/timesheets/me`,

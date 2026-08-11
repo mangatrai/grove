@@ -226,6 +226,166 @@ function TimesheetApprovalQueue() {
   );
 }
 
+type PendingExpense = {
+  id: string;
+  staffProfileId: string;
+  staffFullName: string;
+  expenseDate: string;
+  category: string;
+  amountCents: number;
+  description: string | null;
+};
+
+function ExpenseApprovalQueue() {
+  const [expenses, setExpenses] = useState<PendingExpense[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiJson<{ expenses: PendingExpense[] }>("/staff/expenses/pending");
+      setExpenses(res.expenses);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load expenses");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function approve(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await apiJson(`/staff/expenses/${encodeURIComponent(id)}/approve`, { method: "POST" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not approve expense");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmReject(id: string) {
+    if (!reviewNote.trim()) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      await apiJson(`/staff/expenses/${encodeURIComponent(id)}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reviewNote: reviewNote.trim() }),
+      });
+      setRejectingId(null);
+      setReviewNote("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reject expense");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Stack mt="lg">
+      <Title order={4}>Expenses awaiting approval</Title>
+      {error ? <Alert color="red">{error}</Alert> : null}
+      {loading ? (
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading…</Text>
+        </Group>
+      ) : null}
+      {!loading && expenses.length === 0 ? (
+        <Text size="sm" c="dimmed">No expenses awaiting approval.</Text>
+      ) : null}
+      {!loading && expenses.length > 0 ? (
+        <Table withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Staff</Table.Th>
+              <Table.Th>Date</Table.Th>
+              <Table.Th>Category</Table.Th>
+              <Table.Th>Amount</Table.Th>
+              <Table.Th>Description</Table.Th>
+              <Table.Th>Actions</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {expenses.map((e) => (
+              <Table.Tr key={e.id}>
+                <Table.Td>{e.staffFullName}</Table.Td>
+                <Table.Td>{e.expenseDate}</Table.Td>
+                <Table.Td>{e.category}</Table.Td>
+                <Table.Td>{formatUsd(e.amountCents / 100)}</Table.Td>
+                <Table.Td>{e.description ?? "—"}</Table.Td>
+                <Table.Td>
+                  {rejectingId === e.id ? (
+                    <Group gap="xs" wrap="nowrap">
+                      <TextInput
+                        size="xs"
+                        placeholder="Reason for rejecting"
+                        value={reviewNote}
+                        onChange={(ev) => setReviewNote(ev.currentTarget.value)}
+                        disabled={busyId === e.id}
+                      />
+                      <Button
+                        size="xs"
+                        color="red"
+                        disabled={!reviewNote.trim()}
+                        loading={busyId === e.id}
+                        onClick={() => void confirmReject(e.id)}
+                      >
+                        Confirm
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        disabled={busyId === e.id}
+                        onClick={() => {
+                          setRejectingId(null);
+                          setReviewNote("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Group gap="xs">
+                      <Button size="xs" loading={busyId === e.id} onClick={() => void approve(e.id)}>
+                        Approve
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        color="red"
+                        disabled={busyId === e.id}
+                        onClick={() => {
+                          setRejectingId(e.id);
+                          setReviewNote("");
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </Group>
+                  )}
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : null}
+    </Stack>
+  );
+}
+
 type StaffSectionProps = { active: boolean };
 
 export function StaffSection({ active }: StaffSectionProps) {
@@ -373,6 +533,7 @@ export function StaffSection({ active }: StaffSectionProps) {
       ) : null}
 
       <TimesheetApprovalQueue />
+      <ExpenseApprovalQueue />
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">

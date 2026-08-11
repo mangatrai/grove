@@ -5318,6 +5318,133 @@ paths:
         "403": { description: Requires owner or admin role }
         "404": { description: "code NOT_FOUND" }
         "409": { description: "code NOT_SUBMITTED" }
+  /staff/expenses/me:
+    get:
+      tags: [staff]
+      summary: List the caller's own expense claims
+      description: Role staff only. Newest first (expenseDate DESC, createdAt DESC).
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Expense claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expenses:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffExpense' }
+        "404": { description: Caller has no staff_profile }
+    post:
+      tags: [staff]
+      summary: Create a new expense claim, immediately pending
+      description: Role staff only.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expenseDate, category, amountCents]
+              properties:
+                expenseDate: { type: string, format: date }
+                category:
+                  type: string
+                  enum:
+                    - "Transportation/Mileage"
+                    - "Groceries & Kids' Supplies"
+                    - "Activities & Outings"
+                    - "Parking & Tolls"
+                    - "Medical/First Aid"
+                    - "Other"
+                amountCents: { type: integer, minimum: 1 }
+                description: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Created expense claim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: Validation failure (bad category, non-positive amount) }
+        "404": { description: Caller has no staff_profile }
+  /staff/expenses/pending:
+    get:
+      tags: [staff]
+      summary: List all pending expense claims for the household (approval queue)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Pending expenses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expenses:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffExpenseSummary' }
+        "403": { description: Requires owner or admin role }
+  /staff/expenses/{expenseId}/approve:
+    post:
+      tags: [staff]
+      summary: Approve a pending expense claim
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: expenseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Approved expense
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: expenseId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_PENDING — expense is not currently pending" }
+  /staff/expenses/{expenseId}/reject:
+    post:
+      tags: [staff]
+      summary: Reject a pending expense claim with a comment
+      description: Terminal — no resubmit path.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: expenseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewNote]
+              properties:
+                reviewNote: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        "200":
+          description: Rejected expense
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: expenseId not a UUID, or reviewNote missing/empty }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_PENDING" }
 
 components:
   securitySchemes:
@@ -6373,3 +6500,26 @@ components:
         submittedAt: { type: string, format: date-time, nullable: true }
         totalHours: { type: number }
         createdAt: { type: string, format: date-time }
+
+    StaffExpense:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        expenseDate: { type: string, format: date }
+        category: { type: string }
+        amountCents: { type: integer }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [pending, approved, rejected] }
+        reviewedByUserId: { type: string, format: uuid, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    StaffExpenseSummary:
+      allOf:
+        - $ref: '#/components/schemas/StaffExpense'
+        - type: object
+          properties:
+            staffFullName: { type: string }

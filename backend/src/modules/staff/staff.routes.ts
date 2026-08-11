@@ -12,10 +12,12 @@ import {
   updateStaffMember
 } from "./staff.service.js";
 import { timesheetRouter } from "./timesheet.routes.js";
+import { expenseRouter } from "./expense.routes.js";
 
 export const staffRouter = Router();
 staffRouter.use(requireAuth);
 staffRouter.use("/timesheets", timesheetRouter);
+staffRouter.use("/expenses", expenseRouter);
 
 const scheduleSchema = z.record(z.string(), z.number().min(0).max(24));
 

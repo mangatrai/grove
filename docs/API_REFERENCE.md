@@ -1124,6 +1124,99 @@ Moves a `submitted` period to `rejected`; requires a `reviewNote` so the employe
 
 ---
 
+### Staff Expenses (STAFF-4, GH #265)
+
+Reimbursable expense claim entry (staff self-service) and owner/admin approval queue, mounted under `/staff/expenses`. Status is `pending` | `approved` | `rejected` — no `draft` state (unlike timesheets): a submitted claim is created directly as `pending`, and `rejected` is terminal/view-only with no edit-and-resubmit path.
+
+#### `GET /staff/expenses/me`
+
+**Auth:** Role: staff only.
+
+Lists the caller's own expense claims, newest first (`expenseDate DESC, createdAt DESC`).
+
+**Response 200:**
+```json
+{
+  "expenses": [
+    { "id": "uuid", "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "Zoo tickets", "status": "pending", "reviewNote": null }
+  ]
+}
+```
+
+**Errors:**
+- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+
+---
+
+#### `POST /staff/expenses/me`
+
+**Auth:** Role: staff only.
+
+Creates a new claim, immediately `pending` for owner/admin review.
+
+**Request body:**
+```json
+{ "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "string (optional)" }
+```
+`category` must be one of `EXPENSE_CATEGORIES` (`Transportation/Mileage`, `Groceries & Kids' Supplies`, `Activities & Outings`, `Parking & Tolls`, `Medical/First Aid`, `Other`); `amountCents` must be a positive integer.
+
+**Response 201:** `{ "expense": { ...StaffExpense, "status": "pending" } }`
+
+**Errors:**
+- **400** — validation failure (bad category, non-positive amount).
+- **404** — no matching `staff_profile` row.
+
+---
+
+#### `GET /staff/expenses/pending`
+
+**Auth:** Role: owner or admin.
+
+Lists all `pending` expenses across the household's staff, for the approval queue. Registered before `/:expenseId` so the literal path isn't swallowed by the param route.
+
+**Response 200:**
+```json
+{
+  "expenses": [
+    { "id": "uuid", "staffProfileId": "uuid", "staffFullName": "Jamie Rivera", "expenseDate": "2026-08-10", "category": "Parking & Tolls", "amountCents": 800, "description": null }
+  ]
+}
+```
+
+---
+
+#### `POST /staff/expenses/:expenseId/approve`
+
+**Auth:** Role: owner or admin.
+
+Moves a `pending` expense to `approved`; records `reviewedByUserId`/`reviewedAt`.
+
+**Response 200:** `{ "expense": { ...StaffExpense, "status": "approved" } }`
+
+**Errors:**
+- **400** — `expenseId` not a UUID.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_PENDING"` — expense is not currently `pending`.
+
+---
+
+#### `POST /staff/expenses/:expenseId/reject`
+
+**Auth:** Role: owner or admin.
+
+Moves a `pending` expense to `rejected`; requires a `reviewNote`. Terminal — no resubmit path.
+
+**Request body:** `{ "reviewNote": "string, 1-1000 chars, required" }`
+
+**Response 200:** `{ "expense": { ...StaffExpense, "status": "rejected", "reviewNote": "..." } }`
+
+**Errors:**
+- **400** — `expenseId` not a UUID, or `reviewNote` missing/empty.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_PENDING"`.
+
+---
+
 ### Properties
 
 #### `GET /household/properties`
