@@ -400,6 +400,13 @@ export function StaffSection({ active }: StaffSectionProps) {
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
+  const [bonusMemberId, setBonusMemberId] = useState<string | null>(null);
+  const [bonusDate, setBonusDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [bonusAmountUsd, setBonusAmountUsd] = useState<number | undefined>(undefined);
+  const [bonusReason, setBonusReason] = useState("");
+  const [bonusSubmitting, setBonusSubmitting] = useState(false);
+  const [bonusError, setBonusError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -469,6 +476,38 @@ export function StaffSection({ active }: StaffSectionProps) {
     }
   }
 
+  function startBonus(memberId: string) {
+    setBonusMemberId(memberId);
+    setBonusDate(new Date().toISOString().slice(0, 10));
+    setBonusAmountUsd(undefined);
+    setBonusReason("");
+    setBonusError(null);
+  }
+
+  async function recordBonus(memberId: string) {
+    if (!bonusAmountUsd || bonusAmountUsd <= 0 || !bonusReason.trim()) {
+      setBonusError("A positive amount and a reason are required.");
+      return;
+    }
+    setBonusSubmitting(true);
+    setBonusError(null);
+    try {
+      await apiJson(`/staff/${encodeURIComponent(memberId)}/pay-adjustments`, {
+        method: "POST",
+        body: JSON.stringify({
+          adjustmentDate: bonusDate,
+          amountCents: Math.round(bonusAmountUsd * 100),
+          reason: bonusReason.trim(),
+        }),
+      });
+      setBonusMemberId(null);
+    } catch (e) {
+      setBonusError(e instanceof Error ? e.message : "Could not record bonus");
+    } finally {
+      setBonusSubmitting(false);
+    }
+  }
+
   if (!active) return null;
 
   return (
@@ -495,6 +534,7 @@ export function StaffSection({ active }: StaffSectionProps) {
               <Table.Th>Schedule</Table.Th>
               <Table.Th>Login</Table.Th>
               <Table.Th>Active</Table.Th>
+              <Table.Th>Actions</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -522,6 +562,53 @@ export function StaffSection({ active }: StaffSectionProps) {
                     disabled={togglingId === m.id}
                     onChange={() => void toggleActive(m)}
                   />
+                </Table.Td>
+                <Table.Td>
+                  {bonusMemberId === m.id ? (
+                    <Stack gap={4} miw={220}>
+                      <Group gap="xs" wrap="nowrap">
+                        <TextInput
+                          size="xs"
+                          type="date"
+                          value={bonusDate}
+                          onChange={(e) => setBonusDate(e.currentTarget.value)}
+                          disabled={bonusSubmitting}
+                        />
+                        <CurrencyInput
+                          size="xs"
+                          placeholder="Amount"
+                          value={bonusAmountUsd}
+                          onChange={setBonusAmountUsd}
+                          disabled={bonusSubmitting}
+                        />
+                      </Group>
+                      <TextInput
+                        size="xs"
+                        placeholder="Reason (e.g. Holiday bonus)"
+                        value={bonusReason}
+                        onChange={(e) => setBonusReason(e.currentTarget.value)}
+                        disabled={bonusSubmitting}
+                      />
+                      {bonusError ? <Text size="xs" c="red">{bonusError}</Text> : null}
+                      <Group gap="xs">
+                        <Button size="xs" loading={bonusSubmitting} onClick={() => void recordBonus(m.id)}>
+                          Save
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="default"
+                          disabled={bonusSubmitting}
+                          onClick={() => setBonusMemberId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </Group>
+                    </Stack>
+                  ) : (
+                    <Button size="xs" variant="light" onClick={() => startBonus(m.id)}>
+                      Record bonus
+                    </Button>
+                  )}
                 </Table.Td>
               </Table.Tr>
             ))}

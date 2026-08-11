@@ -6,6 +6,7 @@ import { apiJson } from "../api";
 import { GroveLoader } from "../components/GroveLoader";
 import { formatUsd } from "../utils/format";
 import { MyExpensesPanel } from "./staff/MyExpensesPanel";
+import { MyPayPanel } from "./staff/MyPayPanel";
 import { MyTimesheetPanel } from "./staff/MyTimesheetPanel";
 
 type StaffProfile = {
@@ -96,7 +97,7 @@ export function StaffPortalPage() {
                 <MyExpensesPanel />
               </Tabs.Panel>
               <Tabs.Panel value="pay" pt="md">
-                <Text c="dimmed" size="sm">Pay summary and reports are coming soon.</Text>
+                <MyPayPanel staffId={profile.id} />
               </Tabs.Panel>
             </Tabs>
           </>

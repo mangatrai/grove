@@ -5445,6 +5445,74 @@ paths:
         "403": { description: Requires owner or admin role }
         "404": { description: "code NOT_FOUND" }
         "409": { description: "code NOT_PENDING" }
+  /staff/{staffId}/pay-summary:
+    get:
+      tags: [staff]
+      summary: Earned/paid/balance pay summary for a staff member over a date range
+      description: >-
+        A staff-role caller may only fetch their own summary (staffId must resolve to
+        their own personProfileId, else 404). Computed on the fly, no stored payroll run.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Pay summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary: { $ref: '#/components/schemas/StaffPaySummary' }
+        "400": { description: staffId not a UUID, or from/to missing or malformed }
+        "403": { description: Requires owner, admin, or staff role }
+        "404": { description: Staff member not found, or (staff-role caller) staffId is not their own }
+  /staff/{staffId}/pay-adjustments:
+    post:
+      tags: [staff]
+      summary: Record a bonus or other one-off extra pay for a staff member
+      description: >-
+        Adds to the earned total (distinct from an "advance", which would reduce it).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adjustmentDate, amountCents, reason]
+              properties:
+                adjustmentDate: { type: string, format: date }
+                amountCents: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "201":
+          description: Created pay adjustment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  adjustment: { $ref: '#/components/schemas/StaffPayAdjustment' }
+        "400": { description: staffId not a UUID, or body validation failed }
+        "403": { description: Requires owner or admin role }
+        "404": { description: Staff member not found }
 
 components:
   securitySchemes:
@@ -6523,3 +6591,40 @@ components:
         - type: object
           properties:
             staffFullName: { type: string }
+
+    StaffPayAdjustment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        adjustmentDate: { type: string, format: date }
+        amountCents: { type: integer }
+        reason: { type: string }
+        createdByUserId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    StaffPaySummary:
+      type: object
+      properties:
+        staffProfileId: { type: string, format: uuid }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        earned:
+          type: object
+          properties:
+            timesheetCents: { type: integer }
+            expenseCents: { type: integer }
+            adjustmentCents: { type: integer }
+            totalCents: { type: integer }
+        paid:
+          type: object
+          properties:
+            salaryCents: { type: integer }
+            bonusCents: { type: integer }
+            reimbursementCents: { type: integer }
+            totalCents: { type: integer }
+        balanceDueCents: { type: integer }
+        adjustments:
+          type: array
+          items: { $ref: '#/components/schemas/StaffPayAdjustment' }

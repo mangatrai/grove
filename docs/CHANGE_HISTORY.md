@@ -14,6 +14,55 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #266: Pay summary (earned/paid/balance) + bonus adjustments (2026-08-11)
+
+**What changed:** `GET /staff/:staffId/pay-summary?from&to` computes, on the fly (no
+stored payroll run):
+- **Earned** = approved timesheet hours × the hourly rate effective on each entry's
+  `work_date` (rate-at-entry-date, via a `LATERAL` join against `staff_rate` so a
+  mid-range raise doesn't retroactively rewrite already-worked hours) + approved
+  `staff_expense` amounts + `staff_pay_adjustment` amounts (bonuses).
+- **Paid** = `transaction_canonical` rows with `owner_scope='person'`,
+  `owner_person_profile_id` = the staff member's `person_profile_id`, `status='posted'`,
+  and `category_id` under the household's "Employee" tree (Salary/Bonus/Reimbursement —
+  reuses `ensureEmployeeCategoryTree`'s exact leaf IDs, called idempotently so the tree
+  is created on first use if it somehow doesn't already exist), broken out per category.
+- **Balance due** = Earned − Paid.
+
+Also adds `POST /staff/:staffId/pay-adjustments` (owner/admin only) to record a bonus or
+other one-off extra pay (`adjustmentDate`, `amountCents` — route-level `.int().positive()`,
+though the DB column itself has no sign constraint since a future deduction use case may
+want negative values, `reason`). No new migration: `staff_pay_adjustment` already existed
+from migration 0091 (STAFF-1) and was already registered in `EXPORT_REGISTRY`. No new
+transaction-tagging UI either — the existing `PATCH /transactions/:id`
+(`ownerScope`/`ownerPersonProfileId`/`categoryId`) already covers "mark this transaction
+as a payment to her."
+
+Access control: `/pay-summary` allows `["owner", "admin", "staff"]`, but a `staff`-role
+caller may only view their own record (403 if the `:staffId` in the URL doesn't resolve
+to their own `person_profile_id`) — hand-rolled in the route handler since `requireRole`
+has no self-vs-any concept. `/pay-adjustments` stays `["owner", "admin"]` only.
+
+Frontend: `MyPayPanel.tsx` replaces the "My Pay" tab placeholder in `StaffPortalPage.tsx`
+— date-range pickers (defaulting to the current month), Earned/Paid/Balance breakdown,
+and a read-only list of adjustments in range. `StaffSection.tsx` gains a "Record bonus"
+action per staff row opening a small form (date, amount, reason) that posts to
+`/staff/:staffId/pay-adjustments`.
+
+**Why:** Item 6 and item 7 (bonuses/extra pay distinct from "advance") of the household
+employee time & expense capture MVP — the last data-facing slice before the PDF reports
+(STAFF-6).
+
+**Tests:** `backend/tests/staff-pay.test.ts` (6 tests) — zero summary for a fresh staff
+member; a staff-role token can view their own summary but gets 404 on someone else's;
+approved timesheet hours × rate + approved (not pending) expenses + a recorded bonus all
+land in "earned"; a manually-tagged transaction under the Employee/Salary category counts
+toward "paid" and flows through to balance due; non-positive amount and missing-reason
+400s on adjustment creation; a staff-role token is blocked (403) from recording an
+adjustment.
+
+GitHub: closes #266 (epic #121, milestone V7).
+
 ## CR — #265: Expense entry + approval workflow (2026-08-11)
 
 **What changed:** Staff self-service expense claims (`GET/POST /staff/expenses/me`) plus

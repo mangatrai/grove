@@ -722,11 +722,13 @@ Available to owners and admins. Onboard and manage household employees (e.g. a n
 
 On submit, the app creates a restricted login for the employee (`staff` role — see [Staff Portal](#staff-portal) below) and, if email is configured on this instance, sends an invite email so they can set their own password. If email isn't configured, you'll see a default temporary password on screen to share with them directly.
 
-A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member — tag payment transactions with it later to track what's actually been paid against what's owed (see Pay Summary, coming in a future release).
+A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member. When you actually pay them, tag that transaction on the ledger (edit the transaction, set **Belongs to** to the staff member and its category to Salary/Bonus/Reimbursement under Employee) — anything so tagged is picked up as "paid" in their pay summary, no separate linking step needed.
 
 **Timesheet approvals** — below the staff roster, a queue lists every timesheet week an employee has submitted, showing their name, the week, and total hours. **Approve** moves the week to approved; **Reject** requires a comment explaining what needs to change, which the employee sees on their own timesheet and can then edit and resubmit.
 
 **Expense approvals** — below timesheet approvals, a second queue lists every pending expense claim, showing the employee's name, date, category, amount, and description. **Approve** or **Reject with a required comment** — unlike timesheets, a rejected expense claim is final; the employee sees the reviewer's comment but must file a new claim rather than editing the rejected one.
+
+**Record bonus** — a button on each staff member's roster row for recording a one-off bonus or extra pay (date, amount, reason). This is distinct from an advance: it adds to what they're owed (their "earned" total) rather than reducing it, and shows up in their own My Pay tab and in your pay-summary view for them.
 
 ### Accounts Tab
 
@@ -907,7 +909,7 @@ My Portal shows your employment start date, current hourly rate, and regular sch
 
 - **My Timesheet** — enter hours for the current week (defaults on load), navigate to prior/future weeks with the arrows or jump to any date, and log up to 7 days per week. Rows are prefilled from your regular schedule the first time you open a fresh week; edit any day's hours or add an optional note. **Save draft** stores your entries without submitting them; **Submit for approval** sends the week to your household's owner/admin for review. A running weekly total is shown at the bottom. Once submitted, the week is locked until it's approved or rejected — a rejected week shows the reviewer's comment and reopens for editing and resubmission.
 - **My Expenses** — file a reimbursable expense claim: date, category (Transportation/Mileage, Groceries & Kids' Supplies, Activities & Outings, Parking & Tolls, Medical/First Aid, or Other), amount, and an optional description. Submitting sends it straight to your household's owner/admin for review — there's no draft step. Below the form, a table of your past claims shows each one's status; a rejected claim shows the reviewer's comment but can't be edited or resubmitted — file a new claim instead.
-- **My Pay** — earned/paid/balance summary and downloadable reports (coming in a future release).
+- **My Pay** — pick a date range (defaults to the current month) to see what you've **earned** (approved timesheet hours at the rate in effect when worked, plus approved expenses and any bonuses), what's been **paid** (transactions your household's owner/admin has tagged to you under Salary/Bonus/Reimbursement), and the resulting **balance due**, plus a list of any bonuses in that range. Downloadable hours and payment reports are coming in a future release.
 
 ## Year-in-Review
 
