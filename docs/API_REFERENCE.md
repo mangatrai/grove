@@ -1266,6 +1266,42 @@ Records a bonus or other one-off extra pay for the staff member — distinct fro
 
 ---
 
+### Staff Reports (STAFF-6, GH #267)
+
+PDF report downloads, mounted under `/staff`. Both endpoints return `application/pdf` (not JSON) with a `Content-Disposition: attachment` header, streamed via `pdfkit`.
+
+#### `GET /staff/:staffId/reports/hours`
+
+**Auth:** Role: owner, admin, or staff. A staff-role caller may only fetch their own report (`:staffId` must resolve to their own `personProfileId`, else 404).
+
+**Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
+
+Lists every `timesheet_entry` with a `work_date` in `[from, to]` (across all period statuses — draft/submitted/approved/rejected — so the report reflects what was logged, not just what's been approved), with a totals footer.
+
+**Response 200:** `application/pdf` binary body, `Content-Disposition: attachment; filename="hours-report-<name>-<from>-to-<to>.pdf"`.
+
+**Errors:**
+- **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
+- **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
+
+---
+
+#### `GET /staff/:staffId/reports/payment`
+
+**Auth:** Role: owner, admin, or staff. A staff-role caller may only fetch their own report (`:staffId` must resolve to their own `personProfileId`, else 404).
+
+**Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
+
+Renders the same earned/paid/balance breakdown as [`GET /staff/:staffId/pay-summary`](#staff-pay-staff-5-gh-266) as a PDF, including bonus/adjustment line-item detail.
+
+**Response 200:** `application/pdf` binary body, `Content-Disposition: attachment; filename="payment-report-<name>-<from>-to-<to>.pdf"`.
+
+**Errors:**
+- **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
+- **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
+
+---
+
 ### Properties
 
 #### `GET /household/properties`

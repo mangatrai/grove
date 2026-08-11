@@ -14,6 +14,7 @@ import {
 import { timesheetRouter } from "./timesheet.routes.js";
 import { expenseRouter } from "./expense.routes.js";
 import { createPayAdjustment, getPaySummary } from "./pay.service.js";
+import { listHoursReportEntries, renderHoursReportPdf, renderPaymentReportPdf } from "./reports/reports.service.js";
 
 export const staffRouter = Router();
 staffRouter.use(requireAuth);
@@ -188,5 +189,57 @@ staffRouter.post(
     }
     const adjustment = await createPayAdjustment(householdId, member.id, req.authUser!.userId, body.data);
     res.status(201).json({ adjustment });
+  }
+);
+
+staffRouter.get(
+  "/:staffId/reports/hours",
+  requireRole(["owner", "admin", "staff"]),
+  async (req: AuthenticatedRequest, res) => {
+    const params = z.object({ staffId: z.string().uuid() }).safeParse(req.params);
+    const query = z.object({ from: dateSchema, to: dateSchema }).safeParse(req.query);
+    if (!params.success || !query.success) {
+      res.status(400).json({ errors: [...(params.success ? [] : params.error.issues), ...(query.success ? [] : query.error.issues)] });
+      return;
+    }
+    const member = await resolveAccessibleStaffMember(req, params.data.staffId);
+    if (!member) {
+      res.status(404).json({ message: "Staff member not found" });
+      return;
+    }
+    const entries = await listHoursReportEntries(
+      req.authUser!.householdId,
+      member.id,
+      query.data.from,
+      query.data.to
+    );
+    renderHoursReportPdf(res, member, query.data.from, query.data.to, entries);
+  }
+);
+
+staffRouter.get(
+  "/:staffId/reports/payment",
+  requireRole(["owner", "admin", "staff"]),
+  async (req: AuthenticatedRequest, res) => {
+    const params = z.object({ staffId: z.string().uuid() }).safeParse(req.params);
+    const query = z.object({ from: dateSchema, to: dateSchema }).safeParse(req.query);
+    if (!params.success || !query.success) {
+      res.status(400).json({ errors: [...(params.success ? [] : params.error.issues), ...(query.success ? [] : query.error.issues)] });
+      return;
+    }
+    const member = await resolveAccessibleStaffMember(req, params.data.staffId);
+    if (!member) {
+      res.status(404).json({ message: "Staff member not found" });
+      return;
+    }
+    const summary = await getPaySummary(
+      req.authUser!.householdId,
+      member.id,
+      member.personProfileId,
+      req.authUser!.userId,
+      query.data.from,
+      query.data.to
+    );
+    renderPaymentReportPdf(res, member, summary);
   }
 );

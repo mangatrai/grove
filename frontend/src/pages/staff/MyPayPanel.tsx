@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Group, Paper, SimpleGrid, Stack, Table, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Button, Group, Paper, SimpleGrid, Stack, Table, Text, TextInput, Title } from "@mantine/core";
 
-import { apiJson } from "../../api";
+import { apiFetch, apiJson } from "../../api";
 import { GroveLoader } from "../../components/GroveLoader";
 import { formatUsd } from "../../utils/format";
 
@@ -37,6 +37,35 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
   const [summary, setSummary] = useState<PaySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<"hours" | "payment" | null>(null);
+
+  const downloadReport = useCallback(
+    async (kind: "hours" | "payment") => {
+      setDownloading(kind);
+      setError(null);
+      try {
+        const res = await apiFetch(`/staff/${staffId}/reports/${kind}?from=${from}&to=${to}`);
+        if (!res.ok) {
+          throw new Error("Report download failed");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${kind}-report-${from}-to-${to}.pdf`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Report download failed");
+      } finally {
+        setDownloading(null);
+      }
+    },
+    [staffId, from, to]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +91,20 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
       <Group align="end">
         <TextInput label="From" type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
         <TextInput label="To" type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+        <Button
+          variant="light"
+          loading={downloading === "hours"}
+          onClick={() => void downloadReport("hours")}
+        >
+          Download hours report
+        </Button>
+        <Button
+          variant="light"
+          loading={downloading === "payment"}
+          onClick={() => void downloadReport("payment")}
+        >
+          Download payment report
+        </Button>
       </Group>
 
       {loading ? (

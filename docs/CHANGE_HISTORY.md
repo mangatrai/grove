@@ -14,6 +14,41 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #267: PDF hours & payment reports (2026-08-11)
+
+**What changed:** Two new PDF-download endpoints, mounted alongside the existing
+`:staffId`-scoped pay routes in `staff.routes.ts` (not a separate sub-router, to reuse
+`resolveAccessibleStaffMember` without a circular import):
+- `GET /staff/:staffId/reports/hours?from&to` — every `timesheet_entry` in range (joined
+  through `timesheet_period` for `household_id`/`staff_profile_id` scoping), across all
+  period statuses (draft/submitted/approved/rejected — not just approved, so the report
+  reflects what was actually logged), with a total-hours footer.
+- `GET /staff/:staffId/reports/payment?from&to` — renders the same earned/paid/balance
+  breakdown as `GET /staff/:staffId/pay-summary` (STAFF-5, #266) as a PDF, reusing
+  `getPaySummary()` unchanged, plus a bonus/adjustment detail list.
+
+Both stream via `pdfkit` (`doc.pipe(res)` / `doc.end()`) with
+`Content-Type: application/pdf` and `Content-Disposition: attachment; filename=...`
+headers — first use of `pdfkit` in the codebase (it was already a backend dependency,
+previously unused). New `backend/src/modules/staff/reports/reports.service.ts` holds the
+query + both renderers; no new migration, both endpoints only read existing tables from
+migration 0091.
+
+Access control matches `/pay-summary`: `["owner", "admin", "staff"]`, with a `staff`-role
+caller restricted to their own record via the same `resolveAccessibleStaffMember` helper
+(404 if the `:staffId` in the URL doesn't resolve to their own `person_profile_id`).
+
+**Why:** Items 8–9 of the household employee time & expense capture MVP — closes out the
+full plan scope (onboarding through PDF reports) except the explicitly-deferred tax
+withholding piece (item 12).
+
+**Tests:** `backend/tests/staff-reports.test.ts` (5 tests) — owner can download both
+report PDFs with correct `Content-Type`/`Content-Disposition` and a valid `%PDF` header
+on the response body; a staff-role token can download her own reports but gets 404 on
+another staff member's; malformed `from`/`to` query params 400.
+
+GitHub: closes #267 (epic #121, milestone V7).
+
 ## CR — #266: Pay summary (earned/paid/balance) + bonus adjustments (2026-08-11)
 
 **What changed:** `GET /staff/:staffId/pay-summary?from&to` computes, on the fly (no
