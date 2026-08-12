@@ -11,6 +11,7 @@ import {
 
 import { apiJson, setToken, useAuthToken } from "../api";
 import { NotificationPanel } from "../components/NotificationPanel";
+import { useCurrentUser } from "../UserContext";
 
 type AppTopBarProps = {
   onOpenMobileNav: () => void;
@@ -35,6 +36,8 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   const token = useAuthToken();
   const navigate = useNavigate();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const { role } = useCurrentUser();
+  const isStaff = role === "staff";
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuLabel, setMenuLabel] = useState("Account");
@@ -159,18 +162,20 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
           </div>
 
           {/* Import button */}
-          <button
-            type="button"
-            className="app-topbar__import-btn"
-            onClick={onNewImport}
-            aria-label="New import"
-          >
-            <IconUpload size={15} />
-            <span>Import</span>
-          </button>
+          {!isStaff ? (
+            <button
+              type="button"
+              className="app-topbar__import-btn"
+              onClick={onNewImport}
+              aria-label="New import"
+            >
+              <IconUpload size={15} />
+              <span>Import</span>
+            </button>
+          ) : null}
 
           {/* Notifications */}
-          <NotificationPanel />
+          {!isStaff ? <NotificationPanel /> : null}
 
           {/* User menu */}
           <div className="user-menu" ref={menuRef}>
@@ -192,14 +197,16 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
                 role="menu"
                 onClick={(e) => e.stopPropagation()}
               >
-                <Link
-                  to="/settings"
-                  className="user-menu__item"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  Settings
-                </Link>
+                {!isStaff ? (
+                  <Link
+                    to="/settings"
+                    className="user-menu__item"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Settings
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   className="user-menu__item user-menu__item--button"

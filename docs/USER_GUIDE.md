@@ -696,7 +696,7 @@ Manage household members and settings:
 
 **Member roster:**
 
-- Table of household members with name, role (head/member), relationship (self/spouse/child/dependent/other).
+- Table of household members with name, role (owner/admin/member), relationship (self/spouse/child/dependent/other). Selecting **Staff** in the Role dropdown is blocked with a popup pointing you to **Staff → Roster** instead — staff members are onboarded there, not promoted from an existing household member row.
 - **Add another row** button to stage new members.
 - **Save household** to persist changes.
 - **Trash icon** on saved rows to delete a member. Confirm the deletion in the dialog. Optionally also delete the member's login account if they have one.
@@ -706,6 +706,43 @@ Manage household members and settings:
 - Shows "✓ Has login account" or "—" for each member.
 - **Create login** (owners/admins) — generates a login account with a temporary password; the member must change it on first login.
 - **Reset password** (owners/admins) — generates a new temporary password and invalidates the member's current session. Share the temporary password with them out-of-band; they will be prompted to change it on next login.
+
+### Staff (sidebar section)
+
+Available to owners and admins as a top-level **Staff** sidebar group (not under Settings) — onboard and manage household employees (e.g. a nanny). MVP time & expense tracking, no tax withholding this pass. Four pages:
+
+#### Roster
+
+**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history). The **Schedule** column shows a summary of their regular days/hours (or "Not set") with a link to edit it on the Care & Help Schedule editor (Settings → Family) — schedules aren't edited from the Staff Roster itself.
+
+**Editing the pay rate** — click **Edit** next to the rate to open a modal and set a new hourly rate with an effective date (defaults to today). Use this to fix a rate left blank at signup or to record a raise; past pay periods are unaffected since the old rate is kept on record and history is picked by effective date.
+
+**Add staff member** — form fields:
+
+- **First / last name, email, phone, date of birth** — email is required (used for the invite); the rest are optional.
+- **Employment start date** — required.
+- **Hourly rate** — used for both timesheet pay calculations and the pay summary.
+- **Regular schedule** — default days/hours, entered as a Care & Help Schedule entry (Settings → Family); prefills their weekly timesheet, editable per-week by the employee.
+
+On submit, the app creates a restricted login for the employee (`staff` role — see [Staff Portal](#staff-portal) below) and, if email is configured on this instance, sends an invite email so they can set their own password. If email isn't configured, you'll see a default temporary password on screen to share with them directly.
+
+A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member. When you actually pay them — including bonuses or one-off extra pay — tag that transaction on the ledger (edit the transaction, set **Belongs to** to the staff member and its category to Salary/Bonus/Reimbursement under Employee) — anything so tagged is picked up as "paid" in their pay summary, no separate linking step needed. There's no separate bonus/adjustment form; bonuses are tracked exclusively as tagged transactions, the same as salary.
+
+#### Timesheets
+
+**Submit or edit on a staff member's behalf** — pick anyone from the **Staff member** dropdown to view, save, or submit their current week's timesheet, using the same entry screen they see themselves (arrows/date-jump to navigate weeks, save draft, submit for approval). Useful when they missed the deadline or don't have device access — there's no separate "on behalf" form, just this same screen with a staff picker.
+
+**Approval queue** — below the picker, a queue lists every timesheet week an employee has submitted, showing their name, the week, and total hours. **Approve** moves the week to approved; **Reject** requires a comment explaining what needs to change, which the employee sees on their own timesheet and can then edit and resubmit.
+
+#### Expenses
+
+**Submit on a staff member's behalf** — pick anyone from the **Staff member** dropdown to key in a claim for them (e.g. a paper receipt), using the same claim form and claims list they see themselves.
+
+**Approval queue** — below the picker, a second queue lists every pending expense claim, showing the employee's name, date, category, amount, and description. **Approve** or **Reject with a required comment** — unlike timesheets, a rejected expense claim is final; the employee sees the reviewer's comment but must file a new claim rather than editing the rejected one.
+
+#### Pay & Reports
+
+Pick a staff member from the dropdown to see their earned/paid/balance summary and download hours/payment reports — the same view shown on their own My Pay tab (see [Staff Portal](#staff-portal) below).
 
 ### Accounts Tab
 
@@ -878,6 +915,16 @@ The Family page's **Run history** table shows the last 30 agent runs, newest fir
 
 The digest email itself (sent to both parents on the schedule set in Settings → Family) is organized into a handful of named sections — **Coverage & Nanny**, **Deadlines**, **Occasions**, **Research finds** — each shown only when it has something to report, rather than one flat list of bullets. The subject line follows a fixed pattern ("Today/This week in the &lt;household&gt; household — &lt;highlight&gt;") so digest emails are easy to scan and search in your inbox.
 
+## Staff Portal
+
+Household employees (e.g. a nanny) log in with the account credentials set up for them in Settings → Staff (see above) and land on a dedicated **My Portal** page instead of the regular dashboard — there is no sidebar navigation beyond this one page, and no access to household finance screens, imports, or settings.
+
+My Portal shows your employment start date, current hourly rate, and regular schedule at a glance, followed by three tabs:
+
+- **My Timesheet** — enter hours for the current week (defaults on load), navigate to prior/future weeks with the arrows or jump to any date, and log up to 7 days per week. Rows are prefilled from your regular schedule the first time you open a fresh week; edit any day's hours or add an optional note. **Save draft** stores your entries without submitting them; **Submit for approval** sends the week to your household's owner/admin for review. A running weekly total is shown at the bottom. Once submitted, the week is locked until it's approved or rejected — a rejected week shows the reviewer's comment and reopens for editing and resubmission.
+- **My Expenses** — file a reimbursable expense claim: date, category (Transportation/Mileage, Groceries & Kids' Supplies, Activities & Outings, Parking & Tolls, Medical/First Aid, or Other), amount, and an optional description. Submitting sends it straight to your household's owner/admin for review — there's no draft step. Below the form, a table of your past claims shows each one's status; a rejected claim shows the reviewer's comment but can't be edited or resubmitted — file a new claim instead.
+- **My Pay** — pick a date range (defaults to the current month) to see what you've **earned** (approved timesheet hours at the rate in effect when worked, plus approved expenses), what's been **paid** (transactions your household's owner/admin has tagged to you under Salary/Bonus/Reimbursement), and the resulting **balance due**. Bonuses only appear on the **paid** side, once tagged as a transaction — there's no separate bonus ledger. **Download hours report** and **Download payment report** buttons export a PDF for the selected date range — the hours report lists every logged day with its status (draft/submitted/approved/rejected); the payment report mirrors the earned/paid/balance breakdown shown on screen.
+
 ## Year-in-Review
 
 In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:
@@ -949,6 +996,19 @@ The review includes an AI-generated narrative summarizing financial highlights a
 3. Click **Reset password** (owners/admins only).
 4. A temporary password is generated. Share it with the member via a secure channel.
 5. On next login, they are forced to change it.
+
+### Changing a Member's Role
+
+1. Go to **Settings > Household**.
+2. Find the member's row (they must already have a login account).
+3. Under **Role** (owner only), choose **Admin** or **Member**.
+
+This **Role** select is what actually gates access in the app — for example, promoting a
+member to **Admin** lets them approve staff timesheets and expenses. Granting Admin gives
+that person full admin access throughout the app, not just staff approvals. **Owner** and
+**Staff** also appear in the list for reference, but are not selectable here: the owner role
+can't be reassigned, and staff accounts are created during staff onboarding (see
+[Staff (sidebar section)](#staff-sidebar-section)), not promoted from an existing member.
 
 ### Exporting and Restoring Backup
 

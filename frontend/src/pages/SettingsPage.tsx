@@ -261,6 +261,7 @@ type HouseholdMemberResponse = {
   avatarKey: string | null;
   role: "head" | "member";
   relationship: "self" | "spouse" | "child" | "dependent" | "employee" | "other";
+  appUserRole: "owner" | "admin" | "member" | "staff" | null;
 };
 
 type HouseholdMembersPayload = {
@@ -304,9 +305,10 @@ type HouseholdMemberDraft = {
   linkedUserId?: string | null;
   createLogin?: boolean;
   notes?: string | null;
+  appUserRole?: "owner" | "admin" | "member" | "staff" | null;
 };
 
-type MeResponse = { user: { role: "owner" | "admin" | "member" } };
+type MeResponse = { user: { role: "owner" | "admin" | "member" | "staff" } };
 
 type InstitutionsResponse = {
   catalog: string[];
@@ -358,7 +360,8 @@ function normalizeMembersPayload(payload: HouseholdMembersPayload | HouseholdMem
     email: member.email ?? "",
     linkedUserId: member.linkedUserId,
     role: member.role,
-    relationship: member.relationship
+    relationship: member.relationship,
+    appUserRole: member.appUserRole ?? null
   }));
 }
 
@@ -420,11 +423,13 @@ export function SettingsPage() {
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
   const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
+  const [changingPermissionForId, setChangingPermissionForId] = useState<string | null>(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
   const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
   const [notesTarget, setNotesTarget] = useState<{ memberId: string; name: string } | null>(null);
+  const [staffRoleNoticeOpen, setStaffRoleNoticeOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
@@ -436,7 +441,7 @@ export function SettingsPage() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
-  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
+  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | "staff" | null>(null);
   const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -1001,6 +1006,24 @@ export function SettingsPage() {
     }
   }
 
+  async function changeMemberPermission(memberId: string, appUserRole: "admin" | "member") {
+    setChangingPermissionForId(memberId);
+    setMembersError(null);
+    setMembersSuccess(null);
+    try {
+      await apiJson<{ member: HouseholdMemberResponse }>(
+        `/household/members/${encodeURIComponent(memberId)}/permission`,
+        { method: "PATCH", body: JSON.stringify({ appUserRole }) }
+      );
+      setMembersSuccess("Permission level updated.");
+      await loadMembers();
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not update permission level");
+    } finally {
+      setChangingPermissionForId(null);
+    }
+  }
+
   async function confirmResetPassword(memberId: string) {
     setResetPasswordBusy(true);
     setMembersError(null);
@@ -1115,7 +1138,9 @@ export function SettingsPage() {
 
   const visibleTabs = useMemo(
     () => TABS.filter(
-      (id) => (id !== "household" || canManageHousehold) && (id !== "family" || canManageHousehold)
+      (id) =>
+        (id !== "household" || canManageHousehold) &&
+        (id !== "family" || canManageHousehold)
     ),
     [canManageHousehold]
   );
@@ -1154,8 +1179,8 @@ export function SettingsPage() {
                         : id === "data"
                           ? "Data & Backup"
                           : id === "notifications"
-                            ? "Notifications"
-                            : "Family"}
+                              ? "Notifications"
+                              : "Family"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1557,21 +1582,63 @@ export function SettingsPage() {
                           }}
                           disabled={savingMemberIndex !== null}
                         />
-                        <Select
-                          label="Role"
-                          value={member.role}
-                          onChange={(value) => {
-                            const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], role: value ?? "member" };
-                            setMemberDrafts(next);
-                          }}
-                          disabled={savingMemberIndex !== null}
-                          allowDeselect={false}
-                          data={[
-                            { value: "head", label: "Head" },
-                            { value: "member", label: "Member" }
-                          ]}
-                        />
+                        <Tooltip
+                          label={
+                            !member.id
+                              ? "Save this member, then set up a login to assign a role"
+                              : !member.linkedUserId
+                              ? "Available once a login account is set up"
+                              : member.appUserRole === "owner"
+                              ? "The owner role cannot be changed"
+                              : member.appUserRole === "staff"
+                              ? "Staff role is assigned during onboarding"
+                              : authRole !== "owner"
+                              ? "Only the owner can change roles"
+                              : ""
+                          }
+                          disabled={
+                            Boolean(member.id) &&
+                            Boolean(member.linkedUserId) &&
+                            authRole === "owner" &&
+                            member.appUserRole !== "owner" &&
+                            member.appUserRole !== "staff"
+                          }
+                          withArrow
+                        >
+                          <Select
+                            label="Role"
+                            value={
+                              member.appUserRole === "owner"
+                                ? "owner"
+                                : member.appUserRole === "staff"
+                                ? "staff"
+                                : member.appUserRole ?? "member"
+                            }
+                            onChange={(value) => {
+                              if (value === "staff") {
+                                setStaffRoleNoticeOpen(true);
+                                return;
+                              }
+                              if (!member.id || (value !== "admin" && value !== "member")) return;
+                              void changeMemberPermission(member.id, value);
+                            }}
+                            disabled={
+                              !member.id ||
+                              !member.linkedUserId ||
+                              member.appUserRole === "owner" ||
+                              member.appUserRole === "staff" ||
+                              authRole !== "owner" ||
+                              changingPermissionForId === member.id
+                            }
+                            allowDeselect={false}
+                            data={[
+                              { value: "owner", label: "Owner" },
+                              { value: "admin", label: "Admin" },
+                              { value: "member", label: "Member" },
+                              { value: "staff", label: "Staff" }
+                            ]}
+                          />
+                        </Tooltip>
                         <Select
                           label="Relationship"
                           value={member.relationship}
@@ -2391,6 +2458,26 @@ export function SettingsPage() {
           </Text>
         </Paper>
         <Button fullWidth onClick={() => setResetPasswordResult(null)}>Done</Button>
+      </Modal>
+
+      <Modal
+        opened={staffRoleNoticeOpen}
+        onClose={() => setStaffRoleNoticeOpen(false)}
+        title="Not the right place"
+        centered
+      >
+        <Text size="sm" mb="md">
+          Staff members are onboarded from Staff → Roster, not by changing a household member's
+          role here.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setStaffRoleNoticeOpen(false)}>
+            Close
+          </Button>
+          <Button component={Link} to="/staff-admin/directory" onClick={() => setStaffRoleNoticeOpen(false)}>
+            Go to Roster
+          </Button>
+        </Group>
       </Modal>
 
       {/* Member notes modal */}

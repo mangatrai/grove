@@ -26,6 +26,7 @@ tags:
   - name: gcal
   - name: protest
   - name: espp
+  - name: staff
 paths:
   /health:
     get:
@@ -5135,6 +5136,436 @@ paths:
                   error: { type: string, example: NOT_FOUND }
                   message: { type: string }
 
+  /staff/timesheets/me:
+    get:
+      tags: [staff]
+      summary: Get (or lazily create as draft) a staff member's timesheet period for a week
+      description: >-
+        Role staff, owner, or admin. Staff callers are always locked to their own staff_profile
+        (staffId ignored/self-only); owner/admin callers must supply staffId to select which
+        household staff member to view. Entries are not persisted until PUT is called.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: weekStart
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Defaults to the current household-local week's Monday
+        - name: staffId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Optional for staff role; required for owner/admin
+      responses:
+        "200":
+          description: Timesheet period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: weekStart or staffId present but malformed }
+        "404": { description: No accessible staff member for the caller's role and staffId }
+    put:
+      tags: [staff]
+      summary: Full-replace a staff member's entries for a week
+      description: >-
+        Role staff, owner, or admin. Same access rule as GET. Only allowed while the period is
+        draft or rejected.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekStartDate, entries]
+              properties:
+                weekStartDate: { type: string, format: date }
+                entries:
+                  type: array
+                  maxItems: 7
+                  items:
+                    type: object
+                    required: [workDate, hoursWorked]
+                    properties:
+                      workDate: { type: string, format: date }
+                      hoursWorked: { type: number, minimum: 0.01, maximum: 24 }
+                      note: { type: string, nullable: true }
+                staffId: { type: string, format: uuid, description: Optional for staff role; required for owner/admin }
+      responses:
+        "200":
+          description: Updated period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400":
+          description: Validation failure, or code INVALID_DATE (workDate outside the given week)
+        "404": { description: No accessible staff member for the caller's role and staffId }
+        "409": { description: "code NOT_EDITABLE — period is submitted or approved" }
+  /staff/timesheets/me/submit:
+    post:
+      tags: [staff]
+      summary: Submit a staff member's timesheet period for owner/admin review
+      description: >-
+        Role staff, owner, or admin. Same access rule as GET /staff/timesheets/me.
+        Clears any prior reviewNote.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weekStartDate]
+              properties:
+                weekStartDate: { type: string, format: date }
+                staffId: { type: string, format: uuid, description: Optional for staff role; required for owner/admin }
+      responses:
+        "200":
+          description: Submitted period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: Validation failure }
+        "404": { description: No accessible staff member for the caller's role and staffId }
+        "409":
+          description: "code EMPTY (no entries with hours logged) or NOT_EDITABLE"
+  /staff/timesheets/pending:
+    get:
+      tags: [staff]
+      summary: List all submitted timesheet periods for the household (approval queue)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Pending periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/TimesheetPeriodSummary' }
+        "403": { description: Requires owner or admin role }
+  /staff/timesheets/{periodId}:
+    get:
+      tags: [staff]
+      summary: Get a timesheet period by id
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Timesheet period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: No period with that id in the household }
+  /staff/timesheets/{periodId}/approve:
+    post:
+      tags: [staff]
+      summary: Approve a submitted timesheet period
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Approved period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_SUBMITTED — period is not currently submitted" }
+  /staff/timesheets/{periodId}/reject:
+    post:
+      tags: [staff]
+      summary: Reject a submitted timesheet period with a comment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewNote]
+              properties:
+                reviewNote: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        "200":
+          description: Rejected period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: '#/components/schemas/TimesheetPeriod' }
+        "400": { description: periodId not a UUID, or reviewNote missing/empty }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_SUBMITTED" }
+  /staff/expenses/me:
+    get:
+      tags: [staff]
+      summary: List a staff member's expense claims
+      description: >-
+        Role staff, owner, or admin. Staff callers are always locked to their own staff_profile
+        (staffId ignored/self-only); owner/admin callers must supply staffId to select which
+        household staff member to view. Newest first (expenseDate DESC, createdAt DESC).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+          description: Optional for staff role; required for owner/admin
+      responses:
+        "200":
+          description: Expense claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expenses:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: staffId present but malformed }
+        "404": { description: No accessible staff member for the caller's role and staffId }
+    post:
+      tags: [staff]
+      summary: Create a new expense claim for a staff member, immediately pending
+      description: >-
+        Role staff, owner, or admin. Same access rule as GET /staff/expenses/me.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expenseDate, category, amountCents]
+              properties:
+                expenseDate: { type: string, format: date }
+                category:
+                  type: string
+                  enum:
+                    - "Transportation/Mileage"
+                    - "Groceries & Kids' Supplies"
+                    - "Activities & Outings"
+                    - "Parking & Tolls"
+                    - "Medical/First Aid"
+                    - "Other"
+                amountCents: { type: integer, minimum: 1 }
+                description: { type: string, nullable: true }
+                staffId: { type: string, format: uuid, description: Optional for staff role; required for owner/admin }
+      responses:
+        "201":
+          description: Created expense claim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: Validation failure (bad category, non-positive amount) }
+        "404": { description: No accessible staff member for the caller's role and staffId }
+  /staff/expenses/pending:
+    get:
+      tags: [staff]
+      summary: List all pending expense claims for the household (approval queue)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Pending expenses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expenses:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffExpenseSummary' }
+        "403": { description: Requires owner or admin role }
+  /staff/expenses/{expenseId}/approve:
+    post:
+      tags: [staff]
+      summary: Approve a pending expense claim
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: expenseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Approved expense
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: expenseId not a UUID }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_PENDING — expense is not currently pending" }
+  /staff/expenses/{expenseId}/reject:
+    post:
+      tags: [staff]
+      summary: Reject a pending expense claim with a comment
+      description: Terminal — no resubmit path.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: expenseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewNote]
+              properties:
+                reviewNote: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        "200":
+          description: Rejected expense
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expense: { $ref: '#/components/schemas/StaffExpense' }
+        "400": { description: expenseId not a UUID, or reviewNote missing/empty }
+        "403": { description: Requires owner or admin role }
+        "404": { description: "code NOT_FOUND" }
+        "409": { description: "code NOT_PENDING" }
+  /staff/{staffId}/pay-summary:
+    get:
+      tags: [staff]
+      summary: Earned/paid/balance pay summary for a staff member over a date range
+      description: >-
+        A staff-role caller may only fetch their own summary (staffId must resolve to
+        their own personProfileId, else 404). Computed on the fly, no stored payroll run.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Pay summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary: { $ref: '#/components/schemas/StaffPaySummary' }
+        "400": { description: staffId not a UUID, or from/to missing or malformed }
+        "403": { description: Requires owner, admin, or staff role }
+        "404": { description: Staff member not found, or (staff-role caller) staffId is not their own }
+  /staff/{staffId}/reports/hours:
+    get:
+      tags: [staff]
+      summary: Download an hours-report PDF for a staff member over a date range
+      description: >-
+        A staff-role caller may only fetch their own report (staffId must resolve to
+        their own personProfileId, else 404). Lists all timesheet entries in range across
+        every period status, with a totals footer.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Hours report PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: staffId not a UUID, or from/to missing or malformed }
+        "403": { description: Requires owner, admin, or staff role }
+        "404": { description: Staff member not found, or (staff-role caller) staffId is not their own }
+  /staff/{staffId}/reports/payment:
+    get:
+      tags: [staff]
+      summary: Download a payment-report PDF (earned/paid/balance) for a staff member over a date range
+      description: >-
+        A staff-role caller may only fetch their own report (staffId must resolve to
+        their own personProfileId, else 404). Same breakdown as GET /staff/{staffId}/pay-summary.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Payment report PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: staffId not a UUID, or from/to missing or malformed }
+        "403": { description: Requires owner, admin, or staff role }
+        "404": { description: Staff member not found, or (staff-role caller) staffId is not their own }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -6152,4 +6583,84 @@ components:
         label: { type: string, nullable: true }
         notes: { type: string, nullable: true }
         isActive: { type: boolean }
+
+    TimesheetEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workDate: { type: string, format: date }
+        hoursWorked: { type: number }
+        note: { type: string, nullable: true }
+
+    TimesheetPeriod:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        weekStartDate: { type: string, format: date }
+        status: { type: string, enum: [draft, submitted, approved, rejected] }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        reviewedByUserId: { type: string, format: uuid, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/TimesheetEntry' }
+        totalHours: { type: number }
+
+    TimesheetPeriodSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        staffFullName: { type: string }
+        weekStartDate: { type: string, format: date }
+        status: { type: string, enum: [draft, submitted, approved, rejected] }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        totalHours: { type: number }
         createdAt: { type: string, format: date-time }
+
+    StaffExpense:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        staffProfileId: { type: string, format: uuid }
+        expenseDate: { type: string, format: date }
+        category: { type: string }
+        amountCents: { type: integer }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [pending, approved, rejected] }
+        reviewedByUserId: { type: string, format: uuid, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    StaffExpenseSummary:
+      allOf:
+        - $ref: '#/components/schemas/StaffExpense'
+        - type: object
+          properties:
+            staffFullName: { type: string }
+
+    StaffPaySummary:
+      type: object
+      properties:
+        staffProfileId: { type: string, format: uuid }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        earned:
+          type: object
+          properties:
+            timesheetCents: { type: integer }
+            expenseCents: { type: integer }
+            totalCents: { type: integer }
+        paid:
+          type: object
+          properties:
+            salaryCents: { type: integer }
+            bonusCents: { type: integer }
+            reimbursementCents: { type: integer }
+            totalCents: { type: integer }
+        balanceDueCents: { type: integer }

@@ -27,6 +27,7 @@ export default defineConfig({
       "/reports": api,
       "/health": api,
       "/household": api,
+      "/staff": api,
       "/exports": api,
       "/gdrive": api,
       "/gcal": api,

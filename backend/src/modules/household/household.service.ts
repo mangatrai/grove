@@ -207,7 +207,7 @@ export async function patchHouseholdSettings(
 }
 
 export type HouseholdMemberRole = "head" | "member";
-export type HouseholdRelationship = "self" | "spouse" | "child" | "dependent" | "other";
+export type HouseholdRelationship = "self" | "spouse" | "child" | "dependent" | "employee" | "other";
 
 export type HouseholdMemberProfile = {
   id: string;
@@ -221,6 +221,8 @@ export type HouseholdMemberProfile = {
   avatarKey: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  /** app_user.role — the field that actually gates permissions. Null if this member has no login. */
+  appUserRole: "owner" | "admin" | "member" | "staff" | null;
   /** Effective age — computed from DOB if set, otherwise the manual age column. */
   age: number | null;
   /** Decrypted YYYY-MM-DD. Only populated for own-profile responses; null otherwise. */
@@ -243,6 +245,7 @@ type MemberProfileRow = {
   avatar_key: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  app_user_role: "owner" | "admin" | "member" | "staff" | null;
   age: number | null;
   date_of_birth_encrypted: string | null;
   sex: string | null;
@@ -308,6 +311,7 @@ function toHouseholdMemberProfile(row: MemberProfileRow, revealDob = false): Hou
     avatarKey: row.avatar_key,
     role: row.role,
     relationship: row.relationship,
+    appUserRole: row.app_user_role,
     age: computedAge ?? manualAge,
     dateOfBirth: revealDob ? rawDob : null,
     hasDob: rawDob != null,
@@ -372,16 +376,18 @@ export type PatchMemberInput = {
 async function ensureCurrentUserProfile(
   householdId: string,
   userId: string,
-  role: "owner" | "admin" | "member"
+  role: "owner" | "admin" | "member" | "staff"
 ): Promise<HouseholdMemberProfile | null> {
   const existing = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.linked_user_id = ?
   LIMIT 1
 `,
@@ -392,7 +398,7 @@ async function ensureCurrentUserProfile(
     return toOwnProfile(existing);
   }
 
-  const user = await qGet<{ email: string; role: "owner" | "admin" | "member" }>(
+  const user = await qGet<{ email: string; role: "owner" | "admin" | "member" | "staff" }>(
     `
   SELECT email, role
   FROM app_user
@@ -438,11 +444,13 @@ async function ensureCurrentUserProfile(
   const created = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.linked_user_id = ?
   LIMIT 1
 `,
@@ -455,7 +463,7 @@ async function ensureCurrentUserProfile(
 export async function getCurrentUserProfile(
   householdId: string,
   userId: string,
-  role: "owner" | "admin" | "member"
+  role: "owner" | "admin" | "member" | "staff"
 ): Promise<HouseholdMemberProfile | null> {
   return ensureCurrentUserProfile(householdId, userId, role);
 }
@@ -463,7 +471,7 @@ export async function getCurrentUserProfile(
 export async function patchCurrentUserProfile(
   householdId: string,
   userId: string,
-  role: "owner" | "admin" | "member",
+  role: "owner" | "admin" | "member" | "staff",
   input: PatchProfileInput
 ): Promise<{ ok: true; profile: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" }> {
   const ensured = await ensureCurrentUserProfile(householdId, userId, role);
@@ -471,11 +479,13 @@ export async function patchCurrentUserProfile(
     ? await qGet<MemberProfileRow>(
         `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.linked_user_id = ?
   LIMIT 1
 `,
@@ -625,11 +635,13 @@ export async function patchCurrentUserProfile(
   const updated = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.id = ?
   LIMIT 1
 `,
@@ -646,11 +658,13 @@ export async function listHouseholdMembers(householdId: string): Promise<Househo
   const rows = await qAll<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM household_membership m
   JOIN person_profile p
     ON p.id = m.person_profile_id
    AND p.household_id = m.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE m.household_id = ?
   ORDER BY p.created_at ASC, p.id ASC
 `,
@@ -724,11 +738,13 @@ export async function createHouseholdMember(
   const created = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.id = ?
   LIMIT 1
 `,
@@ -757,11 +773,13 @@ export async function patchHouseholdMember(
   const existing = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.id = ?
   LIMIT 1
 `,
@@ -810,11 +828,69 @@ export async function patchHouseholdMember(
   const updated = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
          p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
    AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
+  if (!updated) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  return { ok: true, member: toHouseholdMemberProfile(updated) };
+}
+
+/**
+ * Update app_user.role (the field requireRole() actually checks) for a member's linked login.
+ * Distinct from patchHouseholdMember, which only touches household_membership.role (head/member —
+ * household position, not permissions). Owner-only: only the household owner can grant/revoke admin,
+ * and the owner role itself can never be reassigned through this control.
+ */
+export async function patchHouseholdMemberPermission(
+  householdId: string,
+  memberId: string,
+  nextAppUserRole: "admin" | "member"
+): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" | "IS_OWNER" }> {
+  const existing = await qGet<{ linked_user_id: string | null; app_user_role: string | null }>(
+    `
+  SELECT p.linked_user_id, au.role AS app_user_role
+  FROM person_profile p
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
+  if (!existing) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  if (!existing.linked_user_id) {
+    return { ok: false, code: "NO_LOGIN" };
+  }
+  if (existing.app_user_role === "owner") {
+    return { ok: false, code: "IS_OWNER" };
+  }
+
+  await qExec(`UPDATE app_user SET role = ? WHERE id = ?`, nextAppUserRole, existing.linked_user_id);
+
+  const updated = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         au.role AS app_user_role,
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  LEFT JOIN app_user au ON au.id = p.linked_user_id
   WHERE p.household_id = ? AND p.id = ?
   LIMIT 1
 `,

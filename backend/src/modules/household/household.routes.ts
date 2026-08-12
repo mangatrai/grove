@@ -16,6 +16,7 @@ import {
   listHouseholdMembers,
   patchCurrentUserProfile,
   patchHouseholdMember,
+  patchHouseholdMemberPermission,
   patchHouseholdSettings,
   resetMemberPassword
 } from "./household.service.js";
@@ -97,7 +98,7 @@ householdRouter.patch("/settings", requireRole(["owner", "admin"]), async (req: 
 });
 
 const roleSchema = z.enum(["head", "member"]);
-const relationshipSchema = z.enum(["self", "spouse", "child", "dependent", "other"]);
+const relationshipSchema = z.enum(["self", "spouse", "child", "dependent", "employee", "other"]);
 
 const profilePatchSchema = z
   .object({
@@ -229,6 +230,32 @@ householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), asy
       return;
     }
     res.status(404).json({ message: "Member not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ member: out.member });
+});
+
+const permissionPatchSchema = z.object({
+  appUserRole: z.enum(["admin", "member"])
+});
+
+householdRouter.patch("/members/:memberId/permission", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const body = permissionPatchSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ errors: body.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await patchHouseholdMemberPermission(householdId, params.data.memberId, body.data.appUserRole);
+  if (!out.ok) {
+    if (out.code === "NOT_FOUND") { res.status(404).json({ message: "Member not found", code: out.code }); return; }
+    if (out.code === "NO_LOGIN") { res.status(400).json({ message: "Member has no login account", code: out.code }); return; }
+    res.status(400).json({ message: "Cannot change the owner's permission level", code: out.code });
     return;
   }
   res.status(200).json({ member: out.member });

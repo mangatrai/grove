@@ -28,6 +28,7 @@ import { esppRouter } from "./modules/espp/espp.routes.js";
 import { protestRouter } from "./modules/protest/protest.routes.js";
 import { familyEventsRouter } from "./modules/family/family-events.routes.js";
 import { familyProfilesRouter } from "./modules/family/family-profiles.routes.js";
+import { staffRouter } from "./modules/staff/staff.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -72,7 +73,8 @@ const API_PATH_PREFIXES = [
   "/recurring-overrides",
   "/insights",
   "/espp",
-  "/api/protest"
+  "/api/protest",
+  "/staff"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -135,6 +137,7 @@ export function buildApp() {
   app.use("/api/protest", protestRouter);
   app.use("/api/family", familyEventsRouter);
   app.use("/api/family", familyProfilesRouter);
+  app.use("/staff", staffRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     // Vite hashes all files under assets/ — serve them with a 1-year immutable cache.

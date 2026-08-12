@@ -767,6 +767,25 @@ Creates login credentials for an existing member profile.
 
 ---
 
+#### `PATCH /household/members/:memberId/permission` (STAFF-7, GH #268)
+
+**Auth:** Bearer JWT. **Role:** owner only.
+
+Updates `app_user.role` (the field `requireRole()` actually gates on) for a member's linked login — distinct from `PATCH /household/members/:memberId`, which only touches `household_membership.role` (head/member, a household-position label with no bearing on permissions). Use this to promote a member to `admin` (e.g. so a spouse can approve staff timesheets/expenses) or demote back to `member`. Granting `admin` gives full admin rights app-wide, not a scoped subset.
+
+**Request body:**
+```json
+{ "appUserRole": "admin | member" }
+```
+
+**Response 200:** `{ "member": { ...HouseholdMemberProfile, "appUserRole": "owner|admin|member|staff|null" } }`
+
+**Errors:**
+- **400** — validation failure, or `NO_LOGIN` (member has no linked login account), or `IS_OWNER` (the owner's permission level cannot be reassigned through this endpoint).
+- **404** — member not found.
+
+---
+
 #### `GET /household/members/:memberId/data-count`
 
 Returns transaction and payslip counts for a member (used in delete confirmation).
@@ -860,6 +879,417 @@ Updates the signed-in user's `person_profile`. Send at least one field.
 - **401** — missing or invalid token.
 - **404** — profile could not be resolved.
 - **409** — email conflict (`EMAIL_CONFLICT`).
+
+---
+
+### Staff (Household Employees) (STAFF-2, GH #263)
+
+MVP household-employee (e.g. nanny) onboarding. `GET`/`POST /staff` and `GET /staff/:staffId` require **owner or admin**; `GET /staff/me` requires the **staff** role and returns the caller's own profile. No route lists `"staff"` in `requireRole()`, so a staff login is rejected by every other endpoint in the app by default.
+
+#### `GET /staff`
+
+**Response 200:**
+```json
+{
+  "members": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "personProfileId": "uuid",
+      "fullName": "Jamie Rivera",
+      "email": "jamie@example.com",
+      "phoneNumber": "555-0100",
+      "employmentStartDate": "2026-08-17",
+      "regularScheduleJson": { "mon": 8, "tue": 8, "wed": 8, "thu": 8, "fri": 8 },
+      "isActive": true,
+      "hourlyRateCents": 2500,
+      "hasLogin": true
+    }
+  ]
+}
+```
+
+`hourlyRateCents` reflects the current effective `staff_rate` row (`effective_date <= today`, most recent). `hasLogin` is `false` only if the `app_user` row is somehow missing — every staff member created through `POST /staff` has one.
+
+---
+
+#### `POST /staff`
+
+Creates a household employee: `person_profile` (`relationship=employee`) + `household_membership` (`role=member`, `relationship=employee`) + `app_user` (`role=staff`) + `staff_profile` + an initial `staff_rate`. Idempotently ensures the household has an "Employee" category (with **Salary** / **Bonus** / **Reimbursement** children) for tagging payment transactions later — see [Pay Summary](#pay-summary), not yet shipped.
+
+If SMTP is configured (`isEmailConfigured()`), sends an invite email (reused password-reset-token template) so the employee can set their own password. If not configured, the account is created with a default password (`ChangeMe123!`, `force_password_change` semantics not yet applied) that the admin must share directly — surfaced via `inviteSent: false` in the response.
+
+**Request body:**
+```json
+{
+  "firstName": "string",
+  "lastName": "string (optional)",
+  "email": "string",
+  "phoneNumber": "string (optional)",
+  "dateOfBirth": "YYYY-MM-DD (optional)",
+  "employmentStartDate": "YYYY-MM-DD",
+  "regularScheduleJson": { "mon": 8, "...": "0-24 hours per day key (optional)" },
+  "hourlyRateCents": 2500
+}
+```
+
+**Response 201:** `{ "member": { ...StaffProfile }, "inviteSent": boolean }`
+
+**Errors:**
+- **400** — validation failure (`{ "errors": z.issues }`), or `EMAIL_REQUIRED`.
+- **409** — `EMAIL_CONFLICT` — email already in use by another `person_profile` or `app_user`.
+
+---
+
+#### `GET /staff/me`
+
+**Auth:** Role: staff only.
+
+Returns the calling staff member's own profile, resolved from `req.authUser.personProfileId`.
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **404** — caller has no `personProfileId`, or no matching `staff_profile` row.
+
+---
+
+#### `GET /staff/:staffId`
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **404** — no staff member with that ID in the household.
+
+---
+
+#### `PATCH /staff/:staffId`
+
+Updates schedule, active status, and/or records a new effective-dated pay rate. At least one field required; `newHourlyRateCents` and `newRateEffectiveDate` must be supplied together (a new `staff_rate` row is inserted rather than mutating the current one, preserving history for future pay-summary calculations).
+
+**Request body:** any subset of:
+```json
+{
+  "regularScheduleJson": { "mon": 8 },
+  "isActive": false,
+  "newHourlyRateCents": 2600,
+  "newRateEffectiveDate": "2026-09-01"
+}
+```
+
+**Response 200:** `{ "member": { ...StaffProfile } }`
+
+**Errors:**
+- **400** — validation failure, or `newHourlyRateCents`/`newRateEffectiveDate` provided without its pair.
+- **404** — staff member not found.
+
+---
+
+### Timesheets (STAFF-3, GH #264)
+
+Weekly timesheet entry — same `/me` route set for both staff self-service and owner/admin submit-on-behalf, mounted under `/staff/timesheets`. Status machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is a distinct, editable state (not folded back into `draft`) so the employee can see why a period bounced. `EDITABLE_STATUSES = ["draft", "rejected"]`.
+
+**Access control (all `/me` routes):** staff-role callers are always locked to their own `staff_profile` row — an optional `staffId` is accepted but rejected (404) if it doesn't match their own. Owner/admin callers must supply `staffId` (any household staff member) — omitting it is a 404. Resolved via `resolveAccessibleStaffMember()` (`staff.service.ts`); there is no separate `/for/:staffId` route.
+
+#### `GET /staff/timesheets/me`
+
+**Auth:** Role: staff, owner, or admin.
+
+Returns the selected staff member's timesheet period for the given week, creating an empty `draft` row on first access if none exists. No entries are persisted until `PUT /staff/timesheets/me` is called — prefill from `household_help_availability` is a frontend-only convenience.
+
+**Query params:** `weekStart` (optional, `YYYY-MM-DD`; defaults to the current household-local week's Monday). `staffId` (optional for staff role, required for owner/admin).
+
+**Response 200:**
+```json
+{
+  "period": {
+    "id": "uuid",
+    "householdId": "uuid",
+    "staffProfileId": "uuid",
+    "weekStartDate": "2026-08-10",
+    "status": "draft",
+    "submittedAt": null,
+    "reviewedByUserId": null,
+    "reviewedAt": null,
+    "reviewNote": null,
+    "entries": [{ "id": "uuid", "workDate": "2026-08-10", "hoursWorked": 8, "note": "Full day" }],
+    "totalHours": 8
+  }
+}
+```
+
+**Errors:**
+- **400** — `weekStart` or `staffId` present but malformed.
+- **404** — no accessible staff member (staff self-lookup failed, staff selected a foreign `staffId`, or owner/admin omitted `staffId`/selected an unknown one).
+
+---
+
+#### `PUT /staff/timesheets/me`
+
+**Auth:** Role: staff, owner, or admin.
+
+Full-replace: deletes all existing `timesheet_entry` rows for the period and re-inserts the posted set in one transaction. Only allowed while the period is `draft` or `rejected`.
+
+**Request body:**
+```json
+{
+  "weekStartDate": "2026-08-10",
+  "entries": [{ "workDate": "2026-08-10", "hoursWorked": 8, "note": "string (optional)" }],
+  "staffId": "uuid (optional for staff role, required for owner/admin)"
+}
+```
+Max 7 entries; `hoursWorked` must be `> 0` and `<= 24`.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod } }`
+
+**Errors:**
+- **400** — validation failure, or `code: "INVALID_DATE"` — an entry's `workDate` falls outside the given week.
+- **404** — no accessible staff member (see access control above).
+- **409** — `code: "NOT_EDITABLE"` — period is `submitted` or `approved`.
+
+---
+
+#### `POST /staff/timesheets/me/submit`
+
+**Auth:** Role: staff, owner, or admin.
+
+Moves the period to `submitted` for owner/admin review. Clears any prior `reviewNote`.
+
+**Request body:** `{ "weekStartDate": "2026-08-10", "staffId": "uuid (optional for staff role, required for owner/admin)" }`
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "submitted" } }`
+
+**Errors:**
+- **400** — validation failure.
+- **404** — no accessible staff member (see access control above).
+- **409** — `code: "EMPTY"` — no entries with hours logged; `code: "NOT_EDITABLE"` — period is not `draft`/`rejected`.
+
+---
+
+#### `GET /staff/timesheets/pending`
+
+**Auth:** Role: owner or admin.
+
+Lists all `submitted` periods across the household's staff, for the approval queue. Registered before `/:periodId` in the router so the literal path isn't swallowed by the param route.
+
+**Response 200:**
+```json
+{
+  "periods": [
+    { "id": "uuid", "staffProfileId": "uuid", "staffFullName": "Jamie Rivera", "weekStartDate": "2026-08-10", "status": "submitted", "submittedAt": "2026-08-10T12:00:00.000Z", "totalHours": 14.5 }
+  ]
+}
+```
+
+---
+
+#### `GET /staff/timesheets/:periodId`
+
+**Auth:** Role: owner or admin.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID.
+- **404** — no period with that ID in the household.
+
+---
+
+#### `POST /staff/timesheets/:periodId/approve`
+
+**Auth:** Role: owner or admin.
+
+Moves a `submitted` period to `approved`; records `reviewedByUserId`/`reviewedAt`.
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "approved" } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_SUBMITTED"` — period is not currently `submitted` (e.g. already approved).
+
+---
+
+#### `POST /staff/timesheets/:periodId/reject`
+
+**Auth:** Role: owner or admin.
+
+Moves a `submitted` period to `rejected`; requires a `reviewNote` so the employee knows what to fix, then edits and resubmits from the same period.
+
+**Request body:** `{ "reviewNote": "string, 1-1000 chars, required" }`
+
+**Response 200:** `{ "period": { ...TimesheetPeriod, "status": "rejected", "reviewNote": "..." } }`
+
+**Errors:**
+- **400** — `periodId` not a UUID, or `reviewNote` missing/empty.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_SUBMITTED"`.
+
+---
+
+### Staff Expenses (STAFF-4, GH #265)
+
+Reimbursable expense claim entry — same `/me` route set for both staff self-service and owner/admin submit-on-behalf, mounted under `/staff/expenses`. Status is `pending` | `approved` | `rejected` — no `draft` state (unlike timesheets): a submitted claim is created directly as `pending`, and `rejected` is terminal/view-only with no edit-and-resubmit path.
+
+**Access control (all `/me` routes):** staff-role callers are always locked to their own `staff_profile` row — an optional `staffId` is accepted but rejected (404) if it doesn't match their own. Owner/admin callers must supply `staffId` (any household staff member) — omitting it is a 404. Resolved via `resolveAccessibleStaffMember()` (`staff.service.ts`); there is no separate `/for/:staffId` route.
+
+#### `GET /staff/expenses/me`
+
+**Auth:** Role: staff, owner, or admin.
+
+Lists the selected staff member's expense claims, newest first (`expenseDate DESC, createdAt DESC`).
+
+**Query params:** `staffId` (optional for staff role, required for owner/admin).
+
+**Response 200:**
+```json
+{
+  "expenses": [
+    { "id": "uuid", "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "Zoo tickets", "status": "pending", "reviewNote": null }
+  ]
+}
+```
+
+**Errors:**
+- **400** — `staffId` present but malformed.
+- **404** — no accessible staff member (see access control above).
+
+---
+
+#### `POST /staff/expenses/me`
+
+**Auth:** Role: staff, owner, or admin.
+
+Creates a new claim, immediately `pending` for owner/admin review.
+
+**Request body:**
+```json
+{ "expenseDate": "2026-08-10", "category": "Groceries & Kids' Supplies", "amountCents": 4500, "description": "string (optional)", "staffId": "uuid (optional for staff role, required for owner/admin)" }
+```
+`category` must be one of `EXPENSE_CATEGORIES` (`Transportation/Mileage`, `Groceries & Kids' Supplies`, `Activities & Outings`, `Parking & Tolls`, `Medical/First Aid`, `Other`); `amountCents` must be a positive integer.
+
+**Response 201:** `{ "expense": { ...StaffExpense, "status": "pending" } }`
+
+**Errors:**
+- **400** — validation failure (bad category, non-positive amount).
+- **404** — no accessible staff member (see access control above).
+
+---
+
+#### `GET /staff/expenses/pending`
+
+**Auth:** Role: owner or admin.
+
+Lists all `pending` expenses across the household's staff, for the approval queue. Registered before `/:expenseId` so the literal path isn't swallowed by the param route.
+
+**Response 200:**
+```json
+{
+  "expenses": [
+    { "id": "uuid", "staffProfileId": "uuid", "staffFullName": "Jamie Rivera", "expenseDate": "2026-08-10", "category": "Parking & Tolls", "amountCents": 800, "description": null }
+  ]
+}
+```
+
+---
+
+#### `POST /staff/expenses/:expenseId/approve`
+
+**Auth:** Role: owner or admin.
+
+Moves a `pending` expense to `approved`; records `reviewedByUserId`/`reviewedAt`.
+
+**Response 200:** `{ "expense": { ...StaffExpense, "status": "approved" } }`
+
+**Errors:**
+- **400** — `expenseId` not a UUID.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_PENDING"` — expense is not currently `pending`.
+
+---
+
+#### `POST /staff/expenses/:expenseId/reject`
+
+**Auth:** Role: owner or admin.
+
+Moves a `pending` expense to `rejected`; requires a `reviewNote`. Terminal — no resubmit path.
+
+**Request body:** `{ "reviewNote": "string, 1-1000 chars, required" }`
+
+**Response 200:** `{ "expense": { ...StaffExpense, "status": "rejected", "reviewNote": "..." } }`
+
+**Errors:**
+- **400** — `expenseId` not a UUID, or `reviewNote` missing/empty.
+- **404** — `code: "NOT_FOUND"`.
+- **409** — `code: "NOT_PENDING"`.
+
+---
+
+### Staff Pay (STAFF-5, GH #266)
+
+Pay summary (earned/paid/balance), mounted under `/staff`. Computed on the fly from timesheets, expenses, and tagged transactions — no stored payroll run.
+
+#### `GET /staff/:staffId/pay-summary`
+
+**Auth:** Role: owner, admin, or staff. A staff-role caller may only fetch their own summary (`:staffId` must resolve to their own `personProfileId`, else 404).
+
+**Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
+
+Earned = Σ(approved timesheet hours × the hourly rate effective on each entry's `work_date`) + Σ(approved `staff_expense` amounts) within `[from, to]`. Paid = Σ `transaction_canonical` rows with `owner_scope='person'`, `owner_person_profile_id` = the staff member's `person_profile_id`, `status='posted'`, `category_id` under the household's "Employee" category tree (Salary/Bonus/Reimbursement), `txn_date` within `[from, to]`, broken out per category. Balance due = Earned − Paid. Bonuses are recorded exclusively as transactions tagged to the Employee > Bonus category — there is no separate manually-entered bonus/adjustment ledger (GH #273).
+
+**Response 200:**
+```json
+{
+  "summary": {
+    "staffProfileId": "uuid",
+    "from": "2026-02-01",
+    "to": "2026-02-28",
+    "earned": { "timesheetCents": 16000, "expenseCents": 500, "totalCents": 16500 },
+    "paid": { "salaryCents": 20000, "bonusCents": 0, "reimbursementCents": 0, "totalCents": 20000 },
+    "balanceDueCents": -3500
+  }
+}
+```
+
+**Errors:**
+- **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
+- **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
+
+---
+
+### Staff Reports (STAFF-6, GH #267)
+
+PDF report downloads, mounted under `/staff`. Both endpoints return `application/pdf` (not JSON) with a `Content-Disposition: attachment` header, streamed via `pdfkit`.
+
+#### `GET /staff/:staffId/reports/hours`
+
+**Auth:** Role: owner, admin, or staff. A staff-role caller may only fetch their own report (`:staffId` must resolve to their own `personProfileId`, else 404).
+
+**Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
+
+Lists every `timesheet_entry` with a `work_date` in `[from, to]` (across all period statuses — draft/submitted/approved/rejected — so the report reflects what was logged, not just what's been approved), with a totals footer.
+
+**Response 200:** `application/pdf` binary body, `Content-Disposition: attachment; filename="hours-report-<name>-<from>-to-<to>.pdf"`.
+
+**Errors:**
+- **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
+- **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
+
+---
+
+#### `GET /staff/:staffId/reports/payment`
+
+**Auth:** Role: owner, admin, or staff. A staff-role caller may only fetch their own report (`:staffId` must resolve to their own `personProfileId`, else 404).
+
+**Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
+
+Renders the same earned/paid/balance breakdown as [`GET /staff/:staffId/pay-summary`](#staff-pay-staff-5-gh-266) as a PDF, including bonus/adjustment line-item detail.
+
+**Response 200:** `application/pdf` binary body, `Content-Disposition: attachment; filename="payment-report-<name>-<from>-to-<to>.pdf"`.
+
+**Errors:**
+- **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
+- **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
 
 ---
 

@@ -18,9 +18,9 @@ relevant section here in the same commit (see `CLAUDE.md` checklist).
   either directly (`household_id` FK) or transitively. There is no schema-per-tenant and no
   Postgres Row-Level Security — isolation is enforced at the application query layer, where every
   service-layer query filters by `household_id` (see §5, "No RLS").
-- **Scale**: 44 physical tables — 43 created via SQL migration files, plus `schema_migrations`
+- **Scale**: 50 physical tables — 49 created via SQL migration files, plus `schema_migrations`
   (created programmatically by the migration runner itself, not a `.sql` file). Grouped below into
-  9 functional domains.
+  7 functional domains.
 - **Migration strategy**: `backend/db/migrations/` holds `0001_baseline.sql` (a squashed snapshot
   of migrations 0001–0039) followed by incremental, feature-scoped files (`0041`...`0090`,
   numbering not contiguous — some numbers were retired as dead/no-op and folded into the
@@ -34,7 +34,7 @@ relevant section here in the same commit (see `CLAUDE.md` checklist).
 
 ## 2. Domain relationship overview
 
-All nine domains ultimately scope to `household`. Arrows show the primary FK direction (child →
+All seven domains ultimately scope to `household`. Arrows show the primary FK direction (child →
 parent).
 
 ```mermaid
@@ -44,11 +44,13 @@ erDiagram
     HOUSEHOLD ||--o{ PAYSLIP_ESPP : scopes
     HOUSEHOLD ||--o{ PROPERTY_PROTEST : scopes
     HOUSEHOLD ||--o{ FAMILY_PLANNER : scopes
+    HOUSEHOLD ||--o{ HOUSEHOLD_STAFF : scopes
     HOUSEHOLD ||--o{ AI_JOBS_OPS : scopes
     CORE_IDENTITY ||--o{ IMPORT_LEDGER : "accounts feed"
     IMPORT_LEDGER ||--o{ PAYSLIP_ESPP : "deposit match"
     CORE_IDENTITY ||--o{ PROPERTY_PROTEST : "owns property"
     CORE_IDENTITY ||--o{ FAMILY_PLANNER : "person profiles"
+    CORE_IDENTITY ||--o{ HOUSEHOLD_STAFF : "person profiles"
     IMPORT_LEDGER ||--o{ AI_JOBS_OPS : "insight input"
 ```
 
@@ -61,6 +63,7 @@ Domains, table counts, and their role:
 | Payslip & ESPP | 5 | Payslip PDF extraction, deposit matching, employee stock purchase tracking |
 | Property & Tax Protest | 5 | Real estate value tracking, DCAD property-tax protest workflow, RAG document store |
 | Family Planner | 8 | Calendar sync, AI agent alerts/digests, household help scheduling, agent memory |
+| Household Staff | 6 | Nanny/employee timesheet, expense claims, approval workflow (MVP — no tax withholding) |
 | AI Insights & Jobs/Ops | 10 | Async job queues, AI-generated insights, notifications, auth tokens |
 
 ---
@@ -338,7 +341,68 @@ integration needed the same OAuth-token-lifecycle machinery. The household inbox
 mailbox polled over IMAP with an app password, not a per-parent OAuth grant; see
 `household_credential_separation` rationale in §5.
 
-### 3.6 AI Insights & Jobs/Ops
+### 3.6 Household Staff
+
+```mermaid
+erDiagram
+    HOUSEHOLD ||--o{ STAFF_PROFILE : employs
+    PERSON_PROFILE ||--|| STAFF_PROFILE : "is a"
+    STAFF_PROFILE ||--o{ STAFF_RATE : "paid at"
+    STAFF_PROFILE ||--o{ TIMESHEET_PERIOD : logs
+    TIMESHEET_PERIOD ||--o{ TIMESHEET_ENTRY : contains
+    STAFF_PROFILE ||--o{ STAFF_EXPENSE : claims
+
+    STAFF_PROFILE {
+        text id PK
+        text household_id FK
+        text person_profile_id FK UNIQUE "1:1 with person_profile"
+        text employment_start_date
+        bool is_active
+    }
+    STAFF_RATE {
+        text id PK
+        text staff_profile_id FK
+        int hourly_rate_cents
+        text effective_date "effective-dated, raises don't rewrite history"
+    }
+    TIMESHEET_PERIOD {
+        text id PK
+        text staff_profile_id FK
+        text week_start_date UK "with staff_profile_id"
+        text status "draft|submitted|approved|rejected"
+        text reviewed_by_user_id FK
+    }
+    TIMESHEET_ENTRY {
+        text id PK
+        text timesheet_period_id FK
+        text work_date UK "with timesheet_period_id"
+        numeric hours_worked "CHECK 0 < x <= 24"
+    }
+    STAFF_EXPENSE {
+        text id PK
+        text staff_profile_id FK
+        text category
+        int amount_cents
+        text status "pending|approved|rejected"
+    }
+```
+
+MVP scope deliberately excludes tax withholding, FLSA overtime, and payroll compliance —
+that full-compliance model is specced separately for epic #121 (PY-1..PY-9, milestone V7) and
+untouched by this slice. Pay is a flat `hourly_rate_cents × hours_worked`, no overtime premium.
+There is no `staff_payment` table and no separate bonus/adjustment ledger: a payment against the
+balance — salary, bonus, or reimbursement — is any `transaction_canonical` row tagged with
+`owner_person_profile_id` = the staff member's `person_profile_id` under the household's
+"Employee" category tree (Salary/Bonus/Reimbursement) — reusing the existing transaction/category
+machinery rather than building a linking UI or a manually-entered adjustment table (GH #273).
+`staff_profile` reuses
+`person_profile` for name/contact/DOB (via the existing `date_of_birth_encrypted` +
+`dob-crypto.ts` machinery, see §3.1) rather than duplicating those fields — the same
+one-table-per-concept instinct behind `household_help_availability` in §3.5, which this domain
+does not reuse since that table is a lightweight availability roster, not an employment record
+with pay/approval state.
+
+### 3.7 AI Insights & Jobs/Ops
 
 ```mermaid
 erDiagram
@@ -442,6 +506,16 @@ data.
 | `email_ingest_log` | Household inbox ingestion (shared mailbox, IMAP + app password) | `message_id`, `items_json` JSONB, `status` CHECK (4 values) | `UNIQUE(household_id, message_id)` |
 | `oauth_integrations` | Unified Google OAuth store — Drive (household-scoped) + Calendar (user-scoped) | `provider` CHECK, `calendar_roles`, `selected_calendar_ids`, `gcal_last_synced_at` | 2 partial unique indexes (see §3.5); ephemeral — credentials never appear in `.hfb` backups |
 
+### Household Staff (5)
+
+| Table | Purpose | Key columns | Notable constraints/indexes |
+|---|---|---|---|
+| `staff_profile` | 1:1 employment record for a `person_profile` (nanny/employee) | `person_profile_id` FK UNIQUE, `employment_start_date` | — |
+| `staff_rate` | Effective-dated hourly rate | `hourly_rate_cents` CHECK `> 0`, `effective_date` | `idx_staff_rate_staff_effective` |
+| `timesheet_period` | One row per staff member per week | `week_start_date`, `status` CHECK (4 values), `reviewed_by_user_id` FK | `UNIQUE(staff_profile_id, week_start_date)` |
+| `timesheet_entry` | Hours logged for one day within a period | `work_date`, `hours_worked` CHECK `0 < x <= 24` | `UNIQUE(timesheet_period_id, work_date)` |
+| `staff_expense` | Reimbursable expense claim | `category`, `amount_cents` CHECK `> 0`, `status` CHECK (3 values) | `idx_staff_expense_household_status` |
+
 ### AI Insights & Jobs/Ops (10)
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
@@ -524,7 +598,7 @@ Every table falls into exactly one of two buckets in
 `backend/src/modules/export/export-registry.ts` — a table that isn't in either is silently
 excluded from `.hfb` backups (there's a `[export-coverage]` startup warning that catches this).
 
-- **`EXPORT_REGISTRY`** (30 tables) — user data, restored in `restoreOrder` to satisfy FK
+- **`EXPORT_REGISTRY`** (37 tables) — user data, restored in `restoreOrder` to satisfy FK
   dependencies (e.g. `property` before `financial_account`, since `financial_account.property_id`
   references it). Some entries carry an `onExport`/`onRestore` transform — `person_profile` strips
   the encrypted DOB column on export (instance-bound encryption key won't match on restore),

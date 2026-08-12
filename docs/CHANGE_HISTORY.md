@@ -14,6 +14,430 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #277: Roster — edit an existing staff member's pay rate (2026-08-11)
+
+**What changed:**
+- **Edit pay rate modal:** the Roster table's Rate column now has an **Edit** action that opens
+  a Mantine `Modal` with a new hourly rate and effective date. Saving calls the existing
+  `PATCH /staff/:staffId` endpoint (`newHourlyRateCents` + `newRateEffectiveDate`) — no backend
+  changes required, since the effective-dated `staff_rate` history table and route already
+  supported this; only the frontend UI was missing.
+
+**Why:** Hourly rate is optional at creation time, so a mistake (leaving it blank) or a routine
+raise a few weeks in had **no correction path** other than deleting and recreating the staff
+profile — explicit user report: "during testing i by mistake didn't enter pay rate ... and now i
+can't edit it anywhere ... but edit is important, because what if we increase her pay after a few
+weeks."
+
+**Tests:** New Playwright E2E case in `e2e/staff-admin.spec.ts` — add a staff member, verify the
+initial rate renders, edit via the modal, verify the updated rate renders.
+
+**Files:** `frontend/src/pages/staff/StaffDirectory.tsx`, `e2e/staff-admin.spec.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/277
+
+## UX — #276: Staff sidebar group moved above Setup, Directory tab renamed to Roster (2026-08-11)
+
+**What changed:**
+- **Sidebar order:** the owner/admin-only **Staff** nav group now renders above **Setup**
+  (previously appended after it, so it sat below Categories/Settings).
+- **Directory → Roster:** the "Directory" tab/label read like a generic phone/contact directory
+  rather than the staff roster it actually is. Renamed the nav label, the Household-tab
+  "Staff → Directory" notice/button, and USER_GUIDE references to **Roster**. Route path
+  (`/staff-admin/directory`) and internal component name (`StaffDirectory`) left unchanged —
+  cosmetic label only.
+
+**Verified (code inspection, this session):**
+- **Directory/Roster tab is not staff-visible:** `AppSidebar.tsx` renders only a single "My
+  Portal" nav item for `role === "staff"`; the `Staff` admin group (incl. Roster) is only added
+  for owner/admin. The `/staff-admin/*` routes are also wrapped in `RequireOwnerOrAdmin` in
+  `App.tsx`, and `RequireNotStaffLayout` redirects any `staff`-role user straight to `/staff` —
+  so it's gated at both the sidebar and the route level, not sidebar-only.
+- **Approval UI is not reachable by staff:** `TimesheetApprovalQueue`/`ExpenseApprovalQueue`
+  live only on `/staff-admin/timesheets` and `/staff-admin/expenses` (owner/admin route, not the
+  nanny's `/staff` portal route). The nanny's own `/staff` page renders only
+  `MyTimesheetPanel`/`MyExpensesPanel`/`MyPayPanel` — no approval controls exist on that
+  component tree at all. Backend approval/queue endpoints (`GET /timesheets/pending`,
+  `POST /timesheets/:id/approve|reject`, and the expense equivalents) are `requireRole(["owner",
+  "admin"])`-gated, so even a direct API call from a staff session 403s.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/276
+
+## CR — #273 + #274 + #275: Remove Record Bonus, Directory schedule link, staff-role select guard (2026-08-11)
+
+**What changed:**
+- **Record Bonus removed (#273):** deleted the entire vertical slice — `staff_pay_adjustment`
+  table (migration `0093_drop_staff_pay_adjustment.sql`), its `EXPORT_REGISTRY` entry,
+  `POST /staff/:staffId/pay-adjustments` route/service/types, the "Record bonus" roster-row
+  button and its form, and the adjustments list/section on the payment PDF report. Bonuses are
+  now tracked exclusively as `transaction_canonical` rows tagged to the Employee > Bonus
+  category — the same mechanism as salary and reimbursements, no manually-entered ledger.
+  `pay.service.ts` `getPaySummary`'s **earned** formula drops the
+  `Σ(staff_pay_adjustment amounts)` term; `earned.totalCents` is now
+  `Σ(approved timesheet hours × rate) + Σ(approved expenses)` only. `paid.bonusCents` (sourced
+  from tagged transactions) is untouched.
+- **Directory schedule column now shows real data (#274):** the Staff Directory's Schedule
+  column previously rendered dead placeholder text. It now fetches
+  `GET /api/family/availability` and shows a summary of the staff member's regular days/hours
+  (or "Not set"), with a link to the Care & Help Schedule editor on the Family tab
+  (`Settings → Family`) rather than duplicating that editor inside the Staff module.
+- **Household tab Role select guards against assigning Staff (#275):** the merged Role select
+  (from #269) previously listed "Staff" as a selectable value with no handling — selecting it
+  silently did nothing useful. It now opens a Mantine `Modal` explaining that staff members are
+  onboarded via Staff → Directory, with a button linking there directly, instead of applying
+  the change.
+
+**Why:** Bonuses recorded as a separate manually-entered adjustment created two sources of
+truth for "what was paid" (adjustments vs. tagged transactions) with no reconciliation —
+explicit user direction: "Record bonus needs to go away. we dont want to commit to a bonus or
+anything, if we pay bonus that will get recorded through the transactions." The Directory
+schedule column and Role-select guard are smaller fit-and-finish items found during the same
+review pass — see `[[project_family_planner_data_model]]` for why schedules live in
+`household_help_availability`/the Family tab rather than being re-edited from Staff.
+
+**Tests:** `backend/tests/staff-pay.test.ts` updated — bonus/adjustment test cases removed,
+remaining assertions use `earned.totalCents` = 16500 (no adjustment term),
+`balanceDueCents` = 16500 − 20000. `npm run test -w backend` and `npm run lint` pass across
+both workspaces.
+
+**GitHub:** closes #273 (epic #121, milestone V7), closes #274 (epic #121, milestone V7),
+closes #275 (epic #121, milestone V7).
+
+## CR — #272 + #271: Staff moves to top-level sidebar; owner/admin submit-on-behalf (2026-08-11)
+
+**What changed:**
+- **Sidebar placement (#272):** Staff is no longer a Settings tab. New top-level sidebar
+  section with four pages — `StaffDirectoryPage` (roster + onboarding, was
+  `StaffSection.tsx`), `StaffTimesheetsPage`, `StaffExpensesPage`, `StaffPayPage` — routed
+  at `/staff-admin/{directory,timesheets,expenses,pay}`, all `RequireOwnerOrAdmin`. The
+  approval-queue components (`TimesheetApprovalQueue`, `ExpenseApprovalQueue`) that used to
+  live embedded inside the old Settings tab now render on their respective pages.
+  `frontend/vite.config.ts` gained a `/staff` dev-proxy entry (previously only reachable
+  through the Settings-tab fetch path).
+- **Submit-on-behalf via shared routes, not separate ones (#271):** rejected the initial
+  design of dedicated `/for/:staffId` routes + admin-only UI as unnecessary duplication.
+  Instead, `/staff/timesheets/me` and `/staff/expenses/me` (GET/PUT/POST) now accept an
+  optional `staffId` (query param on GET, body field on PUT/POST) and are open to
+  `staff`/`owner`/`admin` roles alike. New `resolveAccessibleStaffMember(req, staffId?)`
+  in `staff.service.ts` is the single access-control chokepoint: a `staff`-role caller
+  self-resolves and is rejected (`null`) if `staffId` is supplied and doesn't match their
+  own record; an `owner`/`admin` caller must supply `staffId` and may select any household
+  staff member via `getStaffMemberById`. `MyTimesheetPanel`/`MyExpensesPanel` both gained an
+  optional `staffId?: string` prop (undefined = self-service, set = viewing/editing on
+  behalf of that staff member) — same pattern `MyPayPanel` already used. New shared
+  `StaffPicker` component (`GET /staff`, filtered to `isActive`) feeds a Mantine `Select` on
+  `StaffTimesheetsPage`/`StaffExpensesPage` so owner/admin can choose who they're acting on
+  behalf of, in the same UI a staff member sees for themselves — no new routes, no new
+  admin-only UI.
+
+**Why:** The original `/for/:staffId` design duplicated an entire route + UI surface to
+gate by role, when the same result is achievable with role-aware access control on the
+existing self-service surface. See `[[feedback_no_speculative_infra]]`.
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` and `staff-expense.test.ts` — owner/admin
+selecting a staff member via `?staffId=`/body `staffId` can create/save/submit or list/submit
+through `/me`; missing `staffId` for owner/admin → 404; unknown `staffId` → 404; a staff-role
+token supplying a foreign `staffId` → 404 (own `staffId` still works). `npm run lint` and
+`npm test` pass across both workspaces.
+
+**GitHub:** closes #272 (epic #121, milestone V7), closes #271 (epic #121, milestone V7).
+
+## CR — #269: Merge Household Role and Permission Level into a single Role select (2026-08-11)
+
+**What changed:** `Settings > Household` previously showed two separate dropdowns per member
+— "Household Role" (Head/Member, just a household-position label) and "Permission Level"
+(Admin/Member, the actual `app_user.role` gate) — which is exactly the conflation that
+motivated splitting them apart in the first place (#268/STAFF-7). In practice, having two
+role-shaped controls next to each other was confusing. Replaced with one **Role** select
+showing `owner`/`admin`/`member`/`staff`, wrapped in a `Tooltip` explaining why it's disabled
+(no login yet, owner/staff roles are not reassignable here, or the caller isn't the owner).
+Selecting `admin` or `member` calls the existing `changeMemberPermission` PATCH; `owner` and
+`staff` are display-only entries (not selectable — `owner` can't be reassigned, `staff` is
+set at onboarding, not here).
+
+**Why:** The two-dropdown layout still let an owner glance at "Role: Head" and reasonably
+assume that controlled access, when it never did. One select showing the value that actually
+gates `requireRole()` removes the ambiguity.
+
+**Tests:** No backend change — `changeMemberPermission`'s PATCH endpoint and RBAC gating are
+unchanged (see #268/STAFF-7). Manually verified in the browser: owner sees all four values
+with `admin`/`member` selectable for linked non-owner/non-staff members; non-owner sees the
+select disabled.
+
+**GitHub:** closes #269 (epic #121, milestone V7).
+
+## FIX — #270: household_help_availability as sole source of truth for staff schedules (2026-08-11)
+
+**What changed:** `staff_profile.regular_schedule_json` was a second, independent place to
+store a staff member's weekly schedule, duplicating `household_help_availability`
+(`slot_type='regular'`) — the table `family-agent.service.ts` already reads for the same
+person. Migration `0092_drop_staff_regular_schedule.sql` drops the column. Staff onboarding
+(`createStaffMember`) now writes the submitted schedule as a `household_help_availability`
+row instead. Timesheet prefill (`GET /staff/timesheets/me`) computes `scheduledHours` per day
+on the fly via a new `computeScheduledHours()` in `timesheet.service.ts`, reading
+`listAvailability()` and converting matching `regular` slots to hours with a new
+`timeRangeHours(start, end)` helper — nothing is persisted until the staff member actually
+submits real entries. `household.routes.ts`/`household.service.ts` gained an `"employee"`
+value on `HouseholdRelationship` so the onboarding-created `person_profile`/
+`household_membership` rows can be tagged correctly.
+
+**Why:** Two schedule sources for the same person invites drift (edit one, forget the
+other) — see `[[feedback_table_reuse_before_new_table]]`. `household_help_availability` was
+already the canonical schedule table; `staff_profile` should read it, not duplicate it.
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` — fresh-week `GET /me` returns
+`scheduledHours` computed from a `household_help_availability` row created at onboarding, and
+persisted `period.entries` stays empty until an explicit save (prefill is frontend-only).
+`staff-pay.test.ts`/`staff-reports.test.ts` updated to drop the now-removed
+`regularScheduleJson` field from onboarding payloads.
+
+**GitHub:** closes #270 (epic #121, milestone V7).
+
+## CR — #267: PDF hours & payment reports (2026-08-11)
+
+**What changed:** Two new PDF-download endpoints, mounted alongside the existing
+`:staffId`-scoped pay routes in `staff.routes.ts` (not a separate sub-router, to reuse
+`resolveAccessibleStaffMember` without a circular import):
+- `GET /staff/:staffId/reports/hours?from&to` — every `timesheet_entry` in range (joined
+  through `timesheet_period` for `household_id`/`staff_profile_id` scoping), across all
+  period statuses (draft/submitted/approved/rejected — not just approved, so the report
+  reflects what was actually logged), with a total-hours footer.
+- `GET /staff/:staffId/reports/payment?from&to` — renders the same earned/paid/balance
+  breakdown as `GET /staff/:staffId/pay-summary` (STAFF-5, #266) as a PDF, reusing
+  `getPaySummary()` unchanged, plus a bonus/adjustment detail list.
+
+Both stream via `pdfkit` (`doc.pipe(res)` / `doc.end()`) with
+`Content-Type: application/pdf` and `Content-Disposition: attachment; filename=...`
+headers — first use of `pdfkit` in the codebase (it was already a backend dependency,
+previously unused). New `backend/src/modules/staff/reports/reports.service.ts` holds the
+query + both renderers; no new migration, both endpoints only read existing tables from
+migration 0091.
+
+Access control matches `/pay-summary`: `["owner", "admin", "staff"]`, with a `staff`-role
+caller restricted to their own record via the same `resolveAccessibleStaffMember` helper
+(404 if the `:staffId` in the URL doesn't resolve to their own `person_profile_id`).
+
+**Why:** Items 8–9 of the household employee time & expense capture MVP — closes out the
+full plan scope (onboarding through PDF reports) except the explicitly-deferred tax
+withholding piece (item 12).
+
+**Tests:** `backend/tests/staff-reports.test.ts` (5 tests) — owner can download both
+report PDFs with correct `Content-Type`/`Content-Disposition` and a valid `%PDF` header
+on the response body; a staff-role token can download her own reports but gets 404 on
+another staff member's; malformed `from`/`to` query params 400.
+
+GitHub: closes #267 (epic #121, milestone V7).
+
+## CR — #266: Pay summary (earned/paid/balance) + bonus adjustments (2026-08-11)
+
+**What changed:** `GET /staff/:staffId/pay-summary?from&to` computes, on the fly (no
+stored payroll run):
+- **Earned** = approved timesheet hours × the hourly rate effective on each entry's
+  `work_date` (rate-at-entry-date, via a `LATERAL` join against `staff_rate` so a
+  mid-range raise doesn't retroactively rewrite already-worked hours) + approved
+  `staff_expense` amounts + `staff_pay_adjustment` amounts (bonuses).
+- **Paid** = `transaction_canonical` rows with `owner_scope='person'`,
+  `owner_person_profile_id` = the staff member's `person_profile_id`, `status='posted'`,
+  and `category_id` under the household's "Employee" tree (Salary/Bonus/Reimbursement —
+  reuses `ensureEmployeeCategoryTree`'s exact leaf IDs, called idempotently so the tree
+  is created on first use if it somehow doesn't already exist), broken out per category.
+- **Balance due** = Earned − Paid.
+
+Also adds `POST /staff/:staffId/pay-adjustments` (owner/admin only) to record a bonus or
+other one-off extra pay (`adjustmentDate`, `amountCents` — route-level `.int().positive()`,
+though the DB column itself has no sign constraint since a future deduction use case may
+want negative values, `reason`). No new migration: `staff_pay_adjustment` already existed
+from migration 0091 (STAFF-1) and was already registered in `EXPORT_REGISTRY`. No new
+transaction-tagging UI either — the existing `PATCH /transactions/:id`
+(`ownerScope`/`ownerPersonProfileId`/`categoryId`) already covers "mark this transaction
+as a payment to her."
+
+Access control: `/pay-summary` allows `["owner", "admin", "staff"]`, but a `staff`-role
+caller may only view their own record (403 if the `:staffId` in the URL doesn't resolve
+to their own `person_profile_id`) — hand-rolled in the route handler since `requireRole`
+has no self-vs-any concept. `/pay-adjustments` stays `["owner", "admin"]` only.
+
+Frontend: `MyPayPanel.tsx` replaces the "My Pay" tab placeholder in `StaffPortalPage.tsx`
+— date-range pickers (defaulting to the current month), Earned/Paid/Balance breakdown,
+and a read-only list of adjustments in range. `StaffSection.tsx` gains a "Record bonus"
+action per staff row opening a small form (date, amount, reason) that posts to
+`/staff/:staffId/pay-adjustments`.
+
+**Why:** Item 6 and item 7 (bonuses/extra pay distinct from "advance") of the household
+employee time & expense capture MVP — the last data-facing slice before the PDF reports
+(STAFF-6).
+
+**Tests:** `backend/tests/staff-pay.test.ts` (6 tests) — zero summary for a fresh staff
+member; a staff-role token can view their own summary but gets 404 on someone else's;
+approved timesheet hours × rate + approved (not pending) expenses + a recorded bonus all
+land in "earned"; a manually-tagged transaction under the Employee/Salary category counts
+toward "paid" and flows through to balance due; non-positive amount and missing-reason
+400s on adjustment creation; a staff-role token is blocked (403) from recording an
+adjustment.
+
+GitHub: closes #266 (epic #121, milestone V7).
+
+## CR — #265: Expense entry + approval workflow (2026-08-11)
+
+**What changed:** Staff self-service expense claims (`GET/POST /staff/expenses/me`) plus
+an owner/admin approval queue (`GET /staff/expenses/pending`,
+`POST /staff/expenses/:expenseId/approve`, `POST /staff/expenses/:expenseId/reject`)
+(`backend/src/modules/staff/expense.service.ts`, `expense.routes.ts`). Category is one of
+a fixed set (`Transportation/Mileage`, `Groceries & Kids' Supplies`, `Activities &
+Outings`, `Parking & Tolls`, `Medical/First Aid`, `Other`) validated with `z.enum` at the
+route layer against `EXPENSE_CATEGORIES` in `expense.types.ts`; the DB column itself is
+plain `TEXT`, no constraint.
+
+Status machine is intentionally simpler than STAFF-3's timesheet: `staff_expense.status`
+has no `draft` value in its CHECK constraint, so a submitted expense is created
+directly as `pending` — there is no save-draft step, and a `rejected` expense is
+terminal/view-only (no edit-and-resubmit path, unlike a rejected timesheet which reverts
+to `draft`). This is a deliberate simplification for the MVP, not an oversight — filing
+one expense claim doesn't carry the same in-progress-editing need as a multi-day
+timesheet. No standalone `GET /:expenseId` detail route was added since the frontend
+only ever needs the list/pending views.
+
+Frontend: `MyExpensesPanel.tsx` replaces the "My Expenses" tab placeholder in
+`StaffPortalPage.tsx` — new-claim form (date, category, `CurrencyInput` amount,
+description) plus a table of the staff member's own claims with status badge and the
+reviewer's comment shown inline when rejected. `StaffSection.tsx` (Settings → Staff)
+gains an `ExpenseApprovalQueue` below `TimesheetApprovalQueue` — approve, or reject with
+a required comment, mirroring the timesheet review UI.
+
+**Why:** Item 5 of the household employee time & expense capture MVP — same
+owner/admin review pattern as STAFF-3 (timesheets), applied to reimbursable expense
+claims.
+
+**Tests:** `backend/tests/staff-expense.test.ts` (5 tests) — empty list on a fresh staff
+member, staff-role RBAC rejection on the owner/admin `/pending` route, bad-category and
+non-positive-amount 400s, full submit → pending queue → reject-without-note-400 →
+reject-with-comment → re-reject-fails (`NOT_PENDING`), and a second flow for approve →
+re-approve-fails (`NOT_PENDING`).
+
+GitHub: closes #265 (epic #121, milestone V7).
+
+## CR — #264: Timesheet entry + weekly approval workflow (2026-08-11)
+
+**What changed:** Staff self-service weekly timesheet (`GET/PUT /staff/timesheets/me`,
+`POST /staff/timesheets/me/submit`) plus an owner/admin approval queue
+(`GET /staff/timesheets/pending`, `GET /staff/timesheets/:periodId`,
+`POST /staff/timesheets/:periodId/approve`, `POST /staff/timesheets/:periodId/reject`)
+(`backend/src/modules/staff/timesheet.service.ts`, `timesheet.routes.ts`). Status
+machine: `draft` → `submitted` → `approved` | `rejected`; `rejected` is kept as its own
+status (not folded back into `draft`) so the employee's portal can display the
+reviewer's comment, using the schema's already-explicit CHECK-constraint enum value.
+`PUT /me` is full-replace (deletes and re-inserts the week's `timesheet_entry` rows in
+one transaction) rather than diffing/upserting. `GET /me` lazily creates an empty draft
+period on first access per week; nothing is persisted until the client calls `PUT`.
+
+Frontend: `MyTimesheetPanel.tsx` replaces the "My Timesheet" tab placeholder in
+`StaffPortalPage.tsx` — week nav (prev/next + date-jump), a 7-row table prefilled from
+`regular_schedule_json` on a fresh week, running total, Save draft / Submit for approval.
+`StaffSection.tsx` (Settings → Staff) gains a `TimesheetApprovalQueue` below the roster —
+approve, or reject with a required comment.
+
+**Why:** Item 2–3 of the household employee time & expense capture MVP (nanny start
+date 2026-08-17). No overtime premium, no clock-in/out — plain hours-per-day entry, per
+the MVP decisions confirmed with the user (see `BACKLOG.md` FR-15 v2 entry for the full
+future-state payroll scope this MVP intentionally narrows).
+
+**Tests:** `backend/tests/staff-timesheet.test.ts` (5 tests) — prefill-is-empty-until-saved,
+staff-role RBAC rejection on owner/admin routes, `INVALID_DATE`/`EMPTY`/successful-save,
+full submit → pending queue → approve → re-approve-fails(`NOT_SUBMITTED`), and
+reject-with-comment → edit-while-rejected → resubmit-clears-note.
+
+GitHub: closes #264 (epic #121, milestone V7).
+
+## CR — #263: Staff onboarding + invite email + staff portal shell (2026-08-11)
+
+**What changed:** Settings → **Staff** tab (owner/admin only): form to onboard a household
+employee (first/last name, email, phone, DOB, employment start date, regular
+days/hours, hourly rate). On submit, creates `person_profile` (`relationship=employee`) +
+`household_membership` (`role=member`, `relationship=employee`) + `app_user`
+(`role=staff`) + `staff_profile` + an initial `staff_rate`, all in one transaction
+(`backend/src/modules/staff/staff.service.ts`: `createStaffMember`). Idempotently
+ensures the household's "Employee" category tree (Salary/Bonus/Reimbursement children,
+`ensureEmployeeCategoryTree`, reusing `createHouseholdCategory`) exists.
+
+Sends an invite email reusing the existing password-reset-token mechanism
+(`createPasswordResetToken` + `renderMemberInviteTemplate` + `sendMail`) when SMTP is
+configured; falls back to a fixed default password (`ChangeMe123!`, matching the
+`DEFAULT_MEMBER_PASSWORD` pattern already used for regular member logins) shown on
+screen to the admin when it isn't. New routes: `GET/POST /staff`, `GET /staff/me`
+(staff role, self-serve), `GET/PATCH /staff/:staffId` (`backend/src/modules/staff/staff.routes.ts`).
+
+Frontend: staff-role logins render a minimal restricted shell instead of the normal app —
+`StaffPortalPage.tsx` at `/staff` (profile summary + three placeholder tabs: My
+Timesheet / My Expenses / My Pay, populated in STAFF-3/4/5) is the *only* reachable
+route. `RequireNotStaffLayout` (redirects staff away from every other authenticated
+route to `/staff`) and `RequireStaff` (redirects non-staff away from `/staff`) added to
+`App.tsx`'s route tree. `AppSidebar.tsx` collapses to a single "My Portal" nav item for
+staff; `AppTopBar.tsx` hides Import, Notifications, and the Settings link.
+
+**Why:** Second slice of the STAFF-1..7 MVP track (epic #121, milestone V7) — closes
+scope items 1 ("onboard employee via email invite") and 11 ("nanny/employee should have
+restricted access") from the original ask. Depends on STAFF-1 (#262, data model) which
+shipped first in this track.
+
+GitHub: closes #263 (epic #121, milestone V7).
+
+## CR — #268: Household "Permission Level" control, separate from Household Role (2026-08-11)
+
+**What changed:** Settings → Household previously had one dropdown (Head/Member) that only
+edits `household_membership.role` — a household-position label with no bearing on what a
+member can actually do. There was no UI to grant a member `admin` in `app_user.role`, the field
+`requireRole()` actually checks. Added a distinct **Permission Level** control (owner-only,
+Owner/Admin/Member) next to it, deliberately not reusing the existing dropdown to avoid
+recreating the conflation.
+
+`backend/src/modules/household/household.service.ts`: new `patchHouseholdMemberPermission()` —
+updates `app_user.role` directly for a member's linked login, refuses `NO_LOGIN` (member has no
+account) and `IS_OWNER` (the owner's own level can't be reassigned this way). `HouseholdMemberProfile`
+/ `listHouseholdMembers` / `getCurrentUserProfile` / `patchCurrentUserProfile` now surface
+`appUserRole` alongside the existing `role` (household position) field, joined from `app_user`.
+
+New route `PATCH /household/members/:memberId/permission`, `requireRole(["owner"])`. Frontend:
+`SettingsPage.tsx` renders the new control (owner-only Select, read-only text for everyone else)
+in each member row; `BackupRestoreSection.tsx`'s `authRole` prop widened to match.
+
+Found and fixed while investigating this: an unrelated existence-check query in
+`deleteHouseholdMember` accidentally picked up a stray JOIN during a `replace_all` edit pass —
+caught via occurrence-count mismatch, removed before commit.
+
+**Why:** Prerequisite for STAFF-3/STAFF-4 approval workflows — a second approver (e.g. a spouse)
+needs a way to be promoted to `admin` without the owner hand-editing the database. Also closes a
+real RBAC gap that predates the staff feature.
+
+**Note:** granting Admin gives that person full admin rights app-wide, not staff-approval-scoped
+permissions — documented in `USER_GUIDE.md`.
+
+GitHub: closes #268 (epic #121, milestone V7).
+
+## DB — #262: Household staff (nanny/employee) timesheet + expense data model (2026-08-11)
+
+**What changed:** New migration `0091_staff_timesheet_expense_mvp.sql` adds the MVP data model
+for household-employee time & expense tracking (nanny starting 2026-08-17): `staff_profile`
+(1:1 with `person_profile`, reuses existing name/contact/DOB fields — no duplication),
+`staff_rate` (effective-dated hourly rate), `timesheet_period` (one row per staff member per
+week, draft/submitted/approved/rejected), `timesheet_entry` (hours per day), `staff_expense`
+(reimbursable claims, same approval states), `staff_pay_adjustment` (bonuses/extra pay, kept
+distinct from an "advance"). `app_user_role_check` widened to add `'staff'`
+(`backend/src/modules/auth/types.ts` `Role` type also widened) for the nanny's restricted
+portal-only login. All 6 tables registered in `EXPORT_REGISTRY`
+(`backend/src/modules/export/export-registry.ts`), verified no `[export-coverage]` WARN on
+startup.
+
+**Why:** First slice of a 7-issue MVP track (STAFF-1..7) under epic #121 ("FR-15 v2", milestone
+V7). Deliberately does **not** include tax withholding, FLSA overtime, or payroll compliance —
+PY-1..PY-9 (#199–#207, same epic) remain the untouched future full-compliance target; this MVP
+reuses the same core table shapes minus every tax-specific column, per user's explicit "no tax
+withholding this sprint" scope decision. No `staff_payment` table: a payment against the balance
+is any `transaction_canonical` row tagged `owner_person_profile_id` = the staff member under a
+new household-scoped "Employee" category tree (Salary/Bonus/Reimbursement, created at
+onboarding) — reuses existing transaction/category machinery instead of a linking UI.
+
+GitHub: closes #262 (epic #121, milestone V7).
+
 ## DB — #258: Merge `category_rule_global` into `category_rule` (2026-07-23)
 
 **What changed:** Dropped the dedicated `category_rule_global` table; global/built-in

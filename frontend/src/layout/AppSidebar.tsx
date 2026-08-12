@@ -18,6 +18,11 @@ import {
   IconRobot,
   IconChevronLeft,
   IconChevronRight,
+  IconClipboardList,
+  IconUsers,
+  IconClock,
+  IconWallet,
+  IconCash,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
 
@@ -27,6 +32,14 @@ type NavItem = {
   label: string;
   Icon: TablerIcon;
 };
+
+/** Staff logins get a single-item minimal nav — no access to household finance screens. */
+const STAFF_NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Portal",
+    items: [{ to: "/staff", end: true, label: "My Portal", Icon: IconClipboardList }],
+  },
+];
 
 const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
@@ -60,14 +73,26 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { to: "/family/agent", end: false, label: "Agent", Icon: IconRobot },
     ],
   },
-  {
-    label: "Setup",
-    items: [
-      { to: "/categories", end: false, label: "Categories", Icon: IconTag },
-      { to: "/settings", end: false, label: "Settings", Icon: IconSettings },
-    ],
-  },
 ];
+
+const SETUP_NAV_GROUP: { label: string; items: NavItem[] } = {
+  label: "Setup",
+  items: [
+    { to: "/categories", end: false, label: "Categories", Icon: IconTag },
+    { to: "/settings", end: false, label: "Settings", Icon: IconSettings },
+  ],
+};
+
+/** Owner/admin-only group for managing household staff — inserted before Setup for those roles. */
+const STAFF_ADMIN_NAV_GROUP: { label: string; items: NavItem[] } = {
+  label: "Staff",
+  items: [
+    { to: "/staff-admin/directory", end: false, label: "Roster", Icon: IconUsers },
+    { to: "/staff-admin/timesheets", end: false, label: "Timesheets", Icon: IconClock },
+    { to: "/staff-admin/expenses", end: false, label: "Expenses", Icon: IconWallet },
+    { to: "/staff-admin/pay", end: false, label: "Pay & Reports", Icon: IconCash },
+  ],
+};
 
 type AppSidebarProps = {
   collapsed: boolean;
@@ -90,9 +115,11 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { role } = useCurrentUser();
   const isCollapsed = collapsed && !mobileOpen;
-  const visibleGroups = role === "member"
-    ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
-    : NAV_GROUPS;
+  const visibleGroups = role === "staff"
+    ? STAFF_NAV_GROUPS
+    : role === "member"
+      ? [...NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family"), SETUP_NAV_GROUP]
+      : [...NAV_GROUPS, STAFF_ADMIN_NAV_GROUP, SETUP_NAV_GROUP];
 
   return (
     <>
