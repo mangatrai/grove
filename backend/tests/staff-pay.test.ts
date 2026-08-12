@@ -19,7 +19,7 @@ async function ownerToken(): Promise<string> {
   return login.body.token as string;
 }
 
-describe("Staff pay summary + adjustments (STAFF-5)", () => {
+describe("Staff pay summary (STAFF-5)", () => {
   let ownerAuth: string;
   let householdId: string;
   let staffId: string;
@@ -122,13 +122,6 @@ describe("Staff pay summary + adjustments (STAFF-5)", () => {
       .send({ expenseDate: "2026-02-04", category: "Parking & Tolls", amountCents: 9999 })
       .expect(201);
 
-    const bonus = await request(app)
-      .post(`/staff/${staffId}/pay-adjustments`)
-      .set("authorization", `Bearer ${ownerAuth}`)
-      .send({ adjustmentDate: "2026-02-05", amountCents: 10000, reason: "Holiday bonus" });
-    expect(bonus.status).toBe(201);
-    expect(bonus.body.adjustment.amountCents).toBe(10000);
-
     const res = await request(app)
       .get(`/staff/${staffId}/pay-summary`)
       .query({ from: "2026-02-01", to: "2026-02-28" })
@@ -136,9 +129,7 @@ describe("Staff pay summary + adjustments (STAFF-5)", () => {
     expect(res.status).toBe(200);
     expect(res.body.summary.earned.timesheetCents).toBe(16000); // 8h * $20.00
     expect(res.body.summary.earned.expenseCents).toBe(500);
-    expect(res.body.summary.earned.adjustmentCents).toBe(10000);
-    expect(res.body.summary.earned.totalCents).toBe(26500);
-    expect(res.body.summary.adjustments).toHaveLength(1);
+    expect(res.body.summary.earned.totalCents).toBe(16500);
   });
 
   it("counts transactions tagged to the staff member under the Employee category tree as paid", async () => {
@@ -164,28 +155,6 @@ describe("Staff pay summary + adjustments (STAFF-5)", () => {
     expect(res.status).toBe(200);
     expect(res.body.summary.paid.salaryCents).toBe(20000);
     expect(res.body.summary.paid.totalCents).toBe(20000);
-    expect(res.body.summary.balanceDueCents).toBe(26500 - 20000);
-  });
-
-  it("rejects a non-positive pay adjustment amount and requires a reason", async () => {
-    const badAmount = await request(app)
-      .post(`/staff/${staffId}/pay-adjustments`)
-      .set("authorization", `Bearer ${ownerAuth}`)
-      .send({ adjustmentDate: "2026-02-05", amountCents: 0, reason: "test" });
-    expect(badAmount.status).toBe(400);
-
-    const noReason = await request(app)
-      .post(`/staff/${staffId}/pay-adjustments`)
-      .set("authorization", `Bearer ${ownerAuth}`)
-      .send({ adjustmentDate: "2026-02-05", amountCents: 100 });
-    expect(noReason.status).toBe(400);
-  });
-
-  it("blocks a staff-role token from recording a pay adjustment", async () => {
-    const res = await request(app)
-      .post(`/staff/${staffId}/pay-adjustments`)
-      .set("authorization", `Bearer ${staffAuth}`)
-      .send({ adjustmentDate: "2026-02-05", amountCents: 100, reason: "test" });
-    expect(res.status).toBe(403);
+    expect(res.body.summary.balanceDueCents).toBe(16500 - 20000);
   });
 });

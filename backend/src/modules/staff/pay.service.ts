@@ -1,76 +1,6 @@
-import { randomUUID } from "node:crypto";
-
-import { qAll, qExec, qGet } from "../../db/query.js";
+import { qAll, qGet } from "../../db/query.js";
 import { ensureEmployeeCategoryTree } from "./staff.service.js";
-import type { PaySummary, StaffPayAdjustment, StaffPayAdjustmentInput } from "./pay.types.js";
-
-type AdjustmentRow = {
-  id: string;
-  household_id: string;
-  staff_profile_id: string;
-  adjustment_date: string;
-  amount_cents: number;
-  reason: string;
-  created_by_user_id: string | null;
-  created_at: string;
-};
-
-function toAdjustment(row: AdjustmentRow): StaffPayAdjustment {
-  return {
-    id: row.id,
-    householdId: row.household_id,
-    staffProfileId: row.staff_profile_id,
-    adjustmentDate: row.adjustment_date,
-    amountCents: row.amount_cents,
-    reason: row.reason,
-    createdByUserId: row.created_by_user_id,
-    createdAt: row.created_at
-  };
-}
-
-const ADJUSTMENT_SELECT = `
-  SELECT id, household_id, staff_profile_id, adjustment_date, amount_cents, reason, created_by_user_id, created_at
-  FROM staff_pay_adjustment
-`;
-
-export async function createPayAdjustment(
-  householdId: string,
-  staffProfileId: string,
-  createdByUserId: string,
-  input: StaffPayAdjustmentInput
-): Promise<StaffPayAdjustment> {
-  const id = randomUUID();
-  await qExec(
-    `INSERT INTO staff_pay_adjustment (id, household_id, staff_profile_id, adjustment_date, amount_cents, reason, created_by_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    id,
-    householdId,
-    staffProfileId,
-    input.adjustmentDate,
-    input.amountCents,
-    input.reason,
-    createdByUserId
-  );
-  const created = await qGet<AdjustmentRow>(`${ADJUSTMENT_SELECT} WHERE id = ?`, id);
-  return toAdjustment(created!);
-}
-
-export async function listPayAdjustments(
-  householdId: string,
-  staffProfileId: string,
-  from: string,
-  to: string
-): Promise<StaffPayAdjustment[]> {
-  const rows = await qAll<AdjustmentRow>(
-    `${ADJUSTMENT_SELECT} WHERE household_id = ? AND staff_profile_id = ? AND adjustment_date BETWEEN ? AND ?
-     ORDER BY adjustment_date DESC, created_at DESC`,
-    householdId,
-    staffProfileId,
-    from,
-    to
-  );
-  return rows.map(toAdjustment);
-}
+import type { PaySummary } from "./pay.types.js";
 
 export async function getPaySummary(
   householdId: string,
@@ -105,9 +35,6 @@ export async function getPaySummary(
     to
   );
 
-  const adjustments = await listPayAdjustments(householdId, staffProfileId, from, to);
-  const adjustmentCents = adjustments.reduce((sum, a) => sum + a.amountCents, 0);
-
   const paidRows = await qAll<{ category_id: string; cents: string | null }>(
     `SELECT category_id, COALESCE(SUM(-amount), 0) AS cents
      FROM transaction_canonical
@@ -126,7 +53,7 @@ export async function getPaySummary(
 
   const timesheetCents = Math.round(Number(timesheetRow?.cents ?? 0));
   const expenseCents = Math.round(Number(expenseRow?.cents ?? 0));
-  const earnedTotalCents = timesheetCents + expenseCents + adjustmentCents;
+  const earnedTotalCents = timesheetCents + expenseCents;
 
   const salaryCents = paidByCategory.get(categoryIds.salaryCategoryId) ?? 0;
   const bonusCents = paidByCategory.get(categoryIds.bonusCategoryId) ?? 0;
@@ -140,7 +67,6 @@ export async function getPaySummary(
     earned: {
       timesheetCents,
       expenseCents,
-      adjustmentCents,
       totalCents: earnedTotalCents
     },
     paid: {
@@ -149,7 +75,6 @@ export async function getPaySummary(
       reimbursementCents,
       totalCents: paidTotalCents
     },
-    balanceDueCents: earnedTotalCents - paidTotalCents,
-    adjustments
+    balanceDueCents: earnedTotalCents - paidTotalCents
   };
 }

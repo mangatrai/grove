@@ -1,25 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Button, Group, Paper, SimpleGrid, Stack, Table, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Button, Group, Paper, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 
 import { apiFetch, apiJson } from "../../api";
 import { GroveLoader } from "../../components/GroveLoader";
 import { formatUsd } from "../../utils/format";
 
-type StaffPayAdjustment = {
-  id: string;
-  adjustmentDate: string;
-  amountCents: number;
-  reason: string;
-};
-
 type PaySummary = {
   from: string;
   to: string;
-  earned: { timesheetCents: number; expenseCents: number; adjustmentCents: number; totalCents: number };
+  earned: { timesheetCents: number; expenseCents: number; totalCents: number };
   paid: { salaryCents: number; bonusCents: number; reimbursementCents: number; totalCents: number };
   balanceDueCents: number;
-  adjustments: StaffPayAdjustment[];
 };
 
 function monthStartIso(): string {
@@ -123,8 +115,7 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
               <Text fw={700} size="xl">{formatUsd(summary.earned.totalCents / 100)}</Text>
               <Text size="xs" c="dimmed" mt={4}>
                 Timesheet {formatUsd(summary.earned.timesheetCents / 100)} · Expenses{" "}
-                {formatUsd(summary.earned.expenseCents / 100)} · Bonuses{" "}
-                {formatUsd(summary.earned.adjustmentCents / 100)}
+                {formatUsd(summary.earned.expenseCents / 100)}
               </Text>
             </Paper>
             <Paper withBorder p="md" radius="md">
@@ -143,30 +134,6 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
               </Text>
             </Paper>
           </SimpleGrid>
-
-          <Title order={5} mt="md">Bonuses / extra pay in range</Title>
-          {summary.adjustments.length === 0 ? (
-            <Text size="sm" c="dimmed">None recorded in this range.</Text>
-          ) : (
-            <Table withTableBorder withColumnBorders>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Date</Table.Th>
-                  <Table.Th>Amount</Table.Th>
-                  <Table.Th>Reason</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {summary.adjustments.map((a) => (
-                  <Table.Tr key={a.id}>
-                    <Table.Td>{a.adjustmentDate}</Table.Td>
-                    <Table.Td>{formatUsd(a.amountCents / 100)}</Table.Td>
-                    <Table.Td>{a.reason}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          )}
         </>
       ) : null}
     </Stack>

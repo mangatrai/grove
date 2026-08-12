@@ -429,6 +429,7 @@ export function SettingsPage() {
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
   const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
   const [notesTarget, setNotesTarget] = useState<{ memberId: string; name: string } | null>(null);
+  const [staffRoleNoticeOpen, setStaffRoleNoticeOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
@@ -1614,6 +1615,10 @@ export function SettingsPage() {
                                 : member.appUserRole ?? "member"
                             }
                             onChange={(value) => {
+                              if (value === "staff") {
+                                setStaffRoleNoticeOpen(true);
+                                return;
+                              }
                               if (!member.id || (value !== "admin" && value !== "member")) return;
                               void changeMemberPermission(member.id, value);
                             }}
@@ -2453,6 +2458,26 @@ export function SettingsPage() {
           </Text>
         </Paper>
         <Button fullWidth onClick={() => setResetPasswordResult(null)}>Done</Button>
+      </Modal>
+
+      <Modal
+        opened={staffRoleNoticeOpen}
+        onClose={() => setStaffRoleNoticeOpen(false)}
+        title="Not the right place"
+        centered
+      >
+        <Text size="sm" mb="md">
+          Staff members are onboarded from Staff → Directory, not by changing a household member's
+          role here.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setStaffRoleNoticeOpen(false)}>
+            Close
+          </Button>
+          <Button component={Link} to="/staff-admin/directory" onClick={() => setStaffRoleNoticeOpen(false)}>
+            Go to Directory
+          </Button>
+        </Group>
       </Modal>
 
       {/* Member notes modal */}

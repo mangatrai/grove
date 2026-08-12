@@ -351,7 +351,6 @@ erDiagram
     STAFF_PROFILE ||--o{ TIMESHEET_PERIOD : logs
     TIMESHEET_PERIOD ||--o{ TIMESHEET_ENTRY : contains
     STAFF_PROFILE ||--o{ STAFF_EXPENSE : claims
-    STAFF_PROFILE ||--o{ STAFF_PAY_ADJUSTMENT : "bonus/extra pay"
 
     STAFF_PROFILE {
         text id PK
@@ -386,21 +385,17 @@ erDiagram
         int amount_cents
         text status "pending|approved|rejected"
     }
-    STAFF_PAY_ADJUSTMENT {
-        text id PK
-        text staff_profile_id FK
-        int amount_cents
-        text reason "bonus/extra pay, distinct from advance"
-    }
 ```
 
 MVP scope deliberately excludes tax withholding, FLSA overtime, and payroll compliance —
 that full-compliance model is specced separately for epic #121 (PY-1..PY-9, milestone V7) and
 untouched by this slice. Pay is a flat `hourly_rate_cents × hours_worked`, no overtime premium.
-There is no `staff_payment` table: a payment against the balance is any `transaction_canonical`
-row tagged with `owner_person_profile_id` = the staff member's `person_profile_id` under the
-household's "Employee" category tree (Salary/Bonus/Reimbursement) — reusing the existing
-transaction/category machinery rather than building a linking UI. `staff_profile` reuses
+There is no `staff_payment` table and no separate bonus/adjustment ledger: a payment against the
+balance — salary, bonus, or reimbursement — is any `transaction_canonical` row tagged with
+`owner_person_profile_id` = the staff member's `person_profile_id` under the household's
+"Employee" category tree (Salary/Bonus/Reimbursement) — reusing the existing transaction/category
+machinery rather than building a linking UI or a manually-entered adjustment table (GH #273).
+`staff_profile` reuses
 `person_profile` for name/contact/DOB (via the existing `date_of_birth_encrypted` +
 `dob-crypto.ts` machinery, see §3.1) rather than duplicating those fields — the same
 one-table-per-concept instinct behind `household_help_availability` in §3.5, which this domain
@@ -511,7 +506,7 @@ data.
 | `email_ingest_log` | Household inbox ingestion (shared mailbox, IMAP + app password) | `message_id`, `items_json` JSONB, `status` CHECK (4 values) | `UNIQUE(household_id, message_id)` |
 | `oauth_integrations` | Unified Google OAuth store — Drive (household-scoped) + Calendar (user-scoped) | `provider` CHECK, `calendar_roles`, `selected_calendar_ids`, `gcal_last_synced_at` | 2 partial unique indexes (see §3.5); ephemeral — credentials never appear in `.hfb` backups |
 
-### Household Staff (6)
+### Household Staff (5)
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
 |---|---|---|---|
@@ -520,7 +515,6 @@ data.
 | `timesheet_period` | One row per staff member per week | `week_start_date`, `status` CHECK (4 values), `reviewed_by_user_id` FK | `UNIQUE(staff_profile_id, week_start_date)` |
 | `timesheet_entry` | Hours logged for one day within a period | `work_date`, `hours_worked` CHECK `0 < x <= 24` | `UNIQUE(timesheet_period_id, work_date)` |
 | `staff_expense` | Reimbursable expense claim | `category`, `amount_cents` CHECK `> 0`, `status` CHECK (3 values) | `idx_staff_expense_household_status` |
-| `staff_pay_adjustment` | Bonus/extra pay, distinct from an advance | `amount_cents`, `reason` | `idx_staff_pay_adjustment_staff` |
 
 ### AI Insights & Jobs/Ops (10)
 

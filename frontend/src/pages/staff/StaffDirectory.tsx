@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -23,6 +25,7 @@ import { formatUsd } from "../../utils/format";
 
 type StaffMember = {
   id: string;
+  personProfileId: string;
   fullName: string;
   email: string | null;
   phoneNumber: string | null;
@@ -31,6 +34,28 @@ type StaffMember = {
   hourlyRateCents: number;
   hasLogin: boolean;
 };
+
+type HelpAvailabilitySlot = {
+  personProfileId: string;
+  slotType: "regular" | "one_off" | "unavailable";
+  daysOfWeek: number[];
+  startTime: string | null;
+  endTime: string | null;
+};
+
+const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function scheduleSummary(slots: HelpAvailabilitySlot[], personProfileId: string): string | null {
+  const regular = slots.filter((s) => s.personProfileId === personProfileId && s.slotType === "regular");
+  if (regular.length === 0) return null;
+  return regular
+    .map((s) => {
+      const days = s.daysOfWeek.map((d) => DAY_ABBR[d] ?? String(d)).join("/");
+      const time = [s.startTime, s.endTime].filter(Boolean).join("–");
+      return [days, time].filter(Boolean).join(" ");
+    })
+    .join("; ");
+}
 
 const DAY_SELECT_DATA = [
   { value: "0", label: "Sunday" },
@@ -392,20 +417,18 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  const [bonusMemberId, setBonusMemberId] = useState<string | null>(null);
-  const [bonusDate, setBonusDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [bonusAmountUsd, setBonusAmountUsd] = useState<number | undefined>(undefined);
-  const [bonusReason, setBonusReason] = useState("");
-  const [bonusSubmitting, setBonusSubmitting] = useState(false);
-  const [bonusError, setBonusError] = useState<string | null>(null);
+  const [slots, setSlots] = useState<HelpAvailabilitySlot[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiJson<{ members: StaffMember[] }>("/staff");
-      setMembers(res.members);
+      const [staffRes, slotsRes] = await Promise.all([
+        apiJson<{ members: StaffMember[] }>("/staff"),
+        apiJson<{ slots: HelpAvailabilitySlot[] }>("/api/family/availability"),
+      ]);
+      setMembers(staffRes.members);
+      setSlots(slotsRes.slots);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load staff");
     } finally {
@@ -476,38 +499,6 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
     }
   }
 
-  function startBonus(memberId: string) {
-    setBonusMemberId(memberId);
-    setBonusDate(new Date().toISOString().slice(0, 10));
-    setBonusAmountUsd(undefined);
-    setBonusReason("");
-    setBonusError(null);
-  }
-
-  async function recordBonus(memberId: string) {
-    if (!bonusAmountUsd || bonusAmountUsd <= 0 || !bonusReason.trim()) {
-      setBonusError("A positive amount and a reason are required.");
-      return;
-    }
-    setBonusSubmitting(true);
-    setBonusError(null);
-    try {
-      await apiJson(`/staff/${encodeURIComponent(memberId)}/pay-adjustments`, {
-        method: "POST",
-        body: JSON.stringify({
-          adjustmentDate: bonusDate,
-          amountCents: Math.round(bonusAmountUsd * 100),
-          reason: bonusReason.trim(),
-        }),
-      });
-      setBonusMemberId(null);
-    } catch (e) {
-      setBonusError(e instanceof Error ? e.message : "Could not record bonus");
-    } finally {
-      setBonusSubmitting(false);
-    }
-  }
-
   if (!active) return null;
 
   return (
@@ -534,7 +525,6 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
               <Table.Th>Schedule</Table.Th>
               <Table.Th>Login</Table.Th>
               <Table.Th>Active</Table.Th>
-              <Table.Th>Actions</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -547,7 +537,12 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
                 <Table.Td>{m.employmentStartDate}</Table.Td>
                 <Table.Td>{formatUsd(m.hourlyRateCents / 100)}/hr</Table.Td>
                 <Table.Td>
-                  <Text size="xs" c="dimmed">See Family → Care &amp; Help Schedule</Text>
+                  <Stack gap={2}>
+                    <Text size="xs">{scheduleSummary(slots, m.personProfileId) ?? "Not set"}</Text>
+                    <Anchor size="xs" component={Link} to="/settings?tab=family">
+                      Edit in Family tab
+                    </Anchor>
+                  </Stack>
                 </Table.Td>
                 <Table.Td>
                   {m.hasLogin ? (
@@ -562,53 +557,6 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
                     disabled={togglingId === m.id}
                     onChange={() => void toggleActive(m)}
                   />
-                </Table.Td>
-                <Table.Td>
-                  {bonusMemberId === m.id ? (
-                    <Stack gap={4} miw={220}>
-                      <Group gap="xs" wrap="nowrap">
-                        <TextInput
-                          size="xs"
-                          type="date"
-                          value={bonusDate}
-                          onChange={(e) => setBonusDate(e.currentTarget.value)}
-                          disabled={bonusSubmitting}
-                        />
-                        <CurrencyInput
-                          size="xs"
-                          placeholder="Amount"
-                          value={bonusAmountUsd}
-                          onChange={setBonusAmountUsd}
-                          disabled={bonusSubmitting}
-                        />
-                      </Group>
-                      <TextInput
-                        size="xs"
-                        placeholder="Reason (e.g. Holiday bonus)"
-                        value={bonusReason}
-                        onChange={(e) => setBonusReason(e.currentTarget.value)}
-                        disabled={bonusSubmitting}
-                      />
-                      {bonusError ? <Text size="xs" c="red">{bonusError}</Text> : null}
-                      <Group gap="xs">
-                        <Button size="xs" loading={bonusSubmitting} onClick={() => void recordBonus(m.id)}>
-                          Save
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="default"
-                          disabled={bonusSubmitting}
-                          onClick={() => setBonusMemberId(null)}
-                        >
-                          Cancel
-                        </Button>
-                      </Group>
-                    </Stack>
-                  ) : (
-                    <Button size="xs" variant="light" onClick={() => startBonus(m.id)}>
-                      Record bonus
-                    </Button>
-                  )}
                 </Table.Td>
               </Table.Tr>
             ))}

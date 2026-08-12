@@ -696,7 +696,7 @@ Manage household members and settings:
 
 **Member roster:**
 
-- Table of household members with name, role (head/member), relationship (self/spouse/child/dependent/other).
+- Table of household members with name, role (owner/admin/member), relationship (self/spouse/child/dependent/other). Selecting **Staff** in the Role dropdown is blocked with a popup pointing you to **Staff → Directory** instead — staff members are onboarded there, not promoted from an existing household member row.
 - **Add another row** button to stage new members.
 - **Save household** to persist changes.
 - **Trash icon** on saved rows to delete a member. Confirm the deletion in the dialog. Optionally also delete the member's login account if they have one.
@@ -713,7 +713,7 @@ Available to owners and admins as a top-level **Staff** sidebar group (not under
 
 #### Directory
 
-**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, regular schedule summary, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history).
+**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history). The **Schedule** column shows a summary of their regular days/hours (or "Not set") with a link to edit it on the Care & Help Schedule editor (Settings → Family) — schedules aren't edited from the Staff Directory itself.
 
 **Add staff member** — form fields:
 
@@ -724,9 +724,7 @@ Available to owners and admins as a top-level **Staff** sidebar group (not under
 
 On submit, the app creates a restricted login for the employee (`staff` role — see [Staff Portal](#staff-portal) below) and, if email is configured on this instance, sends an invite email so they can set their own password. If email isn't configured, you'll see a default temporary password on screen to share with them directly.
 
-A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member. When you actually pay them, tag that transaction on the ledger (edit the transaction, set **Belongs to** to the staff member and its category to Salary/Bonus/Reimbursement under Employee) — anything so tagged is picked up as "paid" in their pay summary, no separate linking step needed.
-
-**Record bonus** — a button on each staff member's roster row for recording a one-off bonus or extra pay (date, amount, reason). This is distinct from an advance: it adds to what they're owed (their "earned" total) rather than reducing it, and shows up in their own My Pay tab and in your pay-summary view for them.
+A new **Employee** category (with Salary / Bonus / Reimbursement sub-categories) is created automatically the first time you add a staff member. When you actually pay them — including bonuses or one-off extra pay — tag that transaction on the ledger (edit the transaction, set **Belongs to** to the staff member and its category to Salary/Bonus/Reimbursement under Employee) — anything so tagged is picked up as "paid" in their pay summary, no separate linking step needed. There's no separate bonus/adjustment form; bonuses are tracked exclusively as tagged transactions, the same as salary.
 
 #### Timesheets
 
@@ -923,7 +921,7 @@ My Portal shows your employment start date, current hourly rate, and regular sch
 
 - **My Timesheet** — enter hours for the current week (defaults on load), navigate to prior/future weeks with the arrows or jump to any date, and log up to 7 days per week. Rows are prefilled from your regular schedule the first time you open a fresh week; edit any day's hours or add an optional note. **Save draft** stores your entries without submitting them; **Submit for approval** sends the week to your household's owner/admin for review. A running weekly total is shown at the bottom. Once submitted, the week is locked until it's approved or rejected — a rejected week shows the reviewer's comment and reopens for editing and resubmission.
 - **My Expenses** — file a reimbursable expense claim: date, category (Transportation/Mileage, Groceries & Kids' Supplies, Activities & Outings, Parking & Tolls, Medical/First Aid, or Other), amount, and an optional description. Submitting sends it straight to your household's owner/admin for review — there's no draft step. Below the form, a table of your past claims shows each one's status; a rejected claim shows the reviewer's comment but can't be edited or resubmitted — file a new claim instead.
-- **My Pay** — pick a date range (defaults to the current month) to see what you've **earned** (approved timesheet hours at the rate in effect when worked, plus approved expenses and any bonuses), what's been **paid** (transactions your household's owner/admin has tagged to you under Salary/Bonus/Reimbursement), and the resulting **balance due**, plus a list of any bonuses in that range. **Download hours report** and **Download payment report** buttons export a PDF for the selected date range — the hours report lists every logged day with its status (draft/submitted/approved/rejected); the payment report mirrors the earned/paid/balance breakdown shown on screen.
+- **My Pay** — pick a date range (defaults to the current month) to see what you've **earned** (approved timesheet hours at the rate in effect when worked, plus approved expenses), what's been **paid** (transactions your household's owner/admin has tagged to you under Salary/Bonus/Reimbursement), and the resulting **balance due**. Bonuses only appear on the **paid** side, once tagged as a transaction — there's no separate bonus ledger. **Download hours report** and **Download payment report** buttons export a PDF for the selected date range — the hours report lists every logged day with its status (draft/submitted/approved/rejected); the payment report mirrors the earned/paid/balance breakdown shown on screen.
 
 ## Year-in-Review
 

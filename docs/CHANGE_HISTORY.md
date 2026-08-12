@@ -14,6 +14,46 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #273 + #274 + #275: Remove Record Bonus, Directory schedule link, staff-role select guard (2026-08-11)
+
+**What changed:**
+- **Record Bonus removed (#273):** deleted the entire vertical slice — `staff_pay_adjustment`
+  table (migration `0093_drop_staff_pay_adjustment.sql`), its `EXPORT_REGISTRY` entry,
+  `POST /staff/:staffId/pay-adjustments` route/service/types, the "Record bonus" roster-row
+  button and its form, and the adjustments list/section on the payment PDF report. Bonuses are
+  now tracked exclusively as `transaction_canonical` rows tagged to the Employee > Bonus
+  category — the same mechanism as salary and reimbursements, no manually-entered ledger.
+  `pay.service.ts` `getPaySummary`'s **earned** formula drops the
+  `Σ(staff_pay_adjustment amounts)` term; `earned.totalCents` is now
+  `Σ(approved timesheet hours × rate) + Σ(approved expenses)` only. `paid.bonusCents` (sourced
+  from tagged transactions) is untouched.
+- **Directory schedule column now shows real data (#274):** the Staff Directory's Schedule
+  column previously rendered dead placeholder text. It now fetches
+  `GET /api/family/availability` and shows a summary of the staff member's regular days/hours
+  (or "Not set"), with a link to the Care & Help Schedule editor on the Family tab
+  (`Settings → Family`) rather than duplicating that editor inside the Staff module.
+- **Household tab Role select guards against assigning Staff (#275):** the merged Role select
+  (from #269) previously listed "Staff" as a selectable value with no handling — selecting it
+  silently did nothing useful. It now opens a Mantine `Modal` explaining that staff members are
+  onboarded via Staff → Directory, with a button linking there directly, instead of applying
+  the change.
+
+**Why:** Bonuses recorded as a separate manually-entered adjustment created two sources of
+truth for "what was paid" (adjustments vs. tagged transactions) with no reconciliation —
+explicit user direction: "Record bonus needs to go away. we dont want to commit to a bonus or
+anything, if we pay bonus that will get recorded through the transactions." The Directory
+schedule column and Role-select guard are smaller fit-and-finish items found during the same
+review pass — see `[[project_family_planner_data_model]]` for why schedules live in
+`household_help_availability`/the Family tab rather than being re-edited from Staff.
+
+**Tests:** `backend/tests/staff-pay.test.ts` updated — bonus/adjustment test cases removed,
+remaining assertions use `earned.totalCents` = 16500 (no adjustment term),
+`balanceDueCents` = 16500 − 20000. `npm run test -w backend` and `npm run lint` pass across
+both workspaces.
+
+**GitHub:** closes #273 (epic #121, milestone V7), closes #274 (epic #121, milestone V7),
+closes #275 (epic #121, milestone V7).
+
 ## CR — #272 + #271: Staff moves to top-level sidebar; owner/admin submit-on-behalf (2026-08-11)
 
 **What changed:**

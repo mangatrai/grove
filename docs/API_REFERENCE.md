@@ -1227,7 +1227,7 @@ Moves a `pending` expense to `rejected`; requires a `reviewNote`. Terminal — n
 
 ### Staff Pay (STAFF-5, GH #266)
 
-Pay summary (earned/paid/balance) and bonus/pay-adjustment recording, mounted under `/staff`. Computed on the fly from timesheets, expenses, pay adjustments, and tagged transactions — no stored payroll run.
+Pay summary (earned/paid/balance), mounted under `/staff`. Computed on the fly from timesheets, expenses, and tagged transactions — no stored payroll run.
 
 #### `GET /staff/:staffId/pay-summary`
 
@@ -1235,7 +1235,7 @@ Pay summary (earned/paid/balance) and bonus/pay-adjustment recording, mounted un
 
 **Query params:** `from` (YYYY-MM-DD, required), `to` (YYYY-MM-DD, required).
 
-Earned = Σ(approved timesheet hours × the hourly rate effective on each entry's `work_date`) + Σ(approved `staff_expense` amounts) + Σ(`staff_pay_adjustment` amounts) within `[from, to]`. Paid = Σ `transaction_canonical` rows with `owner_scope='person'`, `owner_person_profile_id` = the staff member's `person_profile_id`, `status='posted'`, `category_id` under the household's "Employee" category tree (Salary/Bonus/Reimbursement), `txn_date` within `[from, to]`, broken out per category. Balance due = Earned − Paid.
+Earned = Σ(approved timesheet hours × the hourly rate effective on each entry's `work_date`) + Σ(approved `staff_expense` amounts) within `[from, to]`. Paid = Σ `transaction_canonical` rows with `owner_scope='person'`, `owner_person_profile_id` = the staff member's `person_profile_id`, `status='posted'`, `category_id` under the household's "Employee" category tree (Salary/Bonus/Reimbursement), `txn_date` within `[from, to]`, broken out per category. Balance due = Earned − Paid. Bonuses are recorded exclusively as transactions tagged to the Employee > Bonus category — there is no separate manually-entered bonus/adjustment ledger (GH #273).
 
 **Response 200:**
 ```json
@@ -1244,10 +1244,9 @@ Earned = Σ(approved timesheet hours × the hourly rate effective on each entry'
     "staffProfileId": "uuid",
     "from": "2026-02-01",
     "to": "2026-02-28",
-    "earned": { "timesheetCents": 16000, "expenseCents": 500, "adjustmentCents": 10000, "totalCents": 26500 },
+    "earned": { "timesheetCents": 16000, "expenseCents": 500, "totalCents": 16500 },
     "paid": { "salaryCents": 20000, "bonusCents": 0, "reimbursementCents": 0, "totalCents": 20000 },
-    "balanceDueCents": 6500,
-    "adjustments": [ { "id": "uuid", "adjustmentDate": "2026-02-05", "amountCents": 10000, "reason": "Holiday bonus", "createdByUserId": "uuid", "createdAt": "..." } ]
+    "balanceDueCents": -3500
   }
 }
 ```
@@ -1255,22 +1254,6 @@ Earned = Σ(approved timesheet hours × the hourly rate effective on each entry'
 **Errors:**
 - **400** — `staffId` not a UUID, or `from`/`to` missing/malformed.
 - **404** — staff member not found, or (staff-role caller) `:staffId` is not their own.
-
----
-
-#### `POST /staff/:staffId/pay-adjustments`
-
-**Auth:** Role: owner or admin.
-
-Records a bonus or other one-off extra pay for the staff member — distinct from an "advance," it adds to the earned total rather than reducing it.
-
-**Request body:** `{ "adjustmentDate": "YYYY-MM-DD", "amountCents": "positive integer", "reason": "string, 1-500 chars" }`
-
-**Response 201:** `{ "adjustment": { "id": "uuid", "householdId": "uuid", "staffProfileId": "uuid", "adjustmentDate": "...", "amountCents": 10000, "reason": "...", "createdByUserId": "uuid", "createdAt": "..." } }`
-
-**Errors:**
-- **400** — `staffId` not a UUID, or body validation fails (`amountCents` must be a positive integer; `reason` required).
-- **404** — staff member not found.
 
 ---
 

@@ -123,7 +123,6 @@ export function renderPaymentReportPdf(res: Response, staff: StaffProfile, summa
   doc.fontSize(10).font("Helvetica");
   doc.text(`Timesheet hours: ${formatUsd(summary.earned.timesheetCents)}`);
   doc.text(`Approved expenses: ${formatUsd(summary.earned.expenseCents)}`);
-  doc.text(`Bonuses / adjustments: ${formatUsd(summary.earned.adjustmentCents)}`);
   doc.font("Helvetica-Bold").text(`Total earned: ${formatUsd(summary.earned.totalCents)}`);
   doc.moveDown(1);
 
@@ -137,16 +136,6 @@ export function renderPaymentReportPdf(res: Response, staff: StaffProfile, summa
   doc.moveDown(1);
 
   doc.fontSize(13).font("Helvetica-Bold").text(`Balance due: ${formatUsd(summary.balanceDueCents)}`);
-
-  if (summary.adjustments.length > 0) {
-    doc.moveDown(1);
-    doc.fontSize(13).font("Helvetica-Bold").text("Bonus / adjustment detail");
-    doc.moveDown(0.3);
-    doc.fontSize(10).font("Helvetica");
-    for (const a of summary.adjustments) {
-      doc.text(`${a.adjustmentDate} — ${formatUsd(a.amountCents)} — ${a.reason}`);
-    }
-  }
 
   doc.end();
 }
