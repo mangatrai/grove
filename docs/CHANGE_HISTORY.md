@@ -14,6 +14,28 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #277: Roster — edit an existing staff member's pay rate (2026-08-11)
+
+**What changed:**
+- **Edit pay rate modal:** the Roster table's Rate column now has an **Edit** action that opens
+  a Mantine `Modal` with a new hourly rate and effective date. Saving calls the existing
+  `PATCH /staff/:staffId` endpoint (`newHourlyRateCents` + `newRateEffectiveDate`) — no backend
+  changes required, since the effective-dated `staff_rate` history table and route already
+  supported this; only the frontend UI was missing.
+
+**Why:** Hourly rate is optional at creation time, so a mistake (leaving it blank) or a routine
+raise a few weeks in had **no correction path** other than deleting and recreating the staff
+profile — explicit user report: "during testing i by mistake didn't enter pay rate ... and now i
+can't edit it anywhere ... but edit is important, because what if we increase her pay after a few
+weeks."
+
+**Tests:** New Playwright E2E case in `e2e/staff-admin.spec.ts` — add a staff member, verify the
+initial rate renders, edit via the modal, verify the updated rate renders.
+
+**Files:** `frontend/src/pages/staff/StaffDirectory.tsx`, `e2e/staff-admin.spec.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/277
+
 ## UX — #276: Staff sidebar group moved above Setup, Directory tab renamed to Roster (2026-08-11)
 
 **What changed:**

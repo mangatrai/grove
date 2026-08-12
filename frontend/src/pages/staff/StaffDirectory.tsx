@@ -7,6 +7,7 @@ import {
   Badge,
   Button,
   Group,
+  Modal,
   MultiSelect,
   Paper,
   Stack,
@@ -419,6 +420,14 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [slots, setSlots] = useState<HelpAvailabilitySlot[]>([]);
 
+  const [editingMember, setEditingMember] = useState<StaffMember | null>(null);
+  const [rateDraft, setRateDraft] = useState<{ hourlyRateUsd: number | undefined; effectiveDate: string }>({
+    hourlyRateUsd: undefined,
+    effectiveDate: "",
+  });
+  const [savingRate, setSavingRate] = useState(false);
+  const [rateError, setRateError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -499,6 +508,44 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
     }
   }
 
+  function openEditRate(member: StaffMember) {
+    setRateError(null);
+    setEditingMember(member);
+    setRateDraft({
+      hourlyRateUsd: member.hourlyRateCents > 0 ? member.hourlyRateCents / 100 : undefined,
+      effectiveDate: new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  function closeEditRate() {
+    setEditingMember(null);
+  }
+
+  async function saveRate() {
+    if (!editingMember) return;
+    setRateError(null);
+    if (!rateDraft.hourlyRateUsd || !rateDraft.effectiveDate) {
+      setRateError("Hourly rate and effective date are required.");
+      return;
+    }
+    setSavingRate(true);
+    try {
+      await apiJson<{ member: StaffMember }>(`/staff/${encodeURIComponent(editingMember.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          newHourlyRateCents: Math.round(rateDraft.hourlyRateUsd * 100),
+          newRateEffectiveDate: rateDraft.effectiveDate,
+        }),
+      });
+      setEditingMember(null);
+      await load();
+    } catch (e) {
+      setRateError(e instanceof Error ? e.message : "Could not update pay rate");
+    } finally {
+      setSavingRate(false);
+    }
+  }
+
   if (!active) return null;
 
   return (
@@ -535,7 +582,12 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
                   <Text size="xs" c="dimmed">{m.email}</Text>
                 </Table.Td>
                 <Table.Td>{m.employmentStartDate}</Table.Td>
-                <Table.Td>{formatUsd(m.hourlyRateCents / 100)}/hr</Table.Td>
+                <Table.Td>
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="sm">{formatUsd(m.hourlyRateCents / 100)}/hr</Text>
+                    <Anchor size="xs" onClick={() => openEditRate(m)}>Edit</Anchor>
+                  </Group>
+                </Table.Td>
                 <Table.Td>
                   <Stack gap={2}>
                     <Text size="xs">{scheduleSummary(slots, m.personProfileId) ?? "Not set"}</Text>
@@ -661,6 +713,38 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
           </Group>
         </Stack>
       </Paper>
+
+      <Modal opened={editingMember !== null} onClose={closeEditRate} title={`Edit pay rate — ${editingMember?.fullName ?? ""}`}>
+        <Stack gap="sm">
+          <Text size="xs" c="dimmed">
+            Pay rates are tracked with an effective date. Backdate to correct a mistake, or use a
+            future date to schedule a raise.
+          </Text>
+          <CurrencyInput
+            label="New hourly rate (USD)"
+            placeholder="e.g. 25.00"
+            value={rateDraft.hourlyRateUsd}
+            onChange={(value) => setRateDraft((p) => ({ ...p, hourlyRateUsd: value }))}
+            disabled={savingRate}
+          />
+          <TextInput
+            label="Effective date"
+            type="date"
+            value={rateDraft.effectiveDate}
+            onChange={(e) => setRateDraft((p) => ({ ...p, effectiveDate: e.currentTarget.value }))}
+            disabled={savingRate}
+          />
+          {rateError ? <Alert color="red" p="xs">{rateError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeEditRate} disabled={savingRate}>
+              Cancel
+            </Button>
+            <Button loading={savingRate} onClick={() => void saveRate()}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

@@ -32,4 +32,33 @@ test.describe('Staff Admin', () => {
     await page.goto('/settings');
     await expect(page.getByRole('tab', { name: /^Staff$/ })).not.toBeVisible();
   });
+
+  test('should add a staff member and allow editing their pay rate', async ({ page }) => {
+    const nav = page.locator('nav[aria-label="Main"]');
+    await nav.locator('a:has-text("Roster")').click();
+    await expect(page).toHaveURL(/\/staff-admin\/directory/);
+
+    const email = `st-${Date.now()}@example.com`;
+    const today = new Date().toISOString().slice(0, 10);
+
+    await page.getByLabel('First name').fill('Test');
+    await page.getByLabel('Last name').fill('Nanny');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Employment start date').fill(today);
+    await page.getByLabel('Hourly rate (USD)').pressSequentially('2000');
+    await page.getByRole('button', { name: /Add staff member/ }).click();
+
+    const row = page.locator('table tr', { hasText: email });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('20.00/hr');
+
+    await row.getByText('Edit', { exact: true }).click();
+    const modal = page.getByRole('dialog');
+    await expect(modal).toBeVisible();
+    await modal.getByLabel('New hourly rate (USD)').pressSequentially('2250');
+    await modal.getByRole('button', { name: 'Save' }).click();
+    await expect(modal).not.toBeVisible();
+
+    await expect(row).toContainText('22.50/hr');
+  });
 });

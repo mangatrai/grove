@@ -715,6 +715,8 @@ Available to owners and admins as a top-level **Staff** sidebar group (not under
 
 **Staff roster** — table of current staff members: name/email, employment start date, hourly rate, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history). The **Schedule** column shows a summary of their regular days/hours (or "Not set") with a link to edit it on the Care & Help Schedule editor (Settings → Family) — schedules aren't edited from the Staff Roster itself.
 
+**Editing the pay rate** — click **Edit** next to the rate to open a modal and set a new hourly rate with an effective date (defaults to today). Use this to fix a rate left blank at signup or to record a raise; past pay periods are unaffected since the old rate is kept on record and history is picked by effective date.
+
 **Add staff member** — form fields:
 
 - **First / last name, email, phone, date of birth** — email is required (used for the invite); the rest are optional.
