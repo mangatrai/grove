@@ -696,7 +696,7 @@ Manage household members and settings:
 
 **Member roster:**
 
-- Table of household members with name, role (owner/admin/member), relationship (self/spouse/child/dependent/other). Selecting **Staff** in the Role dropdown is blocked with a popup pointing you to **Staff → Directory** instead — staff members are onboarded there, not promoted from an existing household member row.
+- Table of household members with name, role (owner/admin/member), relationship (self/spouse/child/dependent/other). Selecting **Staff** in the Role dropdown is blocked with a popup pointing you to **Staff → Roster** instead — staff members are onboarded there, not promoted from an existing household member row.
 - **Add another row** button to stage new members.
 - **Save household** to persist changes.
 - **Trash icon** on saved rows to delete a member. Confirm the deletion in the dialog. Optionally also delete the member's login account if they have one.
@@ -711,9 +711,9 @@ Manage household members and settings:
 
 Available to owners and admins as a top-level **Staff** sidebar group (not under Settings) — onboard and manage household employees (e.g. a nanny). MVP time & expense tracking, no tax withholding this pass. Four pages:
 
-#### Directory
+#### Roster
 
-**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history). The **Schedule** column shows a summary of their regular days/hours (or "Not set") with a link to edit it on the Care & Help Schedule editor (Settings → Family) — schedules aren't edited from the Staff Directory itself.
+**Staff roster** — table of current staff members: name/email, employment start date, hourly rate, whether they have a login, and an **Active** toggle (deactivate instead of deleting to preserve their timesheet/expense history). The **Schedule** column shows a summary of their regular days/hours (or "Not set") with a link to edit it on the Care & Help Schedule editor (Settings → Family) — schedules aren't edited from the Staff Roster itself.
 
 **Add staff member** — form fields:
 

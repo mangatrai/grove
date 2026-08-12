@@ -2467,7 +2467,7 @@ export function SettingsPage() {
         centered
       >
         <Text size="sm" mb="md">
-          Staff members are onboarded from Staff → Directory, not by changing a household member's
+          Staff members are onboarded from Staff → Roster, not by changing a household member's
           role here.
         </Text>
         <Group justify="flex-end">
@@ -2475,7 +2475,7 @@ export function SettingsPage() {
             Close
           </Button>
           <Button component={Link} to="/staff-admin/directory" onClick={() => setStaffRoleNoticeOpen(false)}>
-            Go to Directory
+            Go to Roster
           </Button>
         </Group>
       </Modal>

@@ -73,20 +73,21 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { to: "/family/agent", end: false, label: "Agent", Icon: IconRobot },
     ],
   },
-  {
-    label: "Setup",
-    items: [
-      { to: "/categories", end: false, label: "Categories", Icon: IconTag },
-      { to: "/settings", end: false, label: "Settings", Icon: IconSettings },
-    ],
-  },
 ];
 
-/** Owner/admin-only group for managing household staff — appended after NAV_GROUPS for those roles. */
+const SETUP_NAV_GROUP: { label: string; items: NavItem[] } = {
+  label: "Setup",
+  items: [
+    { to: "/categories", end: false, label: "Categories", Icon: IconTag },
+    { to: "/settings", end: false, label: "Settings", Icon: IconSettings },
+  ],
+};
+
+/** Owner/admin-only group for managing household staff — inserted before Setup for those roles. */
 const STAFF_ADMIN_NAV_GROUP: { label: string; items: NavItem[] } = {
   label: "Staff",
   items: [
-    { to: "/staff-admin/directory", end: false, label: "Directory", Icon: IconUsers },
+    { to: "/staff-admin/directory", end: false, label: "Roster", Icon: IconUsers },
     { to: "/staff-admin/timesheets", end: false, label: "Timesheets", Icon: IconClock },
     { to: "/staff-admin/expenses", end: false, label: "Expenses", Icon: IconWallet },
     { to: "/staff-admin/pay", end: false, label: "Pay & Reports", Icon: IconCash },
@@ -117,8 +118,8 @@ export function AppSidebar({
   const visibleGroups = role === "staff"
     ? STAFF_NAV_GROUPS
     : role === "member"
-      ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
-      : [...NAV_GROUPS, STAFF_ADMIN_NAV_GROUP];
+      ? [...NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family"), SETUP_NAV_GROUP]
+      : [...NAV_GROUPS, STAFF_ADMIN_NAV_GROUP, SETUP_NAV_GROUP];
 
   return (
     <>

@@ -14,6 +14,33 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## UX — #276: Staff sidebar group moved above Setup, Directory tab renamed to Roster (2026-08-11)
+
+**What changed:**
+- **Sidebar order:** the owner/admin-only **Staff** nav group now renders above **Setup**
+  (previously appended after it, so it sat below Categories/Settings).
+- **Directory → Roster:** the "Directory" tab/label read like a generic phone/contact directory
+  rather than the staff roster it actually is. Renamed the nav label, the Household-tab
+  "Staff → Directory" notice/button, and USER_GUIDE references to **Roster**. Route path
+  (`/staff-admin/directory`) and internal component name (`StaffDirectory`) left unchanged —
+  cosmetic label only.
+
+**Verified (code inspection, this session):**
+- **Directory/Roster tab is not staff-visible:** `AppSidebar.tsx` renders only a single "My
+  Portal" nav item for `role === "staff"`; the `Staff` admin group (incl. Roster) is only added
+  for owner/admin. The `/staff-admin/*` routes are also wrapped in `RequireOwnerOrAdmin` in
+  `App.tsx`, and `RequireNotStaffLayout` redirects any `staff`-role user straight to `/staff` —
+  so it's gated at both the sidebar and the route level, not sidebar-only.
+- **Approval UI is not reachable by staff:** `TimesheetApprovalQueue`/`ExpenseApprovalQueue`
+  live only on `/staff-admin/timesheets` and `/staff-admin/expenses` (owner/admin route, not the
+  nanny's `/staff` portal route). The nanny's own `/staff` page renders only
+  `MyTimesheetPanel`/`MyExpensesPanel`/`MyPayPanel` — no approval controls exist on that
+  component tree at all. Backend approval/queue endpoints (`GET /timesheets/pending`,
+  `POST /timesheets/:id/approve|reject`, and the expense equivalents) are `requireRole(["owner",
+  "admin"])`-gated, so even a direct API call from a staff session 403s.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/276
+
 ## CR — #273 + #274 + #275: Remove Record Bonus, Directory schedule link, staff-role select guard (2026-08-11)
 
 **What changed:**

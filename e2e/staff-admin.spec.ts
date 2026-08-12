@@ -11,7 +11,7 @@ test.describe('Staff Admin', () => {
     const nav = page.locator('nav[aria-label="Main"]');
     await expect(nav.locator('text=Staff')).toBeVisible();
 
-    await nav.locator('a:has-text("Directory")').click();
+    await nav.locator('a:has-text("Roster")').click();
     await expect(page).toHaveURL(/\/staff-admin\/directory/);
     await expect(page.locator('h2:has-text("Household Staff")')).toBeVisible();
 
