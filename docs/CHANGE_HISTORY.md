@@ -54,6 +54,8 @@ integration test in `backend/tests/app.test.ts`.
 `frontend/src/import/inferParserProfile.test.ts`, `docs/API_REFERENCE.md`,
 `docs/USER_GUIDE.md`.
 
+**GitHub:** https://github.com/mangatrai/grove/issues/279
+
 ## FIX — #277: Roster — edit an existing staff member's pay rate (2026-08-11)
 
 **What changed:**
