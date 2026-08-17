@@ -132,5 +132,9 @@ export function inferParserProfile(
     return "citi_card_csv";
   }
 
+  if (inst === "citi" && t === "credit_card" && ext === ".pdf") {
+    return "citi_credit_card_pdf";
+  }
+
   return null;
 }

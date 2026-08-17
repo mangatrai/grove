@@ -147,4 +147,14 @@ describe("inferParserProfile", () => {
   it("returns null for Wealthfront non-csv/pdf", () => {
     expect(inferParserProfile({ type: "checking", institution: "Wealthfront" }, "export.ofx")).toBe("ofx_transactions");
   });
+
+  it("returns citi_card_csv for Citi + credit_card + .csv", () => {
+    expect(inferParserProfile({ type: "credit_card", institution: "Citi" }, "activity.csv")).toBe("citi_card_csv");
+  });
+
+  it("returns citi_credit_card_pdf for Citi + credit_card + .pdf", () => {
+    expect(inferParserProfile({ type: "credit_card", institution: "Citibank" }, "AugustStatement.pdf")).toBe(
+      "citi_credit_card_pdf"
+    );
+  });
 });

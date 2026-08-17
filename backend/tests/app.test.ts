@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import bcrypt from "bcryptjs";
@@ -18,6 +18,7 @@ const app = buildApp();
 
 /** Seeded in `seeds/dev/dev_0002_seed_financial_accounts.sql` */
 const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
+const SEED_CITI_CC = "40000000-0000-0000-0000-000000000004";
 const SEED_CHASE_CC = "40000000-0000-0000-0000-000000000005";
 const SEED_MARCUS_SAVINGS = "40000000-0000-0000-0000-000000000006";
 
@@ -2765,6 +2766,40 @@ describe("import sessions and file intake", () => {
 
     expect(parseRes.status).toBe(200);
     expect(parseRes.body.parsedRows).toBeGreaterThanOrEqual(1);
+  });
+
+  it("parses Citi credit card PDF using citi_credit_card_pdf when fixtures exist", { timeout: 60_000 }, async () => {
+    const dir = path.join(process.cwd(), "..", "data", "imports", "creditcard", "citibank");
+    if (!existsSync(dir)) {
+      return;
+    }
+    const files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".pdf"));
+    if (files.length === 0) {
+      return;
+    }
+    const fixture = path.join(dir, files[0]);
+
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", readFileSync(fixture), files[0]);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_CITI_CC, "citi_credit_card_pdf");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+
+    expect(parseRes.status).toBe(200);
+    expect(parseRes.body.parsedRows).toBeGreaterThan(0);
   });
 
   it("parses real BoA checking CSV from repo when fixture exists", { timeout: 60_000 }, async () => {

@@ -2316,7 +2316,7 @@ Lists supported parser profile IDs.
 { "profiles": [ { "id", "label" } ] }
 ```
 
-Known IDs: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`.
+Known IDs: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `citi_credit_card_pdf`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`.
 
 ---
 
@@ -2348,7 +2348,7 @@ Supported adapters:
 - CSV (`.csv`)
 - Excel (`.xlsx`, `.xls`)
 - PDF (`.pdf`) — profile-specific behavior:
-  - `boa_estatement_pdf`, `marcus_online_savings_pdf` — local parse.
+  - `boa_estatement_pdf`, `marcus_online_savings_pdf`, `citi_credit_card_pdf` — local parse.
   - `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf` — async LLM extraction (queued on `import_file`; provider per `LLM_PROVIDER`).
 
 **Employer payslip (`ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**. On completion, creates a `payslip_snapshot` row; **no** `transaction_raw` rows.

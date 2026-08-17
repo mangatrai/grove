@@ -9,6 +9,8 @@ export const PARSER_PROFILE_IDS = [
   /** Epic 3 — text-based PDF eStatements */
   "boa_estatement_pdf",
   "marcus_online_savings_pdf",
+  /** Citibank consumer credit card eStatement PDF (e.g. AAdvantage MileUp Card) */
+  "citi_credit_card_pdf",
   /** Epic 3.3 — employer payslip (summary only; stored in payslip_snapshot, not ledger) */
   "ibm_pay_contributions_pdf",
   /** Deloitte Pay Statement PDF — v1 uses same Current/YTD summary heuristics as IBM where text matches */
