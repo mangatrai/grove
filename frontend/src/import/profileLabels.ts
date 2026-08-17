@@ -13,6 +13,7 @@ const FRIENDLY: Record<string, string> = {
   generic_tabular: "Spreadsheet (CSV or Excel)",
   chase_card_csv: "Chase card (CSV)",
   citi_card_csv: "Citi card (CSV)",
+  citi_credit_card_pdf: "Citi card statement (PDF)",
   boa_checking_csv: "Bank of America deposit account (CSV)",
   boa_savings_csv: "Bank of America deposit account (CSV)",
   boa_credit_card_csv: "Bank of America card (CSV)",

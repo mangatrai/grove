@@ -295,6 +295,7 @@ Exact matches are inserted as `duplicate` status and surfaced in **Needs Review*
 
 - **OFX/QFX** — standard banking format (Chase, Discover, most banks).
 - **Bank of America CSV/PDF** — checking and credit card.
+- **Citi CSV/PDF** — credit card.
 - **Marcus PDF** — savings accounts.
 - **Wealthfront PDF** — investment accounts.
 - **IBM, Deloitte, ADP payslip PDFs** — if configured (see [Payslips](#payslips)).

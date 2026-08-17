@@ -15,7 +15,8 @@ export type BoaStatementBalances = {
     | "boa_estatement_pdf"
     | "ofx_transactions"
     | "marcus_online_savings_pdf"
-    | "wealthfront_investment_pdf";
+    | "wealthfront_investment_pdf"
+    | "citi_credit_card_pdf";
 };
 
 function mmddyyyyToIso(s: string): string | null {

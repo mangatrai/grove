@@ -14,6 +14,46 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR: Citi credit card PDF statement parser (2026-08-17)
+
+**What changed:**
+- New import profile `citi_credit_card_pdf` — a local (synchronous) parser for Citibank
+  consumer credit card eStatement PDFs (e.g. AAdvantage MileUp Card), following the existing
+  profile-based import architecture (`boa-estatement-pdf.ts` / `marcus-online-savings-pdf.ts`
+  as references).
+- Parses every transaction row (sale date, post date, description, amount) from the
+  "ACCOUNT SUMMARY" activity table, split by section into Payments/Credits/Adjustments vs.
+  charge zones (Purchases, Cash Advances, Balance Transfers, Fees, Interest) to determine sign.
+- Extracts statement-level balances (previous balance, new balance, new-balance-as-of date,
+  billing period) so the account balance snapshot updates automatically on import, same as the
+  other statement PDF parsers.
+- Resolves `MM/DD`-only transaction dates against the billing period start/end so a period
+  spanning a year boundary (e.g. Dec 20 – Jan 19) attributes December rows to the earlier year.
+- Follows the existing app-wide credit card sign convention: positive = credit/payment/refund
+  (reduces balance owed), negative = charge (increases balance owed).
+- Wired into institution/type/extension auto-detection (`citi` + `credit_card` + `.pdf`) on both
+  backend and frontend, alongside the existing `citi_card_csv` CSV profile.
+
+**Why:** Citi credit card statements were previously only importable via OFX; there was no PDF
+path, so Citi PDF statements had no matching parser profile.
+
+**Tests:** Validated against 5 real, unmodified sample statement PDFs in
+`data/imports/creditcard/citibank/` (gitignored, not committed) — extracted balances
+cross-checked against the literal statement text. New unit tests in
+`backend/tests/citi-parser.test.ts` (balance extraction, transaction parsing, year-boundary
+date resolution, and a guarded real-fixture consistency check) plus a guarded end-to-end
+integration test in `backend/tests/app.test.ts`.
+
+**Files:** `backend/src/modules/imports/profiles/citi-credit-card-pdf.ts` (new),
+`backend/src/modules/imports/profiles/profile-ids.ts`,
+`backend/src/modules/imports/profiles/boa-checking-savings-csv.ts`,
+`backend/src/modules/imports/import-parser.service.ts`,
+`backend/src/modules/imports/infer-parser-profile.ts`,
+`frontend/src/import/inferParserProfile.ts`, `frontend/src/import/profileLabels.ts`,
+`backend/tests/citi-parser.test.ts` (new), `backend/tests/app.test.ts`,
+`frontend/src/import/inferParserProfile.test.ts`, `docs/API_REFERENCE.md`,
+`docs/USER_GUIDE.md`.
+
 ## FIX — #277: Roster — edit an existing staff member's pay rate (2026-08-11)
 
 **What changed:**

@@ -18,6 +18,7 @@ import { parseBoaEStatementFromTextDetailed } from "./profiles/boa-estatement-pd
 import { extractPdfText } from "./profiles/pdf-text.js";
 import { parseChaseCardCsv } from "./profiles/chase-card-csv.js";
 import { parseCitiCardCsv } from "./profiles/citi-card-csv.js";
+import { parseCitiCreditCardPdf } from "./profiles/citi-credit-card-pdf.js";
 import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pdf.js";
 import { parseOfxBuffer } from "./profiles/ofx-parser.js";
 import { parseDiscoverCardCsv } from "./profiles/discover-card-csv.js";
@@ -158,6 +159,8 @@ async function extractByProfile(
     }
     case "marcus_online_savings_pdf":
       return (await parseMarcusOnlineSavingsPdf(buffer)).rows;
+    case "citi_credit_card_pdf":
+      return (await parseCitiCreditCardPdf(buffer)).rows;
     case "ofx_transactions":
       return parseOfxBuffer(buffer).rows;
     case "discover_card_csv":
@@ -201,6 +204,10 @@ async function extractByProfileWithDiagnostics(
   }
   if (profileId === "wealthfront_investment_pdf") {
     const parsed = await parseWealthfrontInvestmentPdf(buffer);
+    return { rows: parsed.rows, statementBalances: parsed.statementBalances };
+  }
+  if (profileId === "citi_credit_card_pdf") {
+    const parsed = await parseCitiCreditCardPdf(buffer);
     return { rows: parsed.rows, statementBalances: parsed.statementBalances };
   }
   if (profileId === "ofx_transactions") {
