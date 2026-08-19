@@ -9,7 +9,7 @@ import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
 import { renderMemberInviteTemplate } from "../mailer/templates/member-invite.js";
 import { createHouseholdCategory } from "../category/categories.service.js";
 import { encryptDob } from "../household/dob-crypto.js";
-import { createAvailability } from "../family/family-profiles.service.js";
+import { serializeDaysOfWeek } from "../family/family-profiles.service.js";
 import type {
   CreateStaffMemberInput,
   EmployeeCategoryIds,
@@ -131,6 +131,7 @@ export async function createStaffMember(
   const staffProfileId = randomUUID();
   const staffRateId = randomUUID();
   const userId = randomUUID();
+  const availabilityId = randomUUID();
   const fullName = [input.firstName.trim(), input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
   const phoneNumber = input.phoneNumber ?? null;
   const dobEncrypted = input.dateOfBirth ? encryptDob(input.dateOfBirth) : null;
@@ -167,6 +168,21 @@ export async function createStaffMember(
   VALUES ($1, $2, $3, $4, $5)`,
         [staffRateId, householdId, staffProfileId, input.hourlyRateCents, input.employmentStartDate] as never[]
       );
+      if (input.schedule && input.schedule.daysOfWeek.length > 0) {
+        await tx.unsafe(
+          `INSERT INTO household_help_availability
+             (id, household_id, person_profile_id, slot_type, service_type, days_of_week, start_time, end_time)
+  VALUES ($1, $2, $3, 'regular', 'nanny', $4, $5, $6)`,
+          [
+            availabilityId,
+            householdId,
+            profileId,
+            serializeDaysOfWeek(input.schedule.daysOfWeek),
+            input.schedule.startTime,
+            input.schedule.endTime
+          ] as never[]
+        );
+      }
     });
   } catch (err: unknown) {
     if (isPgUniqueViolation(err)) {
@@ -176,17 +192,6 @@ export async function createStaffMember(
   }
 
   await ensureEmployeeCategoryTree(householdId, createdByUserId);
-
-  if (input.schedule && input.schedule.daysOfWeek.length > 0) {
-    await createAvailability(householdId, {
-      personProfileId: profileId,
-      slotType: "regular",
-      serviceType: "nanny",
-      daysOfWeek: input.schedule.daysOfWeek,
-      startTime: input.schedule.startTime,
-      endTime: input.schedule.endTime
-    });
-  }
 
   const created = await getStaffMemberById(householdId, staffProfileId);
   if (!created) {

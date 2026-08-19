@@ -19,6 +19,7 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
   let staffEmail: string;
   let staffAuth: string;
   let staffId: string;
+  let staffPersonProfileId: string;
 
   beforeAll(async () => {
     ownerAuth = await ownerToken();
@@ -37,6 +38,7 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
       });
     expect(create.status).toBe(201);
     staffId = create.body.member.id as string;
+    staffPersonProfileId = create.body.member.personProfileId as string;
 
     const login = await request(app).post("/auth/login").send({
       email: staffEmail,
@@ -44,6 +46,16 @@ describe("Staff expense entry + approval workflow (STAFF-4)", () => {
     });
     expect(login.status).toBe(200);
     staffAuth = login.body.token as string;
+  });
+
+  it("(STAFF-17) persists the schedule given at staff creation, not just the staff record", async () => {
+    const res = await request(app).get("/api/family/availability").set("authorization", `Bearer ${ownerAuth}`);
+    expect(res.status).toBe(200);
+    const slot = (res.body.slots as Array<{ personProfileId: string; slotType: string; daysOfWeek: number[] }>).find(
+      (s) => s.personProfileId === staffPersonProfileId && s.slotType === "regular"
+    );
+    expect(slot).toBeDefined();
+    expect(slot!.daysOfWeek).toEqual([1, 2]);
   });
 
   it("staff GET /staff/expenses/me starts empty", async () => {

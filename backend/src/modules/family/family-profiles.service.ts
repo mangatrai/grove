@@ -158,7 +158,7 @@ function parseDaysOfWeek(raw: string | null): number[] {
   return raw.split(",").map(Number).filter(n => !isNaN(n));
 }
 
-function serializeDaysOfWeek(days: number[] | null | undefined): string | null {
+export function serializeDaysOfWeek(days: number[] | null | undefined): string | null {
   if (!days || days.length === 0) return null;
   return [...new Set(days)].sort((a, b) => a - b).join(",");
 }

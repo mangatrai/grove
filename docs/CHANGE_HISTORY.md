@@ -14,6 +14,28 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #281: Staff creation schedule write not atomic with staff record (2026-08-19)
+
+**What changed:** `createStaffMember()` moved the `household_help_availability` schedule
+insert into the *same* `qBegin` transaction as the rest of staff creation (person profile,
+membership, login, staff profile, rate), instead of a separate call made after that
+transaction had already committed.
+
+**Why:** User report — adding a staff member with a schedule filled in during the same "Add
+staff member" form didn't persist the schedule; it only worked when re-added from the Family
+tab. On any failure of the post-commit `createAvailability()` call, the staff record was
+already committed — an orphaned staff member with no schedule — while the HTTP response gave
+only a generic status-text error (`apiJson` had no `message` field to read from either the
+zod 400 path or the global 500 handler), so there was no visible signal that specifically the
+schedule had failed. Reproduced the write path directly with well-formed input and confirmed
+it persists correctly given valid data, confirming the bug is the non-atomic two-step write
+plus poor error surfacing, not a data-shape defect.
+
+**Files:** `backend/src/modules/staff/staff.service.ts`,
+`backend/src/modules/family/family-profiles.service.ts` (exported `serializeDaysOfWeek`).
+
+**GitHub:** https://github.com/mangatrai/grove/issues/281
+
 ## CR: Citi credit card PDF statement parser (2026-08-17)
 
 **What changed:**
