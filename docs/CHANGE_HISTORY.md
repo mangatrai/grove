@@ -36,6 +36,27 @@ plus poor error surfacing, not a data-shape defect.
 
 **GitHub:** https://github.com/mangatrai/grove/issues/281
 
+## FIX — #282: Timesheet note field crashes the page (`currentTarget` null) (2026-08-19)
+
+**What changed:** The "Note" field on the weekly timesheet grid read
+`e.currentTarget.value` *inside* a functional `setState` updater callback
+(`setNoteByDate((p) => ({ ...p, [date]: e.currentTarget.value }))`). React can invoke/re-invoke
+that updater after the native event has already finished dispatching (batching, or
+double-invocation under React 18 StrictMode in dev), at which point the browser has already
+reset `e.currentTarget` to `null` — the `.value` access throws during render and blanks the
+page. Fixed by extracting `e.currentTarget.value` into a local `const` before calling the
+updater. Found and fixed 9 more instances of the identical pattern in `StaffDirectory.tsx`'s
+"Add staff member" and "Edit pay rate" forms — same latent crash risk, not yet reported but
+fixed alongside since it's the same root cause.
+
+**Why:** User report — typing into the timesheet Note field blanked the page with
+`TypeError: null is not an object (evaluating 'E.currentTarget.value')`.
+
+**Files:** `frontend/src/pages/staff/MyTimesheetPanel.tsx`,
+`frontend/src/pages/staff/StaffDirectory.tsx`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/282
+
 ## CR: Citi credit card PDF statement parser (2026-08-17)
 
 **What changed:**

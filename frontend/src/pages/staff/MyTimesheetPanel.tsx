@@ -257,7 +257,10 @@ export function MyTimesheetPanel({ staffId }: MyTimesheetPanelProps) {
                     size="xs"
                     placeholder="Optional note"
                     value={noteByDate[date] ?? ""}
-                    onChange={(e) => setNoteByDate((p) => ({ ...p, [date]: e.currentTarget.value }))}
+                    onChange={(e) => {
+                      const value = e.currentTarget.value;
+                      setNoteByDate((p) => ({ ...p, [date]: value }));
+                    }}
                     disabled={!editable || saving || submitting}
                   />
                 </Table.Td>

@@ -629,14 +629,20 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
             <TextInput
               label="First name"
               value={draft.firstName}
-              onChange={(e) => setDraft((p) => ({ ...p, firstName: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, firstName: value }));
+              }}
               disabled={adding}
               placeholder="Jane"
             />
             <TextInput
               label="Last name"
               value={draft.lastName}
-              onChange={(e) => setDraft((p) => ({ ...p, lastName: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, lastName: value }));
+              }}
               disabled={adding}
               placeholder="Doe"
             />
@@ -644,7 +650,10 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
               label="Email"
               type="email"
               value={draft.email}
-              onChange={(e) => setDraft((p) => ({ ...p, email: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, email: value }));
+              }}
               disabled={adding}
               placeholder="jane@example.com"
             />
@@ -654,7 +663,10 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
               label="Phone (optional)"
               type="tel"
               value={draft.phoneNumber}
-              onChange={(e) => setDraft((p) => ({ ...p, phoneNumber: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, phoneNumber: value }));
+              }}
               disabled={adding}
               placeholder="+1 555 000 0000"
             />
@@ -662,14 +674,20 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
               label="Date of birth (optional)"
               type="date"
               value={draft.dateOfBirth}
-              onChange={(e) => setDraft((p) => ({ ...p, dateOfBirth: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, dateOfBirth: value }));
+              }}
               disabled={adding}
             />
             <TextInput
               label="Employment start date"
               type="date"
               value={draft.employmentStartDate}
-              onChange={(e) => setDraft((p) => ({ ...p, employmentStartDate: e.currentTarget.value }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, employmentStartDate: value }));
+              }}
               disabled={adding}
             />
             <CurrencyInput
@@ -693,14 +711,20 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
               label="Start time"
               type="time"
               value={draft.schedule.startTime}
-              onChange={(e) => setDraft((p) => ({ ...p, schedule: { ...p.schedule, startTime: e.currentTarget.value } }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, schedule: { ...p.schedule, startTime: value } }));
+              }}
               disabled={adding}
             />
             <TextInput
               label="End time"
               type="time"
               value={draft.schedule.endTime}
-              onChange={(e) => setDraft((p) => ({ ...p, schedule: { ...p.schedule, endTime: e.currentTarget.value } }))}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((p) => ({ ...p, schedule: { ...p.schedule, endTime: value } }));
+              }}
               disabled={adding}
             />
           </Group>
@@ -731,7 +755,10 @@ export function StaffDirectory({ active }: StaffDirectoryProps) {
             label="Effective date"
             type="date"
             value={rateDraft.effectiveDate}
-            onChange={(e) => setRateDraft((p) => ({ ...p, effectiveDate: e.currentTarget.value }))}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setRateDraft((p) => ({ ...p, effectiveDate: value }));
+            }}
             disabled={savingRate}
           />
           {rateError ? <Alert color="red" p="xs">{rateError}</Alert> : null}
