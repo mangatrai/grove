@@ -70,7 +70,7 @@ export function CurrencyInput({
     if (e.key >= "0" && e.key <= "9") {
       push(cents * 10 + parseInt(e.key, 10));
     } else if (e.key === "Backspace") {
-      push(Math.floor(cents / 10));
+      push(Math.trunc(cents / 10));
     } else if (e.key === "Delete") {
       push(0);
     }

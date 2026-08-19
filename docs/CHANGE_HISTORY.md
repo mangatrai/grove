@@ -79,6 +79,23 @@ confirmation of approval. Rejection does not send an email yet — out of scope 
 
 **GitHub:** https://github.com/mangatrai/grove/issues/283
 
+## FIX — #284: CurrencyInput Backspace never reaches zero on negative balances (2026-08-19)
+
+**What changed:** The shared `CurrencyInput` component's Backspace handler used
+`Math.floor(cents / 10)` to drop the last digit. `Math.floor` rounds toward `-Infinity`, so
+for negative `cents` (liability balances — credit cards, loans) it doesn't just strip the
+last digit; it gets permanently stuck (e.g. `cents = -5` → Backspace → `Math.floor(-0.5) = -1`
+→ Backspace again → `Math.floor(-0.1) = -1` forever), so a negative balance could never be
+fully cleared via Backspace. Changed to `Math.trunc`, which rounds toward zero; positive
+(asset) values are unaffected since `Math.floor`/`Math.trunc` agree there.
+
+**Why:** User report — Backspace/Delete "don't work" when editing a dollar-value input (Net
+Worth, Balance Sheet balance edit), most visible on liability accounts.
+
+**Files:** `frontend/src/components/CurrencyInput.tsx`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/284
+
 ## CR: Citi credit card PDF statement parser (2026-08-17)
 
 **What changed:**
