@@ -502,6 +502,25 @@ Below the Proceeds box, **OI** (ordinary income) and **CG** (capital gain/loss) 
 
 Click **+ Add Row** to record multiple lots in one session (same sale date). The backend rejects the submission if any row exceeds the available held quantity for that batch.
 
+### Qualifying vs. Disqualifying Dispositions
+
+Each sale is automatically classified against IRS rules (IRC §423(c)):
+
+- **Disqualifying** — sold within 2 years of the offering (grant) date or within 1 year of the purchase date. Ordinary income = `(FMV at purchase − cost basis) × shares`; this amount is included in your W-2.
+- **Qualifying** — held 2+ years from the offering date **and** 1+ year from the purchase date. Ordinary income is the *lesser* of the actual gain or `(discount % × offering-period FMV) × shares`; it is **not** included in your W-2 — you self-report it as additional income. The remainder is capital gain/loss.
+
+The Batch table's **Disposition** column shows a badge (Qualifying / Disqualifying / —) per batch, based on its sales. A qualifying sale needs that offering period's FMV to compute its tax numbers — until entered, the sale is recorded but flagged **Pending** with an ⓘ tooltip, and the Year Summary strip shows a yellow banner with a count of sales awaiting entry.
+
+### Offering Periods
+
+Click **Offering Periods** to open the modal listing every offering start date (Jan 1 / Jul 1) in use across your purchase batches. Enter the **FMV per share at the start of the offering period** for each — this figure is on **IRS Form 3922, Box 3** ("Fair market value per share on grant date"), issued annually by your plan administrator. Saving a value immediately recomputes any pending qualifying-disposition sales tied to that offering period.
+
+You only need to fill these in if you have qualifying-disposition sales; disqualifying sales don't use this value.
+
+### Tax Report (CSV / PDF)
+
+Use the **Tax Report** card to download a year-end report for your CPA: pick a year and click **Download CSV** or **Download PDF**. Both include one row per sale realized in that calendar year (Form 8949-style columns — description, dates, term, disposition, shares, proceeds, basis, ordinary income, adjusted basis, capital gain/loss, W-2 status) plus a summary block citing the IRS box/form each figure belongs to (1099-B Box 1d/1e, W-2 Box 1, Form 8949). Any sale still pending an offering-period FMV is marked for review rather than reported with guessed numbers.
+
 ---
 
 ## Tax Protest

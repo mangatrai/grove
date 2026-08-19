@@ -6,10 +6,38 @@ import { parseEsppCsv, parseEsppPdf } from "./espp-parse.service.js";
 import type {
   EsppBatchRow,
   EsppBatchWithSales,
+  EsppOfferingPeriod,
   EsppSaleRow,
   EsppYearSummary,
   SaleInput,
 } from "./espp.types.js";
+
+// ─── Offering period / disposition classification ─────────────────────────────
+
+// IBM ESPP offering periods are semiannual, starting Jan 1 and Jul 1 (IBM 2014 ESPP
+// Prospectus, "Offering Period"). The offering start date is the option-grant date
+// for tax purposes even though this plan has no lookback in the purchase-price formula.
+export function computeOfferingDate(purchaseDate: string): string {
+  const [yearStr, monthStr] = purchaseDate.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  return month >= 7 ? `${year}-07-01` : `${year}-01-01`;
+}
+
+// Qualifying disposition requires holding 2+ years from the offering (grant) date
+// AND 1+ year from the purchase date (IRC §423(c); confirmed against IBM's prospectus
+// and Computershare's 2025 Tax Form Reference Guide).
+export function isQualifyingDisposition(offeringDate: string, purchaseDate: string, saleDate: string): boolean {
+  const sale = new Date(`${saleDate}T00:00:00Z`);
+
+  const twoYearsFromOffering = new Date(`${offeringDate}T00:00:00Z`);
+  twoYearsFromOffering.setUTCFullYear(twoYearsFromOffering.getUTCFullYear() + 2);
+
+  const oneYearFromPurchase = new Date(`${purchaseDate}T00:00:00Z`);
+  oneYearFromPurchase.setUTCFullYear(oneYearFromPurchase.getUTCFullYear() + 1);
+
+  return sale >= twoYearsFromOffering && sale >= oneYearFromPurchase;
+}
 
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
@@ -18,6 +46,7 @@ function mapBatch(r: Record<string, unknown>): EsppBatchRow {
     id:                   r.id as string,
     householdId:          r.household_id as string,
     purchaseDate:         r.purchase_date as string,
+    offeringDate:         r.offering_date as string,
     sharesGranted:        parseFloat(String(r.shares_granted)),
     fmvPerShare:          r.fmv_per_share != null ? parseFloat(String(r.fmv_per_share)) : null,
     costBasisPerShare:    parseFloat(String(r.cost_basis_per_share)),
@@ -41,9 +70,21 @@ function mapSale(r: Record<string, unknown>): EsppSaleRow {
     sharesSold:          parseFloat(String(r.shares_sold)),
     salePricePerShare:   parseFloat(String(r.sale_price_per_share)),
     proceeds:            parseFloat(String(r.proceeds)),
-    ordinaryIncome:      parseFloat(String(r.ordinary_income)),
-    capGainLoss:         parseFloat(String(r.cap_gain_loss)),
+    dispositionType:     (r.disposition_type as 'qualifying' | 'disqualifying' | null) ?? null,
+    ordinaryIncome:      r.ordinary_income != null ? parseFloat(String(r.ordinary_income)) : null,
+    capGainLoss:         r.cap_gain_loss  != null ? parseFloat(String(r.cap_gain_loss))  : null,
     createdAt:           String(r.created_at),
+  };
+}
+
+function mapOfferingPeriod(r: Record<string, unknown>): EsppOfferingPeriod {
+  return {
+    id:            r.id as string,
+    householdId:   r.household_id as string,
+    offeringDate:  r.offering_date as string,
+    fmvPerShare:   r.fmv_per_share != null ? parseFloat(String(r.fmv_per_share)) : null,
+    createdAt:     String(r.created_at),
+    updatedAt:     String(r.updated_at),
   };
 }
 
@@ -154,7 +195,8 @@ export async function getYearSummary(
        COALESCE(SUM(s.shares_sold),       0) AS shares_sold,
        COALESCE(SUM(s.proceeds),          0) AS sale_proceeds,
        COALESCE(SUM(s.ordinary_income),   0) AS ordinary_income,
-       COALESCE(SUM(s.cap_gain_loss),     0) AS cap_gain_loss
+       COALESCE(SUM(s.cap_gain_loss),     0) AS cap_gain_loss,
+       COALESCE(SUM(CASE WHEN s.disposition_type = 'qualifying' AND s.ordinary_income IS NULL THEN 1 ELSE 0 END), 0) AS pending_count
      FROM espp_sale s
      JOIN espp_batch b ON b.id = s.batch_id
      WHERE b.household_id = ?
@@ -167,6 +209,7 @@ export async function getYearSummary(
   const ordinaryInc   = parseFloat(String(sRow?.ordinary_income)) || 0;
   const capGain       = parseFloat(String(sRow?.cap_gain_loss))   || 0;
   const totalInvested = parseFloat(String(bRow?.total_invested))  || 0;
+  const pendingCount  = parseInt(String(sRow?.pending_count), 10)  || 0;
 
   // Realized G/L = OI + cap gain (or equivalently: proceeds − cost_basis × shares_sold)
   const realizedGainLoss = ordinaryInc + capGain;
@@ -182,6 +225,7 @@ export async function getYearSummary(
     realizedGainLoss,
     ordinaryIncomeYtd:  ordinaryInc,
     capGainLossYtd:     capGain,
+    pendingOfferingFmvCount: pendingCount,
   };
 }
 
@@ -212,6 +256,7 @@ export async function importBatch(
   // • If PDF-only (no CSV), create a single batch from PDF data.
   type BatchSpec = {
     purchaseDate: string;
+    offeringDate: string;
     sharesGranted: number;
     sharesTransferred: number;
     costBasisPerShare: number;
@@ -237,6 +282,7 @@ export async function importBatch(
       const transferred = csvRow.sharesTransferred;
       specs.push({
         purchaseDate:     csvRow.purchaseDate,
+        offeringDate:     computeOfferingDate(csvRow.purchaseDate),
         sharesGranted:    granted,
         sharesTransferred: transferred,
         costBasisPerShare: cost,
@@ -254,6 +300,7 @@ export async function importBatch(
         const granted = pdfData.sharesGranted ?? pdfData.sharesTransferred ?? 0;
         specs.push({
           purchaseDate:     pdfData.purchaseDate,
+          offeringDate:     computeOfferingDate(pdfData.purchaseDate),
           sharesGranted:    granted,
           sharesTransferred: pdfData.sharesTransferred ?? granted,
           costBasisPerShare: cost,
@@ -276,6 +323,7 @@ export async function importBatch(
     const granted = pdfData.sharesGranted ?? pdfData.sharesTransferred ?? 0;
     specs.push({
       purchaseDate:      pdfData.purchaseDate,
+      offeringDate:      computeOfferingDate(pdfData.purchaseDate),
       sharesGranted:     granted,
       sharesTransferred: pdfData.sharesTransferred ?? granted,
       costBasisPerShare: cost,
@@ -301,12 +349,12 @@ export async function importBatch(
       // shares_granted keeps the larger of PDF-sourced vs CSV fallback values.
       await qExec(
         `INSERT INTO espp_batch (
-           id, household_id, purchase_date,
+           id, household_id, purchase_date, offering_date,
            shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
            shares_transferred, payslip_id,
            espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (household_id, purchase_date) DO UPDATE SET
            shares_granted         = GREATEST(EXCLUDED.shares_granted, espp_batch.shares_granted),
            fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
@@ -321,7 +369,7 @@ export async function importBatch(
            espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
            espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
            updated_at             = ?`,
-        id, householdId, spec.purchaseDate,
+        id, householdId, spec.purchaseDate, spec.offeringDate,
         spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
         spec.sharesTransferred, link?.id ?? null,
         link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
@@ -333,12 +381,12 @@ export async function importBatch(
       // total that includes historical events from other batches — don't accumulate it).
       await qExec(
         `INSERT INTO espp_batch (
-           id, household_id, purchase_date,
+           id, household_id, purchase_date, offering_date,
            shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
            shares_transferred, payslip_id,
            espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (household_id, purchase_date) DO UPDATE SET
            shares_granted         = GREATEST(EXCLUDED.shares_granted, espp_batch.shares_granted),
            fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
@@ -350,7 +398,7 @@ export async function importBatch(
            espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
            espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
            updated_at             = ?`,
-        id, householdId, spec.purchaseDate,
+        id, householdId, spec.purchaseDate, spec.offeringDate,
         spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
         spec.sharesTransferred, link?.id ?? null,
         link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
@@ -361,6 +409,16 @@ export async function importBatch(
     log.info({ purchaseDate: spec.purchaseDate, fmv: spec.fmvPerShare, accumulateTransferred: spec.accumulateTransferred, householdId }, 'espp:import batch upserted');
   }
 
+  const offeringDates = Array.from(new Set(specs.map(s => s.offeringDate)));
+  for (const offeringDate of offeringDates) {
+    await qExec(
+      `INSERT INTO espp_offering_period (id, household_id, offering_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (household_id, offering_date) DO NOTHING`,
+      randomUUID(), householdId, offeringDate, now, now
+    );
+  }
+
   const dates = specs.map(s => s.purchaseDate);
   const placeholders = dates.map(() => '?').join(', ');
   const rows = await qAll<Record<string, unknown>>(
@@ -369,6 +427,45 @@ export async function importBatch(
   );
 
   return { ok: true, data: rows.map(mapBatch) };
+}
+
+type SaleTaxResult = {
+  dispositionType: 'qualifying' | 'disqualifying';
+  ordinaryIncome: number | null;
+  capGainLoss: number | null;
+};
+
+// Disqualifying: ordinary income = (purchase-date FMV − purchase price) × shares (IBM 2014 ESPP
+// Prospectus, "Tax" §1). Qualifying: ordinary income = lesser of actual gain (floored at 0) or
+// (discount% × offering-date FMV) × shares (Computershare 2025 Tax Form Reference Guide, "ESPP —
+// Qualified"); requires offering_fmv from Form 3922 Box 3, entered via the Offering Periods UI.
+function computeSaleTax(
+  batch: { offeringDate: string; purchaseDate: string; fmvPerShare: number; costBasisPerShare: number; discountPerShare: number },
+  offeringFmv: number | null,
+  saleDate: string,
+  sharesSold: number,
+  salePricePerShare: number
+): SaleTaxResult {
+  const qualifying = isQualifyingDisposition(batch.offeringDate, batch.purchaseDate, saleDate);
+
+  if (!qualifying) {
+    const ordinaryIncome = parseFloat((batch.discountPerShare * sharesSold).toFixed(2));
+    const capGainLoss    = parseFloat(((salePricePerShare - batch.fmvPerShare) * sharesSold).toFixed(2));
+    return { dispositionType: 'disqualifying', ordinaryIncome, capGainLoss };
+  }
+
+  if (offeringFmv == null) {
+    return { dispositionType: 'qualifying', ordinaryIncome: null, capGainLoss: null };
+  }
+
+  const totalRealizedGain = (salePricePerShare - batch.costBasisPerShare) * sharesSold;
+  const actualGainFloored = Math.max(0, totalRealizedGain);
+  const discountPct       = batch.discountPerShare / batch.fmvPerShare;
+  const cap                = discountPct * offeringFmv * sharesSold;
+  const ordinaryIncome     = parseFloat(Math.min(actualGainFloored, cap).toFixed(2));
+  const capGainLoss        = parseFloat((totalRealizedGain - ordinaryIncome).toFixed(2));
+
+  return { dispositionType: 'qualifying', ordinaryIncome, capGainLoss };
 }
 
 export async function recordSales(
@@ -419,12 +516,22 @@ export async function recordSales(
       const batchRaw = await qGet<Record<string, unknown>>(
         `SELECT * FROM espp_batch WHERE id = ?`, row.batchId
       );
-      const fmv      = parseFloat(String(batchRaw!.fmv_per_share));
-      const discount = parseFloat(String(batchRaw!.discount_per_share));
+      const offeringPeriod = await qGet<Record<string, unknown>>(
+        `SELECT fmv_per_share FROM espp_offering_period WHERE household_id = ? AND offering_date = ?`,
+        householdId, batchRaw!.offering_date as string
+      );
 
-      const proceeds       = parseFloat((row.sharesSold * row.salePricePerShare).toFixed(2));
-      const ordinaryIncome = parseFloat((discount * row.sharesSold).toFixed(2));
-      const capGainLoss    = parseFloat(((row.salePricePerShare - fmv) * row.sharesSold).toFixed(2));
+      const batch = {
+        offeringDate:      batchRaw!.offering_date as string,
+        purchaseDate:      batchRaw!.purchase_date as string,
+        fmvPerShare:       parseFloat(String(batchRaw!.fmv_per_share)),
+        costBasisPerShare: parseFloat(String(batchRaw!.cost_basis_per_share)),
+        discountPerShare:  parseFloat(String(batchRaw!.discount_per_share)),
+      };
+      const offeringFmv = offeringPeriod?.fmv_per_share != null ? parseFloat(String(offeringPeriod.fmv_per_share)) : null;
+
+      const proceeds = parseFloat((row.sharesSold * row.salePricePerShare).toFixed(2));
+      const tax = computeSaleTax(batch, offeringFmv, saleDate, row.sharesSold, row.salePricePerShare);
 
       const id  = randomUUID();
       const now = new Date().toISOString();
@@ -432,23 +539,92 @@ export async function recordSales(
       const { text, values } = sqlBind(
         `INSERT INTO espp_sale
            (id, batch_id, household_id, sale_date, shares_sold, sale_price_per_share,
-            proceeds, ordinary_income, cap_gain_loss, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            proceeds, disposition_type, ordinary_income, cap_gain_loss, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, row.batchId, householdId, saleDate,
          row.sharesSold, row.salePricePerShare,
-         proceeds, ordinaryIncome, capGainLoss, now]
+         proceeds, tax.dispositionType, tax.ordinaryIncome, tax.capGainLoss, now]
       );
       await tx.unsafe(text, values as never[]);
 
       inserted.push({
         id, batchId: row.batchId, householdId, saleDate,
         sharesSold: row.sharesSold, salePricePerShare: row.salePricePerShare,
-        proceeds, ordinaryIncome, capGainLoss, createdAt: now,
+        proceeds, dispositionType: tax.dispositionType,
+        ordinaryIncome: tax.ordinaryIncome, capGainLoss: tax.capGainLoss, createdAt: now,
       });
     }
   });
 
   return { ok: true, data: inserted };
+}
+
+export async function listOfferingPeriods(householdId: string): Promise<EsppOfferingPeriod[]> {
+  const rows = await qAll<Record<string, unknown>>(
+    `SELECT * FROM espp_offering_period WHERE household_id = ? ORDER BY offering_date DESC`,
+    householdId
+  );
+  return rows.map(mapOfferingPeriod);
+}
+
+export async function upsertOfferingPeriodFmv(
+  householdId: string,
+  offeringDate: string,
+  fmvPerShare: number
+): Promise<{ ok: true; data: EsppOfferingPeriod } | { ok: false; code: string; message: string }> {
+  const now = new Date().toISOString();
+  const existing = await qGet<Record<string, unknown>>(
+    `SELECT id FROM espp_offering_period WHERE household_id = ? AND offering_date = ?`,
+    householdId, offeringDate
+  );
+
+  if (existing) {
+    await qExec(
+      `UPDATE espp_offering_period SET fmv_per_share = ?, updated_at = ? WHERE id = ?`,
+      fmvPerShare, now, existing.id as string
+    );
+  } else {
+    await qExec(
+      `INSERT INTO espp_offering_period (id, household_id, offering_date, fmv_per_share, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      randomUUID(), householdId, offeringDate, fmvPerShare, now, now
+    );
+  }
+
+  // Recompute any qualifying-disposition sales for batches in this offering period that
+  // were left pending (ordinary_income/cap_gain_loss null) because the FMV wasn't known yet.
+  const pendingSales = await qAll<Record<string, unknown>>(
+    `SELECT s.*, b.offering_date, b.purchase_date, b.fmv_per_share AS batch_fmv,
+            b.cost_basis_per_share, b.discount_per_share
+     FROM espp_sale s
+     JOIN espp_batch b ON b.id = s.batch_id
+     WHERE b.household_id = ? AND b.offering_date = ? AND s.disposition_type = 'qualifying' AND s.ordinary_income IS NULL`,
+    householdId, offeringDate
+  );
+
+  for (const s of pendingSales) {
+    const batch = {
+      offeringDate:      s.offering_date as string,
+      purchaseDate:      s.purchase_date as string,
+      fmvPerShare:       parseFloat(String(s.batch_fmv)),
+      costBasisPerShare: parseFloat(String(s.cost_basis_per_share)),
+      discountPerShare:  parseFloat(String(s.discount_per_share)),
+    };
+    const tax = computeSaleTax(
+      batch, fmvPerShare, s.sale_date as string,
+      parseFloat(String(s.shares_sold)), parseFloat(String(s.sale_price_per_share))
+    );
+    await qExec(
+      `UPDATE espp_sale SET ordinary_income = ?, cap_gain_loss = ? WHERE id = ?`,
+      tax.ordinaryIncome, tax.capGainLoss, s.id as string
+    );
+  }
+
+  const saved = await qGet<Record<string, unknown>>(
+    `SELECT * FROM espp_offering_period WHERE household_id = ? AND offering_date = ?`,
+    householdId, offeringDate
+  );
+  return { ok: true, data: mapOfferingPeriod(saved!) };
 }
 
 export async function deleteSale(

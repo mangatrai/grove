@@ -473,15 +473,16 @@ data.
 | `budget_category` | Monthly budget target per category | `month` CHECK regex `YYYY-MM`, `amount` CHECK `>= 0` | `UNIQUE(household_id, category_id, month)` |
 | `recurring_merchant_override` | User confirm/dismiss verdict for detected recurring merchants | `verdict` CHECK, `amount_tolerance_pct` | `UNIQUE(household_id, merchant_key)` |
 
-### Payslip & ESPP (5)
+### Payslip & ESPP (6)
 
 | Table | Purpose | Key columns | Notable constraints/indexes |
 |---|---|---|---|
 | `payslip_snapshot` | One row per parsed payslip PDF | ~15 current/YTD NUMERIC pay figures, `canonical_extract_json` (validated LLM extract) | `UNIQUE(household_id, file_checksum)` dedup |
 | `payslip_line_item` | Normalized line items exploded from a snapshot | `section` CHECK (7 values), `sort_order` (preserves PDF row order) | FK `ON DELETE CASCADE` from `payslip_snapshot` |
 | `payslip_deposit_match` | Confirmed payslip ↔ bank-deposit link | join table, 1 payslip : N deposits | `UNIQUE(payslip_snapshot_id, transaction_canonical_id)`, both FKs `ON DELETE CASCADE` |
-| `espp_batch` | One row per ESPP purchase date | `cost_basis_per_share` (85% of FMV — plan design constant), `payslip_id` FK `SET NULL` | `UNIQUE(household_id, purchase_date)` |
-| `espp_sale` | One row per lot disposal (time series) | `cap_gain_loss` computed at write time from batch cost basis | FK `ON DELETE CASCADE` from `espp_batch` |
+| `espp_batch` | One row per ESPP purchase date | `cost_basis_per_share` (85% of FMV — plan design constant), `payslip_id` FK `SET NULL`, `offering_date` (derived: nearest Jan 1/Jul 1 ≤ purchase_date) | `UNIQUE(household_id, purchase_date)` |
+| `espp_sale` | One row per lot disposal (time series) | `disposition_type` CHECK (`qualifying`/`disqualifying`); `ordinary_income`/`cap_gain_loss` nullable — null when `disposition_type='qualifying'` and the offering period's FMV isn't entered yet | FK `ON DELETE CASCADE` from `espp_batch` |
+| `espp_offering_period` | One row per household + semiannual ESPP offering start date | `fmv_per_share` nullable — manually entered from IRS Form 3922 Box 3 (grant-date FMV), needed only for the qualifying-disposition ordinary-income formula | `UNIQUE(household_id, offering_date)` |
 
 ### Property & Tax Protest (5)
 

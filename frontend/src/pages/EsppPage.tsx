@@ -54,13 +54,15 @@ type EsppSale = {
   sharesSold: number;
   salePricePerShare: number;
   proceeds: number;
-  ordinaryIncome: number;
-  capGainLoss: number;
+  dispositionType: "qualifying" | "disqualifying" | null;
+  ordinaryIncome: number | null;
+  capGainLoss: number | null;
 };
 
 type EsppBatch = {
   id: string;
   purchaseDate: string;
+  offeringDate: string;
   sharesGranted: number;
   fmvPerShare: number;
   costBasisPerShare: number;
@@ -83,7 +85,16 @@ type EsppSummary = {
   realizedGainLoss: number;
   ordinaryIncomeYtd: number;
   capGainLossYtd: number;
+  pendingOfferingFmvCount: number;
 };
+
+type EsppOfferingPeriod = {
+  id: string;
+  offeringDate: string;
+  fmvPerShare: number | null;
+};
+
+type EsppOfferingPeriodsResponse = { offeringPeriods: EsppOfferingPeriod[] };
 
 type StockQuote = {
   symbol: string;
@@ -124,7 +135,21 @@ function emptySummary(year: number): EsppSummary {
     realizedGainLoss: 0,
     ordinaryIncomeYtd: 0,
     capGainLossYtd: 0,
+    pendingOfferingFmvCount: 0,
   };
+}
+
+function batchDispositionSummary(batch: EsppBatch): { label: string; pending: boolean } {
+  if (batch.sales.length === 0) {
+    return { label: "—", pending: false };
+  }
+  const types = new Set(batch.sales.map((s) => s.dispositionType).filter(Boolean));
+  const pending = batch.sales.some((s) => s.dispositionType === "qualifying" && s.ordinaryIncome == null);
+  if (types.size > 1) {
+    return { label: "Mixed", pending };
+  }
+  const only = [...types][0];
+  return { label: only === "qualifying" ? "Qualifying" : only === "disqualifying" ? "Disqualifying" : "—", pending };
 }
 
 function statusBadgeStyle(status: EsppBatch["status"]): { color: string; background: string } {
@@ -268,28 +293,52 @@ function SaleHistoryTable({ sales }: { sales: EsppSale[] }) {
           <Table.Th>Shares Sold</Table.Th>
           <Table.Th>Sale Price / sh</Table.Th>
           <Table.Th>Proceeds</Table.Th>
+          <Table.Th>Disposition</Table.Th>
           <Table.Th>Ordinary Income</Table.Th>
           <Table.Th>Cap Gain / Loss</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {sales.map((sale) => (
-          <Table.Tr key={sale.id}>
-            <Table.Td>{sale.saleDate}</Table.Td>
-            <Table.Td style={mono}>{formatShares(sale.sharesSold)}</Table.Td>
-            <Table.Td style={mono}>${formatUsd(sale.salePricePerShare)}</Table.Td>
-            <Table.Td style={mono}>${formatUsd(sale.proceeds)}</Table.Td>
-            <Table.Td style={{ ...mono, color: T.gold }}>${formatUsd(sale.ordinaryIncome)}</Table.Td>
-            <Table.Td
-              style={{
-                ...mono,
-                color: sale.capGainLoss >= 0 ? T.forest : T.terracotta,
-              }}
-            >
-              {formatSignedUsd(sale.capGainLoss)}
-            </Table.Td>
-          </Table.Tr>
-        ))}
+        {sales.map((sale) => {
+          const pending = sale.dispositionType === "qualifying" && sale.ordinaryIncome == null;
+          return (
+            <Table.Tr key={sale.id}>
+              <Table.Td>{sale.saleDate}</Table.Td>
+              <Table.Td style={mono}>{formatShares(sale.sharesSold)}</Table.Td>
+              <Table.Td style={mono}>${formatUsd(sale.salePricePerShare)}</Table.Td>
+              <Table.Td style={mono}>${formatUsd(sale.proceeds)}</Table.Td>
+              <Table.Td>
+                {sale.dispositionType ? (
+                  <Badge
+                    variant="light"
+                    color={sale.dispositionType === "qualifying" ? "teal" : "gray"}
+                    size="sm"
+                  >
+                    {sale.dispositionType === "qualifying" ? "Qualifying" : "Disqualifying"}
+                  </Badge>
+                ) : (
+                  "—"
+                )}
+                {pending ? (
+                  <Tooltip label="Offering-period FMV not entered yet — enter it in Offering Periods to compute this sale's tax treatment." multiline w={260}>
+                    <IconInfoCircle size={13} color={T.gold} style={{ marginLeft: 4, verticalAlign: "middle", cursor: "help" }} />
+                  </Tooltip>
+                ) : null}
+              </Table.Td>
+              <Table.Td style={{ ...mono, color: T.gold }}>
+                {sale.ordinaryIncome != null ? `$${formatUsd(sale.ordinaryIncome)}` : "Pending"}
+              </Table.Td>
+              <Table.Td
+                style={{
+                  ...mono,
+                  color: sale.capGainLoss == null ? T.textMuted : sale.capGainLoss >= 0 ? T.forest : T.terracotta,
+                }}
+              >
+                {sale.capGainLoss != null ? formatSignedUsd(sale.capGainLoss) : "Pending"}
+              </Table.Td>
+            </Table.Tr>
+          );
+        })}
       </Table.Tbody>
     </Table>
   );
@@ -508,6 +557,117 @@ function ImportModal({
           </Button>
           <Button onClick={() => void handleImport()} loading={submitting} disabled={!canSubmit}>
             Import Files
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function OfferingPeriodRow({
+  period,
+  onSaved,
+}: {
+  period: EsppOfferingPeriod;
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState<number | "">(period.fmvPerShare ?? "");
+  const [saving, setSaving] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  async function save() {
+    if (value === "" || Number(value) <= 0) {
+      setRowError("Enter a positive FMV");
+      return;
+    }
+    setSaving(true);
+    setRowError(null);
+    try {
+      await apiJson(`/espp/offering-periods/${period.offeringDate}`, {
+        method: "PUT",
+        body: JSON.stringify({ fmvPerShare: Number(value) }),
+      });
+      onSaved();
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 80px", gap: 8, alignItems: "start" }}>
+      <div>
+        <Text size="sm" fw={600}>{period.offeringDate}</Text>
+        {rowError ? <Text size="xs" c="red">{rowError}</Text> : null}
+      </div>
+      <NumberInput
+        size="sm"
+        min={0.0001}
+        step={0.01}
+        decimalScale={4}
+        prefix="$"
+        placeholder="From Form 3922 Box 3"
+        value={value}
+        onChange={(v) => setValue(v === "" || v == null ? "" : Number(v))}
+      />
+      <Button size="xs" onClick={() => void save()} loading={saving}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
+function OfferingPeriodsModal({
+  opened,
+  onClose,
+  onSuccess,
+}: {
+  opened: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [periods, setPeriods] = useState<EsppOfferingPeriod[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiJson<EsppOfferingPeriodsResponse>("/espp/offering-periods")
+      .then((res) => setPeriods(res.offeringPeriods ?? []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (opened) {
+      load();
+    }
+  }, [opened, load]);
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Offering Period FMV" size="md">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          The offering (grant) dates below are pulled automatically from the purchase lots
+          you've imported. The FMV at the start of each offering period is only needed to
+          compute tax on shares sold as a <strong>qualifying disposition</strong> (held 2+ years
+          from the offering date and 1+ year from purchase) — find it on IRS Form 3922, Box 3
+          ("Fair market value per share on grant date"), issued by your plan administrator each
+          year.
+        </Text>
+        {loading ? (
+          <Text size="sm" c="dimmed">Loading…</Text>
+        ) : periods.length === 0 ? (
+          <Text size="sm" c="dimmed">No offering periods yet — import an ESPP batch first.</Text>
+        ) : (
+          <Stack gap="sm">
+            {periods.map((p) => (
+              <OfferingPeriodRow key={p.offeringDate} period={p} onSaved={() => { load(); onSuccess(); }} />
+            ))}
+          </Stack>
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Close
           </Button>
         </Group>
       </Stack>
@@ -774,6 +934,94 @@ function RecordSaleModal({
   );
 }
 
+function TaxReportPanel({ currentYear, earliestYear }: { currentYear: number; earliestYear: number }) {
+  const yearOptions = useMemo(() => {
+    const opts: string[] = [];
+    for (let y = currentYear; y >= earliestYear; y--) {
+      opts.push(String(y));
+    }
+    return opts;
+  }, [currentYear, earliestYear]);
+
+  const [reportYear, setReportYear] = useState<string>(String(currentYear));
+  const [downloading, setDownloading] = useState<"csv" | "pdf" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const download = useCallback(
+    async (format: "csv" | "pdf") => {
+      setDownloading(format);
+      setError(null);
+      try {
+        const res = await apiFetch(`/espp/tax-report?year=${reportYear}&format=${format}`);
+        if (!res.ok) {
+          throw new Error("Report download failed");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `espp-tax-report-${reportYear}.${format}`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Report download failed");
+      } finally {
+        setDownloading(null);
+      }
+    },
+    [reportYear]
+  );
+
+  return (
+    <Paper
+      p="md"
+      radius="md"
+      style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: T.shadow }}
+    >
+      <Group justify="space-between" align="center" mb="sm" wrap="wrap">
+        <div>
+          <Text fw={600}>Tax Season Report</Text>
+          <Text size="xs" c="dimmed">
+            Form 8949-style detail for every sale realized in the selected calendar year — hand this to your CPA.
+          </Text>
+        </div>
+        <Group gap="sm" wrap="wrap">
+          <Select
+            data={yearOptions}
+            value={reportYear}
+            onChange={(v) => setReportYear(v ?? String(currentYear))}
+            w={100}
+            size="sm"
+          />
+          <Button
+            variant="light"
+            size="sm"
+            onClick={() => void download("csv")}
+            loading={downloading === "csv"}
+          >
+            Download CSV
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void download("pdf")}
+            loading={downloading === "pdf"}
+          >
+            Download PDF
+          </Button>
+        </Group>
+      </Group>
+      {error ? (
+        <Alert variant="light" color="red">
+          {error}
+        </Alert>
+      ) : null}
+    </Paper>
+  );
+}
+
 export function EsppPage() {
   const token = useAuthToken();
   const currentYear = new Date().getFullYear();
@@ -785,6 +1033,7 @@ export function EsppPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [importOpen, setImportOpen] = useState(false);
   const [saleOpen, setSaleOpen] = useState(false);
+  const [offeringOpen, setOfferingOpen] = useState(false);
   const [stockQuote, setStockQuote] = useState<StockQuote | null>(null);
 
   useEffect(() => {
@@ -852,6 +1101,9 @@ export function EsppPage() {
           ) : null}
         </Group>
         <Group gap="sm">
+          <Button variant="default" onClick={() => setOfferingOpen(true)}>
+            Offering Periods
+          </Button>
           <Button variant="light" leftSection={<IconUpload size={16} />} onClick={() => setImportOpen(true)}>
             Import
           </Button>
@@ -864,6 +1116,15 @@ export function EsppPage() {
       {error ? (
         <Alert color="red" variant="light">
           {error}
+        </Alert>
+      ) : null}
+
+      {summaryData.pendingOfferingFmvCount > 0 ? (
+        <Alert variant="light" color="yellow" icon={<IconInfoCircle size={16} />}>
+          {summaryData.pendingOfferingFmvCount} sale{summaryData.pendingOfferingFmvCount === 1 ? "" : "s"} in {year} qualify
+          for long-term (qualifying-disposition) tax treatment but are missing that offering period's FMV. Open{" "}
+          <Button variant="subtle" size="compact-sm" onClick={() => setOfferingOpen(true)}>Offering Periods</Button> to
+          enter it (from Form 3922, Box 3) so the numbers and tax report are accurate.
         </Alert>
       ) : null}
 
@@ -955,6 +1216,7 @@ export function EsppPage() {
                   <Table.Th>Outstanding</Table.Th>
                   <Table.Th>Sold</Table.Th>
                   <Table.Th>Held</Table.Th>
+                  <Table.Th>Disposition</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th w={28} />
                 </Table.Tr>
@@ -964,6 +1226,7 @@ export function EsppPage() {
                   const expanded = expandedIds.has(batch.id);
                   const outstanding = batch.sharesGranted - batch.sharesTransferred;
                   const badge = statusBadgeStyle(batch.status);
+                  const disposition = batchDispositionSummary(batch);
 
                   return (
                     <Fragment key={batch.id}>
@@ -982,6 +1245,16 @@ export function EsppPage() {
                         <Table.Td style={mono}>{formatShares(outstanding)}</Table.Td>
                         <Table.Td style={mono}>{formatShares(batch.sharesSold)}</Table.Td>
                         <Table.Td style={mono}>{formatShares(batch.held)}</Table.Td>
+                        <Table.Td>
+                          <Group gap={4} wrap="nowrap">
+                            <Text size="xs">{disposition.label}</Text>
+                            {disposition.pending ? (
+                              <Tooltip label="Pending — enter offering-period FMV" multiline w={220}>
+                                <IconInfoCircle size={13} color={T.gold} style={{ cursor: "help" }} />
+                              </Tooltip>
+                            ) : null}
+                          </Group>
+                        </Table.Td>
                         <Table.Td>
                           <span
                             style={{
@@ -1007,7 +1280,7 @@ export function EsppPage() {
                       </Table.Tr>
                       {expanded ? (
                         <Table.Tr>
-                          <Table.Td colSpan={11} style={{ background: T.accentSub, padding: "12px 16px" }}>
+                          <Table.Td colSpan={12} style={{ background: T.accentSub, padding: "12px 16px" }}>
                             <Text size="sm" fw={600} mb="xs">
                               Sale History · {batch.purchaseDate} batch · {formatShares(batch.sharesSold)} of{" "}
                               {formatShares(batch.sharesGranted)} shares disposed
@@ -1025,11 +1298,18 @@ export function EsppPage() {
         )}
       </Paper>
 
+      <TaxReportPanel currentYear={currentYear} earliestYear={2025} />
+
       <ImportModal opened={importOpen} onClose={() => setImportOpen(false)} onSuccess={loadData} />
       <RecordSaleModal
         opened={saleOpen}
         onClose={() => setSaleOpen(false)}
         batches={batches}
+        onSuccess={loadData}
+      />
+      <OfferingPeriodsModal
+        opened={offeringOpen}
+        onClose={() => setOfferingOpen(false)}
         onSuccess={loadData}
       />
     </Stack>

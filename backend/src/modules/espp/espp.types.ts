@@ -2,6 +2,7 @@ export type EsppBatchRow = {
   id: string;
   householdId: string;
   purchaseDate: string;
+  offeringDate: string;
   sharesGranted: number;
   fmvPerShare: number | null;
   costBasisPerShare: number;
@@ -23,8 +24,9 @@ export type EsppSaleRow = {
   sharesSold: number;
   salePricePerShare: number;
   proceeds: number;
-  ordinaryIncome: number;
-  capGainLoss: number;
+  dispositionType: 'qualifying' | 'disqualifying' | null;
+  ordinaryIncome: number | null;
+  capGainLoss: number | null;
   createdAt: string;
 };
 
@@ -46,10 +48,51 @@ export type EsppYearSummary = {
   realizedGainLoss: number;
   ordinaryIncomeYtd: number;
   capGainLossYtd: number;
+  pendingOfferingFmvCount: number;
 };
 
 export type SaleInput = {
   batchId: string;
   sharesSold: number;
   salePricePerShare: number;
+};
+
+export type EsppOfferingPeriod = {
+  id: string;
+  householdId: string;
+  offeringDate: string;
+  fmvPerShare: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EsppTaxReportRow = {
+  batchId: string;
+  saleId: string;
+  description: string;
+  offeringDate: string;
+  offeringFmv: number | null;
+  dateAcquired: string;
+  dateSold: string;
+  term: 'Short-term' | 'Long-term';
+  dispositionType: 'qualifying' | 'disqualifying';
+  sharesSold: number;
+  proceeds: number;
+  brokerBasis: number;
+  ordinaryIncome: number | null;
+  adjustedBasis: number | null;
+  capGainLoss: number | null;
+  w2Status: string;
+  needsReview: boolean;
+};
+
+export type EsppTaxReportSummary = {
+  year: number;
+  totalProceeds: number;
+  totalBrokerBasis: number;
+  totalOrdinaryIncomeInW2: number;
+  totalOrdinaryIncomeSelfReport: number;
+  totalShortTermGainLoss: number;
+  totalLongTermGainLoss: number;
+  needsReviewCount: number;
 };

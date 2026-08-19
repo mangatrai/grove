@@ -42,6 +42,8 @@ export default defineConfig({
       "/espp/summary": api,
       "/espp/import": api,
       "/espp/sales": api,
+      "/espp/offering-periods": api,
+      "/espp/tax-report": api,
       "/api": api
     }
   }

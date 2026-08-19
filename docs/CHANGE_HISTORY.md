@@ -14,6 +14,42 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #285: ESPP qualifying/disqualifying disposition tracking + CPA tax report (2026-08-19)
+
+**What changed:** Added `espp_offering_period` (one row per household + semiannual offering
+start date — Jan 1 / Jul 1 — with a manually-entered FMV sourced from IRS Form 3922 Box 3),
+`offering_date` on `espp_batch` (derived from `purchase_date`), and `disposition_type` on
+`espp_sale`. `recordSales()` now classifies every sale qualifying vs. disqualifying (IRC
+§423(c): 2+ years from offering date AND 1+ year from purchase date) and applies the correct
+ordinary-income formula for each — disqualifying unchanged; qualifying is
+`min(actual gain, discount% × offering-date FMV)`, with the remainder as capital gain.
+Backfilled all existing sales with the same classification (safe: no historical sale actually
+needed the qualifying formula, since offering-FMV tracking didn't exist yet). Added
+`GET/PUT /espp/offering-periods` and `GET /espp/tax-report?year=YYYY&format=csv|pdf` (Form
+8949-style detail per sale, scoped by **sale year** not purchase year, flags any lot still
+missing its offering-period FMV as "needs review" rather than guessing). Frontend: Disposition
+column + pending badge in the batch table, an "Offering Periods" input modal, and a Tax Season
+Report panel (year select + CSV/PDF download) on `EsppPage`.
+
+**Why:** User wants a year-end report to hand their CPA. Investigation surfaced that the app's
+existing `ordinary_income` formula (`(FMV at purchase − purchase price) × shares`) was being
+applied to *every* sale regardless of holding period — correct only for disqualifying
+dispositions. Verified the correct qualifying-disposition formula against three independent
+sources: IBM's 2014 ESPP Prospectus, an internal IBM Slack thread, and Computershare's 2025
+Tax Form Reference Guide — all agree ordinary income for a qualifying disposition is capped by
+the discount off the *offering-date* FMV, a number the app never captured. Chose manual entry
+over an auto-fetch from a public stock-price API: only two offering dates exist per year, and
+using an unverified third-party price in a document meant for tax filing is the wrong
+trade-off versus a couple of manual entries sourced from the household's own Form 3922.
+
+**Files:** `backend/db/migrations/0094_espp_qualifying_disposition.sql`,
+`backend/src/modules/espp/espp.service.ts`, `backend/src/modules/espp/espp.types.ts`,
+`backend/src/modules/espp/espp-tax-report.service.ts` (new),
+`backend/src/modules/espp/espp.routes.ts`, `backend/src/modules/export/export-registry.ts`,
+`frontend/src/pages/EsppPage.tsx`, `backend/tests/espp.test.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/285
+
 ## FIX — #281: Staff creation schedule write not atomic with staff record (2026-08-19)
 
 **What changed:** `createStaffMember()` moved the `household_help_availability` schedule

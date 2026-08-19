@@ -4,7 +4,7 @@ import YahooFinance from "yahoo-finance2";
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 
-const SYMBOL = "IBM";
+export const SYMBOL = "IBM";
 
 export type StockQuote = {
   symbol: string;

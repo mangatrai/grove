@@ -7,12 +7,15 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { log } from "../../logger.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { getStockQuote } from "./espp-stock.service.js";
+import { getTaxReportData, renderTaxReportPdf, toCsv } from "./espp-tax-report.service.js";
 import {
   deleteSale,
   getYearSummary,
   importBatch,
   listBatchesWithSales,
+  listOfferingPeriods,
   recordSales,
+  upsertOfferingPeriodFmv,
 } from "./espp.service.js";
 
 export const esppRouter = Router();
@@ -33,6 +36,19 @@ const salesBodySchema = z.object({
     sharesSold:        z.number().positive(),
     salePricePerShare: z.number().positive(),
   })).min(1),
+});
+
+const offeringDateParamSchema = z.object({
+  offeringDate: z.string().regex(/^\d{4}-(01|07)-01$/, 'offeringDate must be YYYY-01-01 or YYYY-07-01'),
+});
+
+const offeringFmvBodySchema = z.object({
+  fmvPerShare: z.number().positive(),
+});
+
+const taxReportQuerySchema = z.object({
+  year: z.coerce.number().int().min(2020).max(2099),
+  format: z.enum(['csv', 'pdf']),
 });
 
 esppRouter.use(requireAuth);
@@ -135,4 +151,54 @@ esppRouter.delete('/sales/:saleId', async (req: AuthenticatedRequest, res) => {
     return;
   }
   res.status(204).send();
+});
+
+/** GET /espp/offering-periods */
+esppRouter.get('/offering-periods', async (req: AuthenticatedRequest, res) => {
+  const { householdId } = req.authUser!;
+  const periods = await listOfferingPeriods(householdId);
+  res.json({ offeringPeriods: periods });
+});
+
+/** PUT /espp/offering-periods/:offeringDate — body: { fmvPerShare }. FMV at start of the
+ *  offering period, from IRS Form 3922 Box 3. Recomputes any pending qualifying sales. */
+esppRouter.put('/offering-periods/:offeringDate', async (req: AuthenticatedRequest, res) => {
+  const paramsParsed = offeringDateParamSchema.safeParse(req.params);
+  if (!paramsParsed.success) {
+    res.status(400).json({ message: 'Invalid offeringDate', errors: paramsParsed.error.issues });
+    return;
+  }
+  const bodyParsed = offeringFmvBodySchema.safeParse(req.body ?? {});
+  if (!bodyParsed.success) {
+    res.status(400).json({ message: 'Invalid payload', errors: bodyParsed.error.issues });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const result = await upsertOfferingPeriodFmv(householdId, paramsParsed.data.offeringDate, bodyParsed.data.fmvPerShare);
+  if (!result.ok) {
+    res.status(422).json({ message: result.message, code: result.code });
+    return;
+  }
+  res.json({ offeringPeriod: result.data });
+});
+
+/** GET /espp/tax-report?year=YYYY&format=csv|pdf */
+esppRouter.get('/tax-report', async (req: AuthenticatedRequest, res) => {
+  const parsed = taxReportQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ message: 'year and format (csv|pdf) query params required', errors: parsed.error.issues });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const { year, format } = parsed.data;
+  const { rows, summary } = await getTaxReportData(householdId, year);
+
+  if (format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="espp-tax-report-${year}.csv"`);
+    res.send(toCsv(rows, summary));
+    return;
+  }
+
+  renderTaxReportPdf(res, year, rows, summary);
 });

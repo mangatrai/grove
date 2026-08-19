@@ -1818,6 +1818,86 @@ paths:
           description: Deleted
         "404":
           description: Sale not found
+  /api/espp/offering-periods:
+    get:
+      tags: [espp]
+      summary: List ESPP offering periods (Jan 1 / Jul 1 start dates) with FMV if entered
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Offering periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  offeringPeriods:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EsppOfferingPeriod"
+  /api/espp/offering-periods/{offeringDate}:
+    put:
+      tags: [espp]
+      summary: Set FMV for an ESPP offering period (IRS Form 3922 Box 3)
+      description: |
+        Recomputes ordinaryIncome/capGainLoss for any existing qualifying-disposition sales
+        in this offering period that were previously null pending this value.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: offeringDate
+          in: path
+          required: true
+          description: Must match YYYY-01-01 or YYYY-07-01
+          schema: { type: string, format: date }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fmvPerShare]
+              properties:
+                fmvPerShare: { type: number, exclusiveMinimum: 0 }
+      responses:
+        "200":
+          description: Offering period FMV set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  offeringPeriod:
+                    $ref: "#/components/schemas/EsppOfferingPeriod"
+        "400":
+          description: Invalid offeringDate or body
+  /api/espp/tax-report:
+    get:
+      tags: [espp]
+      summary: Year-end ESPP tax report (CSV or PDF) for CPA filing
+      description: |
+        One row per sale realized in the given calendar year (scoped by saleDate, not
+        purchaseDate). CSV includes Form 8949-style columns with IRS box/form citations;
+        PDF is a formatted summary + detail table via pdfkit.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2020, maximum: 2099 }
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [csv, pdf] }
+      responses:
+        "200":
+          description: File download
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400":
+          description: Missing or invalid year/format
   /gdrive/oauth/callback:
     get:
       tags: [gdrive]
@@ -5698,6 +5778,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         purchaseDate: { type: string, format: date }
+        offeringDate: { type: string, format: date }
         sharesGranted: { type: number }
         fmvPerShare: { type: number }
         costBasisPerShare: { type: number }
@@ -5719,8 +5800,9 @@ components:
               sharesSold: { type: number }
               salePricePerShare: { type: number }
               proceeds: { type: number }
-              ordinaryIncome: { type: number }
-              capGainLoss: { type: number }
+              dispositionType: { type: string, enum: [qualifying, disqualifying] }
+              ordinaryIncome: { type: number, nullable: true }
+              capGainLoss: { type: number, nullable: true }
     EsppYearSummary:
       type: object
       properties:
@@ -5734,6 +5816,13 @@ components:
         realizedGainLoss: { type: number }
         ordinaryIncomeYtd: { type: number }
         capGainLossYtd: { type: number }
+        pendingOfferingFmvCount: { type: integer }
+    EsppOfferingPeriod:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        offeringDate: { type: string, format: date }
+        fmvPerShare: { type: number, nullable: true }
     ExportBundleManifest:
       type: object
       description: Manifest JSON embedded in the exported .hfb backup payload.

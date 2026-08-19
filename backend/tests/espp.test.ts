@@ -9,10 +9,13 @@ vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({
 import { buildApp } from "../src/app.js";
 import { parseEsppCsv, parseEsppPdf } from "../src/modules/espp/espp-parse.service.js";
 import {
+  computeOfferingDate,
   deleteSale,
   getYearSummary,
   importBatch,
+  isQualifyingDisposition,
   recordSales,
+  upsertOfferingPeriodFmv,
 } from "../src/modules/espp/espp.service.js";
 import { sqlStmt } from "./pg-stmt.js";
 
@@ -353,11 +356,11 @@ describe("recordSales + deleteSale", () => {
     const id = 'test-espp-batch-aug2026';
     await sqlStmt(
       `INSERT INTO espp_batch
-         (id, household_id, purchase_date, shares_granted, fmv_per_share, cost_basis_per_share,
+         (id, household_id, purchase_date, offering_date, shares_granted, fmv_per_share, cost_basis_per_share,
           discount_per_share, shares_transferred, created_at, updated_at)
-       VALUES (?, ?, ?, 20, 224, 190, 34, 20, NOW(), NOW())
+       VALUES (?, ?, ?, ?, 20, 224, 190, 34, 20, NOW(), NOW())
        ON CONFLICT (household_id, purchase_date) DO UPDATE SET updated_at = NOW()`
-    ).run(id, HOUSEHOLD_ID, BATCH_DATE);
+    ).run(id, HOUSEHOLD_ID, BATCH_DATE, computeOfferingDate(BATCH_DATE));
     seedBatchId = id;
   });
 
@@ -413,6 +416,107 @@ describe("getYearSummary", () => {
   });
 });
 
+describe("computeOfferingDate", () => {
+  it("maps purchase dates in Jan-Jun to the Jan 1 offering period", () => {
+    expect(computeOfferingDate('2026-01-01')).toBe('2026-01-01');
+    expect(computeOfferingDate('2026-06-30')).toBe('2026-01-01');
+  });
+
+  it("maps purchase dates in Jul-Dec to the Jul 1 offering period", () => {
+    expect(computeOfferingDate('2026-07-01')).toBe('2026-07-01');
+    expect(computeOfferingDate('2026-12-31')).toBe('2026-07-01');
+  });
+});
+
+describe("isQualifyingDisposition", () => {
+  it("is disqualifying when sold before 1 year from purchase, even if 2y-from-offering has passed", () => {
+    // Artificially large offering-to-purchase gap isolates the purchase-date threshold —
+    // real IBM offering periods are only 6 months, but the function must handle this generically.
+    expect(isQualifyingDisposition('2020-01-01', '2024-06-15', '2025-06-14')).toBe(false); // 1 day short of purchase+1y
+    expect(isQualifyingDisposition('2020-01-01', '2024-06-15', '2025-06-15')).toBe(true);
+  });
+
+  it("is disqualifying when sold before 2 years from offering, even if 1y from purchase has passed", () => {
+    // offering Jul 1 2024 (6-month offering, purchase near the end) — 1y from purchase passes
+    // well before 2y from offering
+    expect(isQualifyingDisposition('2024-07-01', '2024-12-15', '2025-12-16')).toBe(false);
+  });
+
+  it("is qualifying only once the offering-date threshold has passed (purchase threshold already met)", () => {
+    expect(isQualifyingDisposition('2023-01-01', '2023-01-02', '2024-12-31')).toBe(false); // 1 day short of offering+2y
+    expect(isQualifyingDisposition('2023-01-01', '2023-01-02', '2025-01-01')).toBe(true);
+  });
+});
+
+describe("recordSales — qualifying disposition", () => {
+  // Golden example from the IBM internal Slack thread / Computershare 2025 Tax Form
+  // Reference Guide: FMV at purchase $8, price paid $6.80 (15% discount), offering-date
+  // FMV $10, sold at $20 → ordinary income = min(actual gain, 15% x $10) = $1.50/share,
+  // capital gain = $11.70/share.
+  const PURCHASE_DATE = '2023-01-15';
+  const OFFERING_DATE = '2023-01-01'; // computeOfferingDate('2023-01-15')
+  const SALE_DATE = '2026-08-15';     // > 2y from offering, > 1y from purchase
+  let batchId = '';
+
+  beforeAll(async () => {
+    batchId = 'test-espp-batch-qualifying-2023';
+    await sqlStmt(
+      `INSERT INTO espp_batch
+         (id, household_id, purchase_date, offering_date, shares_granted, fmv_per_share, cost_basis_per_share,
+          discount_per_share, shares_transferred, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 3, 8.00, 6.80, 1.20, 3, NOW(), NOW())
+       ON CONFLICT (household_id, purchase_date) DO UPDATE SET updated_at = NOW()`
+    ).run(batchId, HOUSEHOLD_ID, PURCHASE_DATE, OFFERING_DATE);
+  });
+
+  afterAll(async () => {
+    await sqlStmt(`DELETE FROM espp_offering_period WHERE household_id = ? AND offering_date = ?`)
+      .run(HOUSEHOLD_ID, OFFERING_DATE);
+    await cleanupBatch(PURCHASE_DATE);
+  });
+
+  it("leaves ordinary income/cap gain pending when offering FMV is unknown", async () => {
+    const result = await recordSales(HOUSEHOLD_ID, SALE_DATE, [
+      { batchId, sharesSold: 1, salePricePerShare: 20 },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const sale = result.data[0]!;
+    expect(sale.dispositionType).toBe('qualifying');
+    expect(sale.ordinaryIncome).toBeNull();
+    expect(sale.capGainLoss).toBeNull();
+
+    await sqlStmt(`DELETE FROM espp_sale WHERE id = ?`).run(sale.id);
+  });
+
+  it("computes the correct lesser-of formula once offering FMV is entered, and recomputes prior pending sales", async () => {
+    const pending = await recordSales(HOUSEHOLD_ID, SALE_DATE, [
+      { batchId, sharesSold: 1, salePricePerShare: 20 },
+    ]);
+    expect(pending.ok).toBe(true);
+    if (!pending.ok) return;
+    expect(pending.data[0]!.ordinaryIncome).toBeNull();
+
+    const upsert = await upsertOfferingPeriodFmv(HOUSEHOLD_ID, OFFERING_DATE, 10.00);
+    expect(upsert.ok).toBe(true);
+
+    const resolved = await sqlStmt(
+      `SELECT ordinary_income, cap_gain_loss FROM espp_sale WHERE id = ?`
+    ).get<{ ordinary_income: string; cap_gain_loss: string }>(pending.data[0]!.id);
+    expect(Number(resolved!.ordinary_income)).toBeCloseTo(1.50, 2);
+    expect(Number(resolved!.cap_gain_loss)).toBeCloseTo(11.70, 2);
+
+    // New sales after the FMV is known should compute directly too
+    const direct = await recordSales(HOUSEHOLD_ID, SALE_DATE, [
+      { batchId, sharesSold: 1, salePricePerShare: 20 },
+    ]);
+    expect(direct.ok).toBe(true);
+    if (!direct.ok) return;
+    expect(direct.data[0]!.ordinaryIncome).toBeCloseTo(1.50, 2);
+    expect(direct.data[0]!.capGainLoss).toBeCloseTo(11.70, 2);
+  });
+});
+
 // ─── API route smoke tests ────────────────────────────────────────────────────
 
 describe("GET /espp/batches + /espp/summary", () => {
@@ -439,5 +543,67 @@ describe("GET /espp/batches + /espp/summary", () => {
   it("returns 401 without auth", async () => {
     const res = await request(app).get("/espp/batches?year=2026");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET/PUT /espp/offering-periods", () => {
+  it("lists offering periods for the household", async () => {
+    const token = await login();
+    const res = await request(app).get("/espp/offering-periods").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("offeringPeriods");
+    expect(Array.isArray(res.body.offeringPeriods)).toBe(true);
+  });
+
+  it("rejects an invalid offeringDate", async () => {
+    const token = await login();
+    const res = await request(app)
+      .put("/espp/offering-periods/2026-03-01")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ fmvPerShare: 200 });
+    expect(res.status).toBe(400);
+  });
+
+  it("upserts a valid offering period FMV", async () => {
+    const token = await login();
+    const res = await request(app)
+      .put("/espp/offering-periods/2026-07-01")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ fmvPerShare: 205.5 });
+    expect(res.status).toBe(200);
+    expect(res.body.offeringPeriod.fmvPerShare).toBeCloseTo(205.5, 2);
+  });
+});
+
+describe("GET /espp/tax-report", () => {
+  it("returns 400 without required query params", async () => {
+    const token = await login();
+    const res = await request(app).get("/espp/tax-report?year=2026").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns CSV with expected content type", async () => {
+    const token = await login();
+    const res = await request(app)
+      .get("/espp/tax-report?year=2026&format=csv")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/csv");
+    expect(res.text).toContain("Description");
+  });
+
+  it("returns PDF with expected content type", async () => {
+    const token = await login();
+    const res = await request(app)
+      .get("/espp/tax-report?year=2026&format=pdf")
+      .set("Authorization", `Bearer ${token}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => callback(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/pdf");
   });
 });

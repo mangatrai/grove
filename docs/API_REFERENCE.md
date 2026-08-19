@@ -4030,6 +4030,7 @@ Returns all purchase batches with their sale history for the specified year.
       "id": "uuid",
       "householdId": "uuid",
       "purchaseDate": "2026-04-25",
+      "offeringDate": "2026-01-01",
       "sharesGranted": 6.0,
       "fmvPerShare": 190.00,
       "costBasisPerShare": 160.00,
@@ -4050,6 +4051,7 @@ Returns all purchase batches with their sale history for the specified year.
           "sharesSold": 2.0,
           "salePricePerShare": 200.00,
           "proceeds": 400.00,
+          "dispositionType": "disqualifying",
           "ordinaryIncome": 60.00,
           "capGainLoss": 20.00,
           "createdAt": "2026-06-01T12:00:00Z"
@@ -4062,13 +4064,22 @@ Returns all purchase batches with their sale history for the specified year.
 }
 ```
 
+`offeringDate` is derived from `purchaseDate` (nearest Jan 1/Jul 1 on or before it — IBM ESPP's
+semiannual offering period start, which doubles as the option-grant date for tax purposes).
+`dispositionType` is `"qualifying"` or `"disqualifying"` (IRC §423(c): qualifying requires 2+
+years held from `offeringDate` AND 1+ year from `purchaseDate`). For a qualifying-disposition
+sale, `ordinaryIncome`/`capGainLoss` are `null` until the sale's offering period has an FMV
+entered via `PUT /espp/offering-periods/:offeringDate` — see that endpoint and
+`GET /espp/tax-report` below.
+
 **Errors:** `400` — missing or invalid `year`
 
 ---
 
 ### GET /espp/summary
 
-Returns aggregated year-level statistics for the specified year.
+Returns aggregated year-level statistics for the specified year (batches scoped by **purchase**
+year, matching `GET /espp/batches`).
 
 **Query params:** `year` (integer, required)
 
@@ -4084,9 +4095,13 @@ Returns aggregated year-level statistics for the specified year.
   "saleProceeds": 400.00,
   "realizedGainLoss": 80.00,
   "ordinaryIncomeYtd": 60.00,
-  "capGainLossYtd": 20.00
+  "capGainLossYtd": 20.00,
+  "pendingOfferingFmvCount": 0
 }
 ```
+
+`pendingOfferingFmvCount` — number of qualifying-disposition sales (batches purchased in this
+year) whose `ordinaryIncome`/`capGainLoss` are still `null` pending an offering-period FMV entry.
 
 Returns zero values for all numeric fields if no data exists for the year. **Errors:** `400` — missing or invalid `year`
 
@@ -4139,10 +4154,14 @@ Records one or more lot disposals in a single transaction.
 }
 ```
 
-Computed and stored server-side:
-- `proceeds` = `sharesSold × salePricePerShare`
-- `ordinaryIncome` = `discountPerShare × sharesSold`
-- `capGainLoss` = `(salePricePerShare − fmvPerShare) × sharesSold`
+`proceeds` = `sharesSold × salePricePerShare`. `dispositionType` is classified from
+`offeringDate`/`purchaseDate`/`saleDate` (IRC §423(c)). Computed and stored server-side:
+- **Disqualifying** (sold within 2 years of `offeringDate` or within 1 year of `purchaseDate`):
+  `ordinaryIncome` = `discountPerShare × sharesSold`; `capGainLoss` = `(salePricePerShare − fmvPerShare) × sharesSold`.
+- **Qualifying**: `ordinaryIncome` = `min(max(0, (salePricePerShare − costBasisPerShare) × sharesSold), discountPct × offeringFmv × sharesSold)`;
+  `capGainLoss` = total realized gain − `ordinaryIncome`. If the sale's offering period has no
+  FMV entered yet, both are stored as `null` (the sale is still recorded) until
+  `PUT /espp/offering-periods/:offeringDate` supplies it.
 
 **Response `201`:**
 ```json
@@ -4164,6 +4183,76 @@ Removes a sale record. The parent batch's held/status will reflect the change on
 **Response:** `204 No Content`
 
 **Errors:** `404` — sale not found or not owned by this household
+
+---
+
+### GET /espp/offering-periods
+
+Lists all ESPP offering periods (Jan 1 / Jul 1 start dates) with purchases on record for this
+household, with their FMV if entered.
+
+**Response `200`:**
+```json
+{
+  "offeringPeriods": [
+    { "id": "uuid", "offeringDate": "2026-01-01", "fmvPerShare": 205.50 },
+    { "id": "uuid", "offeringDate": "2023-01-01", "fmvPerShare": null }
+  ]
+}
+```
+
+---
+
+### PUT /espp/offering-periods/:offeringDate
+
+Sets the FMV at the start of an ESPP offering period — sourced from IRS Form 3922, Box 3
+("Fair market value per share on grant date"), issued annually by Computershare. This value is
+only needed to compute ordinary income for **qualifying**-disposition sales (see
+`POST /espp/sales`); it is not required for disqualifying-disposition sales.
+
+Immediately recomputes `ordinaryIncome`/`capGainLoss` for any existing qualifying-disposition
+sales in this offering period that were previously `null` pending this value.
+
+**Path params:** `offeringDate` — must match `YYYY-01-01` or `YYYY-07-01`
+
+**Request body:**
+```json
+{ "fmvPerShare": 205.50 }
+```
+
+**Response `200`:**
+```json
+{ "offeringPeriod": { "id": "uuid", "offeringDate": "2026-01-01", "fmvPerShare": 205.50 } }
+```
+
+**Errors:**
+- `400` — invalid `offeringDate` (not `YYYY-01-01`/`YYYY-07-01`) or invalid body
+
+---
+
+### GET /espp/tax-report
+
+Generates a year-end tax report — one row per sale **realized in the given calendar year**
+(scoped by `saleDate`, not `purchaseDate` — a lot purchased in a prior year and sold this year
+is included). Intended to hand to a CPA alongside Form 1099-B and W-2.
+
+**Query params:** `year` (integer, required), `format` (`csv` | `pdf`, required)
+
+**CSV response** (`Content-Type: text/csv`) — one row per sale with Form 8949-style columns:
+description, date acquired/sold, term (short/long, from the 1-year capital-gain holding
+period), disposition type, shares, proceeds, broker-reported (unadjusted) basis, ordinary
+income, 8949 basis-adjustment code/amount, adjusted basis, capital gain/loss, W-2 status
+(`"Included in your W-2, Box 1"` for disqualifying, `"NOT in your W-2 — self-report..."` for
+qualifying), and a "needs review" flag for any lot whose offering-period FMV isn't entered yet
+— those rows show `PENDING` instead of guessed numbers. A summary block (totals) follows the
+detail rows.
+
+**PDF response** (`Content-Type: application/pdf`) — formatted summary + detail table via
+`pdfkit`, with a callout listing any lots still pending an offering-period FMV entry.
+
+**Response `200`:** file download (`Content-Disposition: attachment`)
+
+**Errors:** `400` — missing/invalid `year` or `format`
 
 ---
 

@@ -323,6 +323,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
       sql: "staff_profile_id IN (SELECT id FROM staff_profile WHERE household_id = staff_expense.household_id AND person_profile_id = ?)",
       params: [profileId]
     })
+  },
+  {
+    tableKey: "espp_offering_period",
+    tableName: "espp_offering_period",
+    restoreOrder: 37,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
   }
 ];
 
