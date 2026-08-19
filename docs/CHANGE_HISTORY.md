@@ -57,6 +57,28 @@ fixed alongside since it's the same root cause.
 
 **GitHub:** https://github.com/mangatrai/grove/issues/282
 
+## CR — #283: Email notifications on timesheet/expense submit and approval (2026-08-19)
+
+**What changed:** Added two mailer templates (`staff-submission.ts`, `staff-approved.ts`) and
+wired them in: `submitPeriod()` / `createExpense()` now email every household `owner`/`admin`
+when a staff member submits a timesheet or expense, linking to the relevant `/staff-admin/*`
+review page; `approvePeriod()` / `approveExpense()` now email the employee
+(`person_profile.email`) when their submission is approved, linking to `/staff`. Sends are
+fire-and-forget (`void`), matching the existing invite-email precedent in
+`createStaffMember()`, and wrapped in try/catch so a notification failure never breaks the
+underlying submit/approve action.
+
+**Why:** User report — no notification (email or in-app) fired on timesheet/expense
+submission or approval; owner/admin had no signal review was needed, and staff had no
+confirmation of approval. Rejection does not send an email yet — out of scope for this pass.
+
+**Files:** `backend/src/modules/staff/timesheet.service.ts`,
+`backend/src/modules/staff/expense.service.ts`,
+`backend/src/modules/mailer/templates/staff-submission.ts` (new),
+`backend/src/modules/mailer/templates/staff-approved.ts` (new).
+
+**GitHub:** https://github.com/mangatrai/grove/issues/283
+
 ## CR: Citi credit card PDF statement parser (2026-08-17)
 
 **What changed:**

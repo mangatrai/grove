@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { qAll, qBegin, qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
+import { log } from "../../logger.js";
 import { listAvailability } from "../family/family-profiles.service.js";
+import { sendMail } from "../mailer/mailer.service.js";
+import { renderStaffSubmissionTemplate } from "../mailer/templates/staff-submission.js";
+import { renderStaffApprovedTemplate } from "../mailer/templates/staff-approved.js";
 import type {
   TimesheetEntry,
   TimesheetEntryInput,
@@ -209,7 +213,37 @@ export async function submitPeriod(
     period.id
   );
   const updated = await getPeriodById(householdId, period.id);
+  void notifyTimesheetSubmitted(householdId, staffProfileId, updated!);
   return { ok: true, period: updated! };
+}
+
+async function notifyTimesheetSubmitted(
+  householdId: string,
+  staffProfileId: string,
+  period: TimesheetPeriod
+): Promise<void> {
+  try {
+    const staff = await qGet<{ full_name: string }>(
+      `SELECT p.full_name FROM staff_profile sp JOIN person_profile p ON p.id = sp.person_profile_id WHERE sp.id = ?`,
+      staffProfileId
+    );
+    const recipients = await qAll<{ email: string }>(
+      `SELECT email FROM app_user WHERE household_id = ? AND role IN ('owner', 'admin')`,
+      householdId
+    );
+    if (!staff || recipients.length === 0) return;
+    const template = renderStaffSubmissionTemplate({
+      kind: "timesheet",
+      staffName: staff.full_name,
+      detail: `Week of ${period.weekStartDate} — ${period.totalHours} hour${period.totalHours === 1 ? "" : "s"}.`,
+      reviewUrl: `${env.PUBLIC_BASE_URL}/staff-admin/timesheets`
+    });
+    for (const recipient of recipients) {
+      void sendMail({ to: recipient.email, ...template });
+    }
+  } catch (err) {
+    log.warn(`Timesheet submission notification failed for staff ${staffProfileId}: ${String(err)}`);
+  }
 }
 
 export async function listPendingPeriods(householdId: string): Promise<TimesheetPeriodSummary[]> {
@@ -257,7 +291,26 @@ export async function approvePeriod(
     periodId
   );
   const updated = await getPeriodById(householdId, periodId);
+  void notifyTimesheetApproved(updated!);
   return { ok: true, period: updated! };
+}
+
+async function notifyTimesheetApproved(period: TimesheetPeriod): Promise<void> {
+  try {
+    const staff = await qGet<{ email: string | null }>(
+      `SELECT p.email FROM staff_profile sp JOIN person_profile p ON p.id = sp.person_profile_id WHERE sp.id = ?`,
+      period.staffProfileId
+    );
+    if (!staff?.email) return;
+    const template = renderStaffApprovedTemplate({
+      kind: "timesheet",
+      detail: `Your timesheet for the week of ${period.weekStartDate} (${period.totalHours} hour${period.totalHours === 1 ? "" : "s"}) has been approved.`,
+      portalUrl: `${env.PUBLIC_BASE_URL}/staff`
+    });
+    void sendMail({ to: staff.email, ...template });
+  } catch (err) {
+    log.warn(`Timesheet approval notification failed for period ${period.id}: ${String(err)}`);
+  }
 }
 
 export async function rejectPeriod(

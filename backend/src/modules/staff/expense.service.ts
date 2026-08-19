@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { env } from "../../config/env.js";
+import { log } from "../../logger.js";
+import { sendMail } from "../mailer/mailer.service.js";
+import { renderStaffSubmissionTemplate } from "../mailer/templates/staff-submission.js";
+import { renderStaffApprovedTemplate } from "../mailer/templates/staff-approved.js";
 import type { ExpenseStatus, StaffExpense, StaffExpenseInput, StaffExpenseSummary } from "./expense.types.js";
+
+function formatUsd(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
 
 type ExpenseRow = {
   id: string;
@@ -59,7 +68,38 @@ export async function createExpense(
     input.description ?? null
   );
   const created = await qGet<ExpenseRow>(`${EXPENSE_SELECT} WHERE id = ?`, id);
-  return toExpense(created!);
+  const expense = toExpense(created!);
+  void notifyExpenseSubmitted(householdId, staffProfileId, expense);
+  return expense;
+}
+
+async function notifyExpenseSubmitted(
+  householdId: string,
+  staffProfileId: string,
+  expense: StaffExpense
+): Promise<void> {
+  try {
+    const staff = await qGet<{ full_name: string }>(
+      `SELECT p.full_name FROM staff_profile sp JOIN person_profile p ON p.id = sp.person_profile_id WHERE sp.id = ?`,
+      staffProfileId
+    );
+    const recipients = await qAll<{ email: string }>(
+      `SELECT email FROM app_user WHERE household_id = ? AND role IN ('owner', 'admin')`,
+      householdId
+    );
+    if (!staff || recipients.length === 0) return;
+    const template = renderStaffSubmissionTemplate({
+      kind: "expense",
+      staffName: staff.full_name,
+      detail: `${expense.category} — ${formatUsd(expense.amountCents)} on ${expense.expenseDate}.`,
+      reviewUrl: `${env.PUBLIC_BASE_URL}/staff-admin/expenses`
+    });
+    for (const recipient of recipients) {
+      void sendMail({ to: recipient.email, ...template });
+    }
+  } catch (err) {
+    log.warn(`Expense submission notification failed for staff ${staffProfileId}: ${String(err)}`);
+  }
 }
 
 export async function listMyExpenses(householdId: string, staffProfileId: string): Promise<StaffExpense[]> {
@@ -100,7 +140,27 @@ export async function approveExpense(
     expenseId
   );
   const updated = await qGet<ExpenseRow>(`${EXPENSE_SELECT} WHERE id = ?`, expenseId);
-  return { ok: true, expense: toExpense(updated!) };
+  const expense = toExpense(updated!);
+  void notifyExpenseApproved(expense);
+  return { ok: true, expense };
+}
+
+async function notifyExpenseApproved(expense: StaffExpense): Promise<void> {
+  try {
+    const staff = await qGet<{ email: string | null }>(
+      `SELECT p.email FROM staff_profile sp JOIN person_profile p ON p.id = sp.person_profile_id WHERE sp.id = ?`,
+      expense.staffProfileId
+    );
+    if (!staff?.email) return;
+    const template = renderStaffApprovedTemplate({
+      kind: "expense",
+      detail: `Your ${expense.category} expense of ${formatUsd(expense.amountCents)} on ${expense.expenseDate} has been approved.`,
+      portalUrl: `${env.PUBLIC_BASE_URL}/staff`
+    });
+    void sendMail({ to: staff.email, ...template });
+  } catch (err) {
+    log.warn(`Expense approval notification failed for expense ${expense.id}: ${String(err)}`);
+  }
 }
 
 export async function rejectExpense(
