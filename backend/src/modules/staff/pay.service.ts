@@ -36,7 +36,7 @@ export async function getPaySummary(
   );
 
   const paidRows = await qAll<{ category_id: string; cents: string | null }>(
-    `SELECT category_id, COALESCE(SUM(-amount), 0) AS cents
+    `SELECT category_id, COALESCE(SUM(-amount * 100), 0) AS cents
      FROM transaction_canonical
      WHERE household_id = ? AND status = 'posted' AND owner_scope = 'person' AND owner_person_profile_id = ?
        AND category_id IN (?, ?, ?) AND txn_date BETWEEN ? AND ?

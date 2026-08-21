@@ -145,7 +145,7 @@ describe("Staff pay summary (STAFF-5)", () => {
       `INSERT INTO transaction_canonical
          (id, household_id, account_id, txn_date, amount, direction, memo, fingerprint, status, category_id, owner_scope, owner_person_profile_id)
        VALUES (?, ?, ?, ?, ?, 'debit', 'nanny pay', ?, 'posted', ?, 'person', ?)`
-    ).run(txnId, householdId, ACCOUNT_ID, "2026-02-10", -20000, fingerprint, category!.id, staffPersonProfileId);
+    ).run(txnId, householdId, ACCOUNT_ID, "2026-02-10", -200.0, fingerprint, category!.id, staffPersonProfileId);
     insertedTxnIds.push(txnId);
 
     const res = await request(app)

@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #286: Staff pay summary shows paid amount 100x too small (2026-08-21)
+
+**What changed:** `getPaySummary()`'s "paid" query summed `transaction_canonical.amount`
+(a `NUMERIC` dollar column) and aliased the raw dollar total `AS cents`, feeding it directly
+into `PaySummary.paid.*Cents` with no dollars→cents conversion. Fixed by multiplying by 100 in
+the SQL (`SUM(-amount * 100)`), matching the conversion convention used elsewhere (e.g.
+`canonical-ingest.service.ts`). Also fixed the `staff-pay.test.ts` fixture, which inserted
+`amount = -20000` (i.e. -$20,000) instead of a realistic dollar value — that unrealistic input
+happened to make the buggy query's assertion pass, masking the bug.
+
+**Why:** User report — recorded a $450.00 salary payment via a transaction; Staff Pay &
+Reports showed only $4.50 paid (balance due inflated by the same ~100x). The ledger/account
+balance was correct; the bug was isolated to this one aggregation query.
+
+**Files:** `backend/src/modules/staff/pay.service.ts`, `backend/tests/staff-pay.test.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/286
+
 ## CR — #285: ESPP qualifying/disqualifying disposition tracking + CPA tax report (2026-08-19)
 
 **What changed:** Added `espp_offering_period` (one row per household + semiannual offering
