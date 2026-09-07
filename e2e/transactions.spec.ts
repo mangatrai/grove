@@ -30,4 +30,40 @@ test.describe('Transactions Page', () => {
     // After switching, the tab should be active (aria-selected=true)
     await expect(reviewTab).toHaveAttribute('aria-selected', 'true');
   });
+
+  test.describe('Add transaction — CurrencyInput editing', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.click('button:has-text("Add transaction")');
+      await expect(page.getByRole('dialog', { name: 'Add transaction' })).toBeVisible();
+    });
+
+    test('typing digits into a blank field builds up the value cash-register style', async ({ page }) => {
+      const amount = page.getByRole('dialog').getByRole('textbox', { name: 'Amount' });
+      await amount.click();
+      await amount.pressSequentially('12345');
+      await expect(amount).toHaveValue('123.45');
+    });
+
+    test('selecting all and typing a digit replaces the value instead of appending', async ({ page }) => {
+      const amount = page.getByRole('dialog').getByRole('textbox', { name: 'Amount' });
+      await amount.click();
+      await amount.pressSequentially('12345');
+      await expect(amount).toHaveValue('123.45');
+
+      await amount.selectText();
+      await amount.press('7');
+      await expect(amount).toHaveValue('0.07');
+    });
+
+    test('selecting all and pressing Backspace clears the whole value', async ({ page }) => {
+      const amount = page.getByRole('dialog').getByRole('textbox', { name: 'Amount' });
+      await amount.click();
+      await amount.pressSequentially('7890');
+      await expect(amount).toHaveValue('78.90');
+
+      await amount.selectText();
+      await amount.press('Backspace');
+      await expect(amount).toHaveValue('');
+    });
+  });
 });

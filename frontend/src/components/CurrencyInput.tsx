@@ -1,6 +1,7 @@
 import { Input } from "@mantine/core";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CURRENCY_INPUT_PASSTHROUGH_KEYS, reduceCurrencyKey, valueToCents } from "./currencyInputLogic";
 
 export type CurrencyInputProps = {
   value: number | undefined;
@@ -19,10 +20,6 @@ const fmt = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
-
-function valueToCents(v: number | undefined): number {
-  return v === undefined ? 0 : Math.round(v * 100);
-}
 
 export function CurrencyInput({
   value,
@@ -56,24 +53,13 @@ export function CurrencyInput({
     onChange(num);
   }
 
-  // Keys that should pass through without interception (navigation / modifiers)
-  const PASSTHROUGH = new Set([
-    "Tab", "Shift", "Control", "Alt", "Meta",
-    "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-    "Home", "End", "Escape",
-  ]);
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (disabled) return;
-    if (PASSTHROUGH.has(e.key)) return;
+    if (CURRENCY_INPUT_PASSTHROUGH_KEYS.has(e.key)) return;
     e.preventDefault();
-    if (e.key >= "0" && e.key <= "9") {
-      push(cents * 10 + parseInt(e.key, 10));
-    } else if (e.key === "Backspace") {
-      push(Math.trunc(cents / 10));
-    } else if (e.key === "Delete") {
-      push(0);
-    }
+    const hasSelection = e.currentTarget.selectionStart !== e.currentTarget.selectionEnd;
+    const next = reduceCurrencyKey(cents, e.key, hasSelection);
+    if (next !== null) push(next);
   }
 
   return (

@@ -14,6 +14,33 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #288: CurrencyInput ignores text selection during edit (2026-09-07)
+
+**What changed:** `handleKeyDown` in `CurrencyInput` never read `selectionStart`/`selectionEnd` —
+every digit keystroke did `cents * 10 + digit` and every Backspace did `Math.trunc(cents / 10)`
+regardless of any active selection, so selecting all the text and typing appended onto the old
+value instead of replacing it, and selecting all + Backspace removed only the last digit instead
+of clearing the field. Split the key-reduction logic into a pure `reduceCurrencyKey()`
+(`currencyInputLogic.ts`) that now treats any active selection — full or partial, since this
+digit-shift model has no meaningful cursor position — as "start over": a digit replaces the whole
+value, Backspace/Delete clear it. The no-selection incremental-edit-from-the-right behavior (click
+anywhere, Backspace trims the last digit, digits append at the end) is unchanged. Also added
+`Enter` to the passthrough key set — it was being `preventDefault`'d, silently blocking native
+`<form onSubmit>` submission on the Net Worth inline balance-edit row (`onSubmit={saveRow}`) — and
+a `MAX_CENTS` cap matching the `NUMERIC(12,2)` precision used for every amount/balance column, so
+a stuck key can't produce a value the backend would reject at submit time.
+
+**Why:** User report — editing an existing dollar amount (Net Worth, Add Transaction, etc.) was
+effectively broken: Backspace wouldn't clear the field, and selecting-all-then-typing corrupted
+the number instead of replacing it. The only workaround was clearing the field digit-by-digit and
+retyping from scratch. Root cause traced to the `ed370dc` digit-shift rewrite, which was never
+selection-aware; the later `ca89b66` fix only addressed negative-balance rounding, not this.
+
+**Files:** `frontend/src/components/CurrencyInput.tsx`, `frontend/src/components/currencyInputLogic.ts`
+(new), `frontend/src/components/currencyInputLogic.test.ts` (new), `e2e/transactions.spec.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/288
+
 ## FIX — #286: Staff pay summary shows paid amount 100x too small (2026-08-21)
 
 **What changed:** `getPaySummary()`'s "paid" query summed `transaction_canonical.amount`
