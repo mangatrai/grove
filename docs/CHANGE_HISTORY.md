@@ -14,6 +14,30 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #293: Staff Pay & Reports Balance Due misleading at period boundaries — add All-time section (2026-09-14)
+
+**What changed:** `getPaySummary()` filters Earned (timesheet `work_date`), Paid (transaction
+`txn_date`), and Balance Due (`earned - paid`) all to the same From/To window, and
+`MyPayPanel.tsx` defaults that window to current-month-start → today. Staff pay periods are
+weekly and don't align to calendar months, and payment typically lands a few days after the
+period ends — so a week straddling a month boundary (e.g. work Aug 28–Sep 3, paid Sep 5) shows
+the payment inside the window without the work behind it, making Balance Due look like a real
+over/underpayment when it's a window-boundary artifact. No change to the calculation itself
+(still period-scoped by design for the "This period" view); added a second, unfiltered **All
+time** section using the same `pay-summary` endpoint with `from = employment_start_date` instead
+of the picker value, so a running lifetime balance is always visible alongside the period one.
+`employmentStartDate` was already returned by `/staff` and `/staff/me`; threaded through as a
+prop to `MyPayPanel` from both call sites.
+
+**Why:** User report — Balance Due for the current-month-to-date window gave the wrong
+impression (looked like severe overpayment) purely because of the weekly-pay/calendar-month
+mismatch at the start of the month.
+
+**Files:** `frontend/src/pages/staff/MyPayPanel.tsx`, `frontend/src/pages/StaffPayPage.tsx`,
+`frontend/src/pages/StaffPortalPage.tsx`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/293
+
 ## FIX — #288: CurrencyInput ignores text selection during edit (2026-09-07)
 
 **What changed:** `handleKeyDown` in `CurrencyInput` never read `selectionStart`/`selectionEnd` —

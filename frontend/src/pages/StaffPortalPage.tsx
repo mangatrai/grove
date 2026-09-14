@@ -77,7 +77,7 @@ export function StaffPortalPage() {
                 <MyExpensesPanel />
               </Tabs.Panel>
               <Tabs.Panel value="pay" pt="md">
-                <MyPayPanel staffId={profile.id} />
+                <MyPayPanel staffId={profile.id} employmentStartDate={profile.employmentStartDate} />
               </Tabs.Panel>
             </Tabs>
           </>

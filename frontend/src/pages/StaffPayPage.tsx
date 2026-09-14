@@ -6,7 +6,7 @@ import { apiJson } from "../api";
 import { GroveLoader } from "../components/GroveLoader";
 import { MyPayPanel } from "./staff/MyPayPanel";
 
-type StaffMember = { id: string; fullName: string };
+type StaffMember = { id: string; fullName: string; employmentStartDate: string };
 
 export function StaffPayPage() {
   const [members, setMembers] = useState<StaffMember[]>([]);
@@ -58,7 +58,12 @@ export function StaffPayPage() {
           maw={320}
         />
       ) : null}
-      {selected ? <MyPayPanel staffId={selected} /> : null}
+      {selected ? (
+        <MyPayPanel
+          staffId={selected}
+          employmentStartDate={members.find((m) => m.id === selected)?.employmentStartDate ?? null}
+        />
+      ) : null}
     </Stack>
   );
 }

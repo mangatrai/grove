@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Button, Group, Paper, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { Alert, Button, Divider, Group, Paper, SimpleGrid, Stack, Text, TextInput, Title } from "@mantine/core";
 
 import { apiFetch, apiJson } from "../../api";
 import { GroveLoader } from "../../components/GroveLoader";
@@ -23,13 +23,22 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function MyPayPanel({ staffId }: { staffId: string }) {
+export function MyPayPanel({
+  staffId,
+  employmentStartDate
+}: {
+  staffId: string;
+  employmentStartDate: string | null;
+}) {
   const [from, setFrom] = useState(monthStartIso);
   const [to, setTo] = useState(todayIso);
   const [summary, setSummary] = useState<PaySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"hours" | "payment" | null>(null);
+  const [allTimeSummary, setAllTimeSummary] = useState<PaySummary | null>(null);
+  const [allTimeLoading, setAllTimeLoading] = useState(true);
+  const [allTimeError, setAllTimeError] = useState<string | null>(null);
 
   const downloadReport = useCallback(
     async (kind: "hours" | "payment") => {
@@ -78,8 +87,34 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!employmentStartDate) {
+      setAllTimeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAllTimeLoading(true);
+    setAllTimeError(null);
+    apiJson<{ summary: PaySummary }>(
+      `/staff/${staffId}/pay-summary?from=${employmentStartDate}&to=${todayIso()}`
+    )
+      .then((res) => {
+        if (!cancelled) setAllTimeSummary(res.summary);
+      })
+      .catch((e) => {
+        if (!cancelled) setAllTimeError(e instanceof Error ? e.message : "Could not load all-time summary");
+      })
+      .finally(() => {
+        if (!cancelled) setAllTimeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [staffId, employmentStartDate]);
+
   return (
     <Stack mt="sm">
+      <Title order={4}>This period</Title>
       <Group align="end">
         <TextInput label="From" type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
         <TextInput label="To" type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
@@ -108,33 +143,74 @@ export function MyPayPanel({ staffId }: { staffId: string }) {
       {error ? <Alert color="red">{error}</Alert> : null}
 
       {!loading && summary ? (
-        <>
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <Paper withBorder p="md" radius="md">
-              <Text size="xs" c="dimmed">Earned</Text>
-              <Text fw={700} size="xl">{formatUsd(summary.earned.totalCents / 100)}</Text>
-              <Text size="xs" c="dimmed" mt={4}>
-                Timesheet {formatUsd(summary.earned.timesheetCents / 100)} · Expenses{" "}
-                {formatUsd(summary.earned.expenseCents / 100)}
-              </Text>
-            </Paper>
-            <Paper withBorder p="md" radius="md">
-              <Text size="xs" c="dimmed">Paid</Text>
-              <Text fw={700} size="xl">{formatUsd(summary.paid.totalCents / 100)}</Text>
-              <Text size="xs" c="dimmed" mt={4}>
-                Salary {formatUsd(summary.paid.salaryCents / 100)} · Bonus{" "}
-                {formatUsd(summary.paid.bonusCents / 100)} · Reimbursement{" "}
-                {formatUsd(summary.paid.reimbursementCents / 100)}
-              </Text>
-            </Paper>
-            <Paper withBorder p="md" radius="md">
-              <Text size="xs" c="dimmed">Balance due</Text>
-              <Text fw={700} size="xl" c={summary.balanceDueCents > 0 ? "orange" : undefined}>
-                {formatUsd(summary.balanceDueCents / 100)}
-              </Text>
-            </Paper>
-          </SimpleGrid>
-        </>
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Earned</Text>
+            <Text fw={700} size="xl">{formatUsd(summary.earned.totalCents / 100)}</Text>
+            <Text size="xs" c="dimmed" mt={4}>
+              Timesheet {formatUsd(summary.earned.timesheetCents / 100)} · Expenses{" "}
+              {formatUsd(summary.earned.expenseCents / 100)}
+            </Text>
+          </Paper>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Paid</Text>
+            <Text fw={700} size="xl">{formatUsd(summary.paid.totalCents / 100)}</Text>
+            <Text size="xs" c="dimmed" mt={4}>
+              Salary {formatUsd(summary.paid.salaryCents / 100)} · Bonus{" "}
+              {formatUsd(summary.paid.bonusCents / 100)} · Reimbursement{" "}
+              {formatUsd(summary.paid.reimbursementCents / 100)}
+            </Text>
+          </Paper>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Balance due this period</Text>
+            <Text fw={700} size="xl" c={summary.balanceDueCents > 0 ? "orange" : undefined}>
+              {formatUsd(summary.balanceDueCents / 100)}
+            </Text>
+          </Paper>
+        </SimpleGrid>
+      ) : null}
+
+      <Divider my="sm" />
+
+      <Title order={4}>All time</Title>
+      <Text size="xs" c="dimmed" mt={-8}>
+        Since employment start ({employmentStartDate ?? "unknown"}) — not affected by the date filter above.
+      </Text>
+
+      {allTimeLoading ? (
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading…</Text>
+        </Group>
+      ) : null}
+      {allTimeError ? <Alert color="red">{allTimeError}</Alert> : null}
+
+      {!allTimeLoading && allTimeSummary ? (
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Total earned</Text>
+            <Text fw={700} size="xl">{formatUsd(allTimeSummary.earned.totalCents / 100)}</Text>
+            <Text size="xs" c="dimmed" mt={4}>
+              Timesheet {formatUsd(allTimeSummary.earned.timesheetCents / 100)} · Expenses{" "}
+              {formatUsd(allTimeSummary.earned.expenseCents / 100)}
+            </Text>
+          </Paper>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Total paid</Text>
+            <Text fw={700} size="xl">{formatUsd(allTimeSummary.paid.totalCents / 100)}</Text>
+            <Text size="xs" c="dimmed" mt={4}>
+              Salary {formatUsd(allTimeSummary.paid.salaryCents / 100)} · Bonus{" "}
+              {formatUsd(allTimeSummary.paid.bonusCents / 100)} · Reimbursement{" "}
+              {formatUsd(allTimeSummary.paid.reimbursementCents / 100)}
+            </Text>
+          </Paper>
+          <Paper withBorder p="md" radius="md">
+            <Text size="xs" c="dimmed">Running balance due</Text>
+            <Text fw={700} size="xl" c={allTimeSummary.balanceDueCents > 0 ? "orange" : undefined}>
+              {formatUsd(allTimeSummary.balanceDueCents / 100)}
+            </Text>
+          </Paper>
+        </SimpleGrid>
       ) : null}
     </Stack>
   );
