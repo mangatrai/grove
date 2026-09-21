@@ -35,6 +35,7 @@ const TRANSFER_CATEGORY_IDS: string[] = [
   DEFAULT_CATEGORY_IDS.transfersIn,
   DEFAULT_CATEGORY_IDS.transfersOut,
   DEFAULT_CATEGORY_IDS.transfersCashWithdrawal,
+  DEFAULT_CATEGORY_IDS.transfersCashDeposit,
 ];
 
 // Investment contributions are excluded from spending and reported separately.

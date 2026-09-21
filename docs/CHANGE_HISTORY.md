@@ -14,6 +14,36 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #294: Cash withdrawal auto-links a Wallet deposit (2026-09-21)
+
+**What changed:** Categorizing a transaction as **Transfers > Cash withdrawal** now auto-creates
+a linked "Money in" deposit on the household's `type='cash'` account (new category **Transfers >
+Cash deposit**, id `...170`, migrations `0095`/`0096`), and updates the Wallet balance
+immediately — previously the category was purely a reporting label with no effect on any
+balance, leaving the user to manually enter the offsetting deposit. Both legs share a
+`transfer_group_id`; the auto-created leg is flagged `auto_generated = TRUE`
+(`transaction_canonical.auto_generated`) so it can be told apart from a genuine manual entry.
+Recategorizing away from Cash withdrawal, or trashing/deleting it, when a deposit is linked now
+returns `409 HAS_LINKED_WALLET_TXN` and requires `confirmUnlink: true` to proceed — confirming
+cascades the removal (delete on recategorize; trash/restore together on trash/restore) along
+with the balance reversal. No-ops (category still sets) when the household has no cash account.
+Forward-only — existing Cash withdrawal transactions are not backfilled.
+
+**Why:** User-reported gap: assigning Cash withdrawal never moved money into the Wallet balance,
+so cash-on-hand tracking required a manual double-entry every time. `Transfers > Cash deposit`
+was added as a new leaf rather than reusing the existing generic `Transfers In` — that category
+also covers unrelated internal transfers (e.g. checking↔savings) and would blur reporting/intent
+for this specific flow.
+
+**Files:** `backend/db/migrations/0095_category_transfers_cash_deposit.sql`,
+`backend/db/migrations/0096_transaction_canonical_auto_generated.sql`,
+`backend/db/seeds/0001_bootstrap.sql`, `backend/src/modules/category/category-ids.ts`,
+`backend/src/modules/reports/year-summary.service.ts`,
+`backend/src/modules/ledger/ledger.service.ts`, `backend/src/modules/ledger/ledger.routes.ts`,
+`frontend/src/api.ts`, `frontend/src/pages/TransactionsPage.tsx`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/294
+
 ## FIX — #293: Staff Pay & Reports Balance Due misleading at period boundaries — add All-time section (2026-09-14)
 
 **What changed:** `getPaySummary()` filters Earned (timesheet `work_date`), Paid (transaction

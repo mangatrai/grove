@@ -418,18 +418,21 @@ ledgerRouter.post("/bulk-category", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
     return;
   }
-  const { householdId, role, personProfileId } = req.authUser!;
+  const { householdId, userId, role, personProfileId } = req.authUser!;
   if (role === "member") {
     if (!personProfileId) {
       res.status(403).json({ message: "Your account is not linked to a household profile." });
       return;
     }
     const { owned, notOwnedCount } = await filterOwnedTransactionIds(householdId, parsed.data.ids, personProfileId);
-    const result = owned.length > 0 ? await bulkUpdateCategory(householdId, owned, parsed.data.categoryId) : { updated: 0, skipped: 0 };
+    const result =
+      owned.length > 0
+        ? await bulkUpdateCategory(householdId, owned, parsed.data.categoryId, { userId })
+        : { updated: 0, skipped: 0 };
     res.json({ ...result, skippedNotOwned: notOwnedCount });
     return;
   }
-  const result = await bulkUpdateCategory(householdId, parsed.data.ids, parsed.data.categoryId);
+  const result = await bulkUpdateCategory(householdId, parsed.data.ids, parsed.data.categoryId, { userId });
   res.json(result);
 });
 
@@ -439,7 +442,9 @@ const patchCategorySchema = z.object({
   ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
   status: z.enum(["trashed", "posted"]).optional(),
   memo: z.union([z.string().max(500).trim(), z.null()]).optional(),
-  amount: z.number().finite().refine((n) => n !== 0, "Amount must not be zero").optional()
+  amount: z.number().finite().refine((n) => n !== 0, "Amount must not be zero").optional(),
+  /** Confirms cascading removal of an auto-created Wallet deposit linked to this transaction (GH #294). */
+  confirmUnlink: z.boolean().optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -468,7 +473,7 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const { householdId, role, personProfileId } = req.authUser!;
+  const { householdId, userId, role, personProfileId } = req.authUser!;
 
   // Members can only modify their own transactions.
   if (role === "member") {
@@ -528,8 +533,17 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   // Status-only change: trash or restore.
   if (parsed.data.status && parsed.data.categoryId === undefined && !parsed.data.ownerScope) {
     if (parsed.data.status === "trashed") {
-      const out = await trashTransaction(householdId, req.params.id);
+      const out = await trashTransaction(householdId, req.params.id, { confirmUnlink: parsed.data.confirmUnlink });
       if (!out.ok) {
+        if (out.code === "HAS_LINKED_WALLET_TXN") {
+          res.status(409).json({
+            message: "This transaction has a linked Wallet deposit. Resubmit with confirmUnlink to remove both.",
+            code: out.code,
+            linkedTransactionId: out.linkedTransactionId,
+            linkedAmount: out.linkedAmount
+          });
+          return;
+        }
         res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
         return;
       }
@@ -573,13 +587,23 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     req.params.id,
     parsed.data.categoryId,
     effectiveOwnerScope,
-    effectiveOwnerPersonProfileId
+    effectiveOwnerPersonProfileId,
+    { userId, confirmUnlink: parsed.data.confirmUnlink }
   );
   if (!out.ok) {
     if (out.code === "INVALID_CATEGORY") {
       res.status(400).json({
         message: "Category is not available for this household",
         code: out.code
+      });
+      return;
+    }
+    if (out.code === "HAS_LINKED_WALLET_TXN") {
+      res.status(409).json({
+        message: "This transaction has a linked Wallet deposit. Resubmit with confirmUnlink to remove both.",
+        code: out.code,
+        linkedTransactionId: out.linkedTransactionId,
+        linkedAmount: out.linkedAmount
       });
       return;
     }

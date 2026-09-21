@@ -177,6 +177,8 @@ Hovering over a row reveals:
 
 **Bulk recategorize:** Check one or more rows in the ledger to reveal a bulk action bar at the bottom. Select a category and click **Apply category**. All selected rows are recategorized at once. Useful after rule changes or when correcting a batch of mis-classified imports.
 
+**Cash withdrawals:** Categorizing a checking/savings transaction as **Transfers > Cash withdrawal** automatically creates a matching "Money in" deposit on your Cash/Wallet account (category **Transfers > Cash deposit**), so the wallet balance updates immediately — no need to enter that deposit yourself. This only happens if you have a Cash/Wallet account set up (Settings > Accounts). If you later recategorize that transaction away from Cash withdrawal, or delete it, the app asks you to confirm — doing so also removes the linked Wallet deposit so the two stay in sync.
+
 ### Resolve All by Merchant Name
 
 When you have many unknown-category items for the same merchant (e.g., 40 uncategorized "WHOLEFDS" rows), use the **Needs Review** tab:

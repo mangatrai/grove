@@ -42,6 +42,12 @@ function authHeaders(): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+/** Thrown by `apiJson` on a non-2xx response. Carries the parsed error body when the server sent one, so callers can branch on `code` instead of parsing `.message`. */
+export class ApiError extends Error {
+  code?: string;
+  body?: unknown;
+}
+
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -57,11 +63,15 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   if (!res.ok) {
     const errBody = await res.text();
     let message = `${res.status} ${res.statusText}`;
+    let parsed: { message?: string; code?: string } | undefined;
     try {
-      const parsed = JSON.parse(errBody) as { message?: string };
+      parsed = JSON.parse(errBody) as { message?: string; code?: string };
       if (parsed.message) message = parsed.message;
     } catch { /* use status text */ }
-    throw new Error(message);
+    const err = new ApiError(message);
+    if (parsed?.code) err.code = parsed.code;
+    if (parsed) err.body = parsed;
+    throw err;
   }
 
   // Invalidate cached data for any scope affected by this mutation.

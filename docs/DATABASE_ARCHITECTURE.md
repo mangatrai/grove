@@ -179,6 +179,18 @@ household only. `rule_key` is only populated on global rows and has a partial un
 keys unique without constraining household rows, which don't use it. Folded from a separate
 `category_rule_global` table via migration `0090_merge_category_rule_global.sql` (DEBT #258).
 
+**Cash withdrawal ↔ Wallet deposit auto-link (GH #294, migrations `0095`/`0096`):** categorizing
+a transaction as **Transfers > Cash withdrawal** (`...163`) auto-creates a linked "Money in" row
+on the household's `type='cash'` account, categorized **Transfers > Cash deposit** (`...170`,
+new leaf — the generic `transfersIn`/`transfersOut` leaves were rejected as too ambiguous for
+this specific flow). Both legs share a `transfer_group_id` (the same column
+`pairTransactions`/`confirmTransferPairForHousehold` use for manually-confirmed transfers); the
+system-created leg is additionally flagged `auto_generated = TRUE` so recategorizing away from
+Cash withdrawal, or trashing/deleting it, can tell a system-created deposit apart from a genuine
+user entry and cascade safely (with a `confirmUnlink` confirmation step — see
+`API_REFERENCE.md`). No-ops (category still sets, no deposit created) when the household has no
+`cash` account — by design, one cash/wallet account per household.
+
 Note: `category_id` on `transaction_canonical` is nullable and **must be `LEFT JOIN`ed, never
 `INNER JOIN`ed** — after a `.hfb` restore, transactions can reference a custom category that no
 longer exists (custom categories aren't restored the same way). `txn_date` is `TEXT` (ISO
@@ -467,7 +479,7 @@ data.
 | `transaction_raw` | Pre-classification raw parsed rows | `extracted_payload_json`, `confidence` | `idx_transaction_raw_file_id` |
 | `category` | Hierarchical category taxonomy | `parent_id` self-FK, `household_id` nullable (NULL = system default) | — |
 | `category_rule` | Household + global auto-categorization rules | `pattern`, `match_type`, `confidence`, `priority`, `household_id` nullable (NULL = global/built-in), `rule_key` (global rows only) | `idx_category_rule_household_priority`; partial unique index `category_rule_rule_key_global_unique` on `rule_key WHERE household_id IS NULL`. Global rows ephemeral — reseeded, not backed up (naturally excluded from per-household `.hfb` exports by `WHERE household_id = ?`) |
-| `transaction_canonical` | **The ledger.** Central fact table | `txn_date` TEXT ISO, `fingerprint`, `status`, `search_document` GENERATED tsvector | 2 partial unique indexes (fingerprint dedup; OFX FITID dedup) + GIN FTS index + 4 compound perf indexes |
+| `transaction_canonical` | **The ledger.** Central fact table | `txn_date` TEXT ISO, `fingerprint`, `status`, `search_document` GENERATED tsvector, `auto_generated` BOOLEAN (system-created row, e.g. the Wallet-side leg of a Cash withdrawal auto-link — GH #294) | 2 partial unique indexes (fingerprint dedup; OFX FITID dedup) + GIN FTS index + 4 compound perf indexes |
 | `resolution_item` | Human-in-the-loop review queue | `type` CHECK (4 values), `target_id` polymorphic (no FK) | `idx_ri_household_status_type`, `idx_ri_household_target` |
 | `account_balance_snapshot` | Point-in-time account balances | `as_of_date` **real DATE**, `source` CHECK(manual/import) | 2 partial unique indexes — one per source, so manual and import balances can coexist same-day |
 | `budget_category` | Monthly budget target per category | `month` CHECK regex `YYYY-MM`, `amount` CHECK `>= 0` | `UNIQUE(household_id, category_id, month)` |

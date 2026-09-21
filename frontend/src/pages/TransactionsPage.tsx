@@ -24,7 +24,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiFetch, apiJson, useAuthToken } from "../api";
+import { ApiError, apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GroveLoader } from "../components/GroveLoader";
@@ -375,6 +375,18 @@ export function TransactionsPage() {
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [amountMinDraft, setAmountMinDraft] = useState(amountMinUrl);
   const [amountMaxDraft, setAmountMaxDraft] = useState(amountMaxUrl);
+  const [confirmUnlinkTarget, setConfirmUnlinkTarget] = useState<
+    | { kind: "trash"; txnId: string; linkedAmount: number }
+    | {
+        kind: "category";
+        txnId: string;
+        categoryId: string | null;
+        ownerScope?: "household" | "person";
+        ownerPersonProfileId?: string | null;
+        linkedAmount: number;
+      }
+    | null
+  >(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -903,13 +915,21 @@ export function TransactionsPage() {
     }
   }
 
-  async function trashSingle(id: string) {
+  async function trashSingle(id: string, confirmUnlink = false) {
     setError(null);
     try {
-      await apiJson(`/transactions/${id}`, { method: "PATCH", body: JSON.stringify({ status: "trashed" }) });
+      await apiJson(`/transactions/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "trashed", ...(confirmUnlink ? { confirmUnlink: true } : {}) })
+      });
       forgetReviewDetail(id);
       await load();
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.code === "HAS_LINKED_WALLET_TXN") {
+        const body = e.body as { linkedAmount?: number } | undefined;
+        setConfirmUnlinkTarget({ kind: "trash", txnId: id, linkedAmount: body?.linkedAmount ?? 0 });
+        return;
+      }
       setError(e instanceof Error ? e.message : "Move to trash failed");
     }
   }
@@ -1164,7 +1184,8 @@ export function TransactionsPage() {
     txnId: string,
     categoryId: string | null,
     ownerScope?: "household" | "person",
-    ownerPersonProfileId?: string | null
+    ownerPersonProfileId?: string | null,
+    confirmUnlink = false
   ): Promise<boolean> {
     setSavingId(txnId);
     setError(null);
@@ -1174,17 +1195,41 @@ export function TransactionsPage() {
         body: JSON.stringify({
           categoryId,
           ownerScope,
-          ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null
+          ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null,
+          ...(confirmUnlink ? { confirmUnlink: true } : {})
         })
       });
       forgetReviewDetail(txnId);
       await load();
       return true;
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.code === "HAS_LINKED_WALLET_TXN") {
+        const body = e.body as { linkedAmount?: number } | undefined;
+        setConfirmUnlinkTarget({
+          kind: "category",
+          txnId,
+          categoryId,
+          ownerScope,
+          ownerPersonProfileId,
+          linkedAmount: body?.linkedAmount ?? 0
+        });
+        return false;
+      }
       setError(e instanceof Error ? e.message : "Failed to update category");
       return false;
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function confirmUnlinkAndProceed() {
+    const target = confirmUnlinkTarget;
+    if (!target) return;
+    setConfirmUnlinkTarget(null);
+    if (target.kind === "trash") {
+      await trashSingle(target.txnId, true);
+    } else {
+      await updateCategory(target.txnId, target.categoryId, target.ownerScope, target.ownerPersonProfileId, true);
     }
   }
 
@@ -3089,6 +3134,17 @@ export function TransactionsPage() {
         closeOnClickOutside
         onClose={() => setRuleFromLedgerConfirm(null)}
         onConfirm={handleCreateRuleFromLedger}
+      />
+
+      <ConfirmDialog
+        opened={confirmUnlinkTarget !== null}
+        title="Remove linked Wallet deposit?"
+        message={`This transaction has a linked ${formatMoney(confirmUnlinkTarget?.linkedAmount ?? 0, "credit")} deposit that was auto-created on your Cash/Wallet account. Continuing will remove that deposit too.`}
+        confirmLabel="Remove both"
+        cancelLabel="Cancel"
+        danger
+        onClose={() => setConfirmUnlinkTarget(null)}
+        onConfirm={confirmUnlinkAndProceed}
       />
     </Stack>
   );

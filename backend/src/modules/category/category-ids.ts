@@ -101,6 +101,8 @@ export const DEFAULT_CATEGORY_IDS = {
   transfersIn: "30000000-0000-0000-0000-000000000115",
   transfersOut: "30000000-0000-0000-0000-000000000116",
   transfersCashWithdrawal: "30000000-0000-0000-0000-000000000163",
+  /** Transfers > Cash deposit — inflow counterpart, auto-created on the Wallet account (GH #294). */
+  transfersCashDeposit: "30000000-0000-0000-0000-000000000170",
 
   /** Insurance leaves; display names: Home, Auto, Health, Life, Other */
   insuranceHome: "30000000-0000-0000-0000-000000000025",

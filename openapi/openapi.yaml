@@ -3343,6 +3343,9 @@ paths:
       description: >
         Members may only update transactions they own (owner_person_profile_id).
         ownerScope/ownerPersonProfileId fields are ignored for member requests (ownership reassignment is owner/admin only).
+        Setting categoryId to Transfers > Cash withdrawal auto-links a Wallet deposit (GH #294);
+        recategorizing away or trashing a linked transaction returns 409 HAS_LINKED_WALLET_TXN
+        unless confirmUnlink: true is included.
       x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
     delete:

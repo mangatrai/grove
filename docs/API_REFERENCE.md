@@ -1658,6 +1658,21 @@ or clear it:
 
 When `categoryId` is set, any **`unknown_category`** resolution item for this transaction is marked **`resolved`**.
 
+**Cash withdrawal auto-link (GH #294):** setting `categoryId` to **Transfers > Cash withdrawal** auto-creates a linked "Money in" deposit on the household's `type='cash'` account (category **Transfers > Cash deposit**, shared `transfer_group_id`), and updates its balance. No-ops silently (category is still set) if the household has no cash account. Recategorizing **away** from Cash withdrawal when a deposit is linked is blocked — see below.
+
+#### Removing a linked Wallet deposit (`confirmUnlink`)
+
+Recategorizing away from Cash withdrawal, or trashing (`status: "trashed"`) a transaction with a linked, auto-created Wallet deposit, returns **409**:
+```json
+{
+  "message": "This transaction has a linked Wallet deposit. Resubmit with confirmUnlink to remove both.",
+  "code": "HAS_LINKED_WALLET_TXN",
+  "linkedTransactionId": "uuid",
+  "linkedAmount": 100.00
+}
+```
+Resubmit the same request with `"confirmUnlink": true` to proceed — the linked deposit is cascade-removed (deleted on category change; trashed alongside on trash, and restored alongside on restore) along with its balance effect.
+
 #### Amount update (manual transactions only)
 
 **Request body:**
