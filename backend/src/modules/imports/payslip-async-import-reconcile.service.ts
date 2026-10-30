@@ -14,7 +14,7 @@ import {
   mapCanonicalExtractToPersist,
   validateCanonicalForImport
 } from "../payslip/llm-extract/payslip-canonical-map.js";
-import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
+import { findPayslipByHouseholdChecksum, insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
 
 const LOG_PREFIX = "[Payslip async LLM reconcile]";
@@ -25,6 +25,24 @@ export type ReconcilePayslipAsyncOutcome = {
   stillPending: boolean;
   errors: Array<{ fileId: string; message: string }>;
 };
+
+async function markDuplicateChecksum(
+  importFileId: string,
+  existingSnapshotId: string,
+  profile: string | null
+): Promise<void> {
+  await qExec(
+    `UPDATE import_file SET status = ?, confidence_summary = ? WHERE id = ?`,
+    "failed",
+    JSON.stringify({
+      stage: "failed",
+      reason: "duplicate_payslip_checksum",
+      existingSnapshotId,
+      profile
+    }),
+    importFileId
+  );
+}
 
 export async function reconcilePayslipAsyncImportSession(
   sessionId: string,
@@ -97,6 +115,16 @@ export async function reconcilePayslipAsyncImportSession(
     try {
       await qExec(`UPDATE import_file SET payslip_async_last_poll_at = NOW() WHERE id = ?`, file.id);
 
+      // Re-check before the paid LLM call: the same file may have been imported since this one was queued.
+      const buffer = fs.readFileSync(file.stored_path);
+      const checksum = sha256Hex(buffer);
+      const existingSnapshot = await findPayslipByHouseholdChecksum(householdId, checksum);
+      if (existingSnapshot) {
+        await markDuplicateChecksum(file.id, existingSnapshot.id, file.parser_profile_id);
+        outcome.errors.push({ fileId: file.id, message: "duplicate_payslip_checksum" });
+        continue;
+      }
+
       const { extract, usage } = await extractPayslipFromPdf({ pdfPath: file.stored_path });
       const validation = validateCanonicalForImport(extract);
       if (!validation.ok) {
@@ -116,8 +144,6 @@ export async function reconcilePayslipAsyncImportSession(
       }
 
       const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.totalTokens ?? null);
-      const buffer = fs.readFileSync(file.stored_path);
-      const checksum = sha256Hex(buffer);
 
       const ins = await insertPayslipSnapshot(
         householdId,
@@ -134,17 +160,7 @@ export async function reconcilePayslipAsyncImportSession(
       );
 
       if (!ins.ok) {
-        await qExec(
-          `UPDATE import_file SET status = ?, confidence_summary = ? WHERE id = ?`,
-          "failed",
-          JSON.stringify({
-            stage: "failed",
-            reason: "duplicate_payslip_checksum",
-            existingSnapshotId: ins.existing.id,
-            profile: file.parser_profile_id
-          }),
-          file.id
-        );
+        await markDuplicateChecksum(file.id, ins.existing.id, file.parser_profile_id);
         outcome.errors.push({ fileId: file.id, message: "duplicate_payslip_checksum" });
         continue;
       }

@@ -269,7 +269,8 @@ export function sha256Hex(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-async function findPayslipByHouseholdChecksum(
+/** Existing snapshot with this file checksum — check before any paid LLM extraction. */
+export async function findPayslipByHouseholdChecksum(
   householdId: string,
   fileChecksum: string
 ): Promise<PayslipSnapshotRow | null> {

@@ -20,6 +20,7 @@ import {
   deletePayslipLineItem,
   deletePayslipSnapshotForHousehold,
   findMatchedDeposits,
+  findPayslipByHouseholdChecksum,
   getConfirmedDeposits,
   getPayslipLineItems,
   getPayslipSnapshotForHousehold,
@@ -355,6 +356,16 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
     res.status(400).json({
       message: resolved.message,
       code: resolved.code
+    });
+    return;
+  }
+
+  const existing = await findPayslipByHouseholdChecksum(householdId, checksum);
+  if (existing) {
+    res.status(409).json({
+      message: "A payslip with this file checksum was already uploaded for this household",
+      code: "DUPLICATE_PAYSLIP",
+      existing
     });
     return;
   }

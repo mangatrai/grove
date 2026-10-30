@@ -8,7 +8,11 @@ import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { sqlStmt } from "./pg-stmt.js";
 
-process.env.OPENAI_API_KEY ??= "test-key-for-payslip-upload-tests";
+// vi.hoisted runs before the static imports above — a plain assignment here would run after
+// `./pg-stmt.js` has already loaded `config/env`, so the key only "worked" when .env had a real one.
+vi.hoisted(() => {
+  process.env.OPENAI_API_KEY ||= "test-key-for-payslip-upload-tests";
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ibmFixture = path.join(__dirname, "fixtures", "ibm-payslip-sample.txt");
@@ -138,6 +142,9 @@ vi.mock("../src/modules/payslip/llm-extract/extract-payslip-llm.js", async (impo
 });
 
 import { buildApp } from "../src/app.js";
+import { extractPayslipFromPdf } from "../src/modules/payslip/llm-extract/extract-payslip-llm.js";
+
+const llmCallCount = (): number => vi.mocked(extractPayslipFromPdf).mock.calls.length;
 
 const app = buildApp();
 
@@ -189,6 +196,7 @@ describe("POST /payslips/upload", () => {
     expect(first.body.snapshot.grossPayCurrent).toBe(5000);
     expect(first.body.snapshot.fileChecksum).toMatch(/^[a-f0-9]{64}$/);
 
+    const callsBefore = llmCallCount();
     const second = await request(app)
       .post("/payslips/upload")
       .set("authorization", `Bearer ${token}`)
@@ -197,6 +205,8 @@ describe("POST /payslips/upload", () => {
     expect(second.status).toBe(409);
     expect(second.body.code).toBe("DUPLICATE_PAYSLIP");
     expect(second.body.existing.id).toBe(first.body.snapshot.id);
+    // Duplicate is rejected before the paid LLM extraction runs.
+    expect(llmCallCount()).toBe(callsBefore);
   });
 
   it("lists payslips for household", async () => {
@@ -715,5 +725,75 @@ describe("Import session with ibm_pay_contributions_pdf", () => {
     const row = list.body.items.find((x: { importFileId?: string }) => x.importFileId === fileId);
     expect(row).toBeDefined();
     expect(row.grossPayCurrent).toBe(5000);
+  });
+
+  it("skips the LLM call for a file already imported — at reconcile and at parse", async () => {
+    const token = await loginToken();
+    const boaChecking = "40000000-0000-0000-0000-000000000001";
+    const buf = Buffer.concat([readFileSync(ibmFixture), Buffer.from(`\ndup-import-${Date.now()}`)]);
+
+    async function queueInNewSession(): Promise<{
+      sessionId: string;
+      fileId: string;
+      parseStatus: number;
+      parseBody: Record<string, unknown>;
+    }> {
+      const sessionRes = await request(app)
+        .post("/imports/sessions")
+        .set("authorization", `Bearer ${token}`)
+        .send({ sourceType: "upload" });
+      expect(sessionRes.status).toBe(201);
+      const sessionId = sessionRes.body.session.id as string;
+      const up = await request(app)
+        .post(`/imports/sessions/${sessionId}/files`)
+        .set("authorization", `Bearer ${token}`)
+        .attach("files", buf, "dup.pdf");
+      expect(up.status).toBe(201);
+      const fileId = up.body.files[0].id as string;
+      const bind = await request(app)
+        .patch(`/imports/sessions/${sessionId}/files/${fileId}`)
+        .set("authorization", `Bearer ${token}`)
+        .send({ financialAccountId: boaChecking, parserProfileId: "ibm_pay_contributions_pdf" });
+      expect(bind.status).toBe(200);
+      const parseRes = await request(app)
+        .post(`/imports/sessions/${sessionId}/parse`)
+        .set("authorization", `Bearer ${token}`)
+        .send({});
+      return { sessionId, fileId, parseStatus: parseRes.status, parseBody: parseRes.body as Record<string, unknown> };
+    }
+
+    async function reconcile(sessionId: string) {
+      const res = await request(app)
+        .post(`/imports/sessions/${sessionId}/reconcile-payslip-async?force=true`)
+        .set("authorization", `Bearer ${token}`)
+        .send({});
+      expect(res.status).toBe(200);
+      return res.body as { completedFiles: number; errors: Array<{ fileId: string; message: string }> };
+    }
+
+    // Same file queued in two sessions before either is extracted.
+    const a = await queueInNewSession();
+    const b = await queueInNewSession();
+    expect(a.parseStatus).toBe(200);
+    expect(b.parseStatus).toBe(200);
+    expect(a.parseBody.asyncPayslipPending).toBe(1);
+    expect(b.parseBody.asyncPayslipPending).toBe(1);
+
+    const callsBefore = llmCallCount();
+    expect((await reconcile(a.sessionId)).completedFiles).toBe(1);
+    expect(llmCallCount()).toBe(callsBefore + 1);
+
+    // Reconcile of the second copy finds the snapshot from the first and never calls the LLM.
+    const second = await reconcile(b.sessionId);
+    expect(second.completedFiles).toBe(0);
+    expect(second.errors).toContainEqual({ fileId: b.fileId, message: "duplicate_payslip_checksum" });
+    expect(llmCallCount()).toBe(callsBefore + 1);
+
+    // A third copy is rejected at parse time and is never queued (only file skipped → 409 NO_SUPPORTED_FILES).
+    const c = await queueInNewSession();
+    expect(c.parseStatus).toBe(409);
+    expect(c.parseBody.code).toBe("NO_SUPPORTED_FILES");
+    expect(c.parseBody.skippedFiles).toContainEqual({ fileId: c.fileId, reason: "duplicate_payslip_checksum" });
+    expect(llmCallCount()).toBe(callsBefore + 1);
   });
 });

@@ -3,7 +3,7 @@ import { log } from "../../logger.js";
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
 import { findEmployerById, resolvePayslipUploadContext } from "../payslip/payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
-import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
+import { findPayslipByHouseholdChecksum, insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { type ParserProfileId } from "./profiles/profile-ids.js";
 import { inferParserProfile } from "./infer-parser-profile.js";
 import { updateImportFileBinding } from "./import-file-binding.service.js";
@@ -177,6 +177,15 @@ async function uploadPayslipAndImport(params: UploadPayslipParams): Promise<Uplo
     return { ok: false, code: resolved.code, message: resolved.message };
   }
 
+  const checksum = sha256Hex(params.file.buffer);
+  if (await findPayslipByHouseholdChecksum(params.householdId, checksum)) {
+    return {
+      ok: false,
+      code: "DUPLICATE_PAYSLIP",
+      message: "A payslip with this file checksum was already uploaded for this household."
+    };
+  }
+
   const parsed = await parsePayslipPdfByProfile(params.file.buffer, resolved.parserProfileId as ParserProfileId);
   if (!parsed.ok) {
     if (parsed.reason === "unsupported_parser") {
@@ -194,7 +203,7 @@ async function uploadPayslipAndImport(params: UploadPayslipParams): Promise<Uplo
   const inserted = await insertPayslipSnapshot(
     params.householdId,
     params.file.originalname || "payslip.pdf",
-    sha256Hex(params.file.buffer),
+    checksum,
     resolved.parserProfileId,
     parsed.summary,
     null,

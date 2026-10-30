@@ -35,7 +35,7 @@ import {
 import { getEmployersByPersonProfileId } from "../household/household.service.js";
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-sheet.service.js";
-import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
+import { findPayslipByHouseholdChecksum, insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
 import { LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
 import { armPayslipAsyncScheduler } from "./payslip-async-scheduler.service.js";
@@ -344,6 +344,27 @@ export async function parseSessionImportFiles(
         }
         await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
 
+        // Dedupe before any extraction — an LLM call on an already-imported file is wasted spend.
+        const checksum = sha256Hex(buffer);
+        const existingSnapshot = await findPayslipByHouseholdChecksum(householdId, checksum);
+        if (existingSnapshot) {
+          await qExec(
+            `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+            "failed",
+            JSON.stringify({
+              stage: "failed",
+              reason: "duplicate_payslip_checksum",
+              existingSnapshotId: existingSnapshot.id,
+              profile: profileId
+            }),
+            file.id
+          );
+          outcome.skippedFiles.push({ fileId: file.id, reason: "duplicate_payslip_checksum" });
+          continue;
+        }
+
         if ((LLM_PAYSLIP_PROFILE_IDS as readonly string[]).includes(profileId)) {
           if (!isLlmConfigured()) {
             await qExec(
@@ -386,7 +407,6 @@ export async function parseSessionImportFiles(
           continue;
         }
 
-        const checksum = sha256Hex(buffer);
         const parseResult = await parsePayslipPdfByProfile(buffer, profileId, { pdfPath: file.stored_path });
         if (!parseResult.ok) {
           if (parseResult.reason === "unsupported_parser") {

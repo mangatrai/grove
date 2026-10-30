@@ -14,6 +14,26 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #298: Duplicate payslip check runs before the paid LLM extraction (2026-10-30)
+
+**What changed:** All four payslip PDF paths — `POST /payslips/upload`, `POST /imports/upload`,
+import-session parse, and async LLM reconcile — now look up `(household_id, file_checksum)` via
+`findPayslipByHouseholdChecksum` **before** extraction. Response/failure shapes are unchanged
+(409 `DUPLICATE_PAYSLIP`; import_file `failed` + `duplicate_payslip_checksum` +
+`existingSnapshotId`). Duplicate files in an import session are no longer queued for the LLM;
+reconcile re-checks right before the call (same file queued in two sessions). The post-insert
+check in `insertPayslipSnapshot` stays as the backstop.
+
+**Why:** The checksum was computed up front but only checked after `extractPayslipFromPdf`, so
+re-uploading an already-imported payslip paid for a full strong-model vision call before being
+rejected.
+
+**Files:** `backend/src/modules/payslip/payslip.service.ts`, `payslip.routes.ts`,
+`backend/src/modules/imports/import-parser.service.ts`, `import-upload.service.ts`,
+`payslip-async-import-reconcile.service.ts`, `backend/tests/payslip-upload.test.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/298
+
 ## DOC — #297: Fake account IDs in OFX fixtures; CLAUDE.md slimmed (2026-10-30)
 
 **What changed:** Replaced a realistic-looking account identifier in the OFX parser test fixture +
