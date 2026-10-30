@@ -706,6 +706,11 @@ Access via the account menu (top-right) → **Settings**.
 - **Email** — email address (for password reset notifications).
 - **Visibility** — role-based (owner, admin, member).
 
+**Employer Setup** (for payslips):
+
+- Add each employer with a display name and **Payslip format** (IBM, Deloitte, Rippling, …).
+- **Primary deposit account** (optional) — the account where most of the pay lands. It ranks deposit matches on the payslip page and qualifies a deposit for auto-link when the payslip doesn't print that account's digits. With split pay you still pick one account: the split itself is read from the payslip's deposit lines (see [Payslips](#payslips) → Matched Deposits).
+
 ### Password Tab
 
 - **Change password** — enter your current password and new password.
@@ -718,15 +723,9 @@ Manage household members and settings:
 **Household settings:**
 
 - **Monthly savings target** — slider to set a target savings goal; updates "Safe to spend" on the Dashboard.
-- **Salary deposit account** — link the account where payslip deposits land (for deposit matching).
 - **Large transaction threshold** — optional; flag transactions above this amount for review.
 - **City / State** — household location (optional).
 - **Combined gross income** — household total annual income (used for AI insights).
-
-**Employer setup** (for payslips):
-
-- Add employers with display name and parser profile.
-- Link each employer to a salary deposit account.
 
 **Member roster:**
 

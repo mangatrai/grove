@@ -1384,7 +1384,7 @@ export function SettingsPage() {
                   <Text
                     span
                     aria-label="Employer setup info"
-                    title="Use this section to set your employer name, salary deposit account, and payslip format mapping for import/upload."
+                    title="Use this section to set your employer name, primary deposit account, and payslip format mapping for import/upload."
                     c="dimmed"
                     ff="monospace"
                   >
@@ -1405,7 +1405,8 @@ export function SettingsPage() {
                       disabled={savingProfile}
                     />
                     <Select
-                      label="Salary deposit account (optional)"
+                      label="Primary deposit account"
+                      description="Optional. Where most of the pay lands; used to rank deposit matches. Split pay is read from the payslip."
                       value={row.salaryDepositAccountId || ""}
                       onChange={(value) => {
                         const next = [...profileDraft.employers];

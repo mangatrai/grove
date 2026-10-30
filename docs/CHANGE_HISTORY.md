@@ -14,6 +14,21 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## UX — #301 (step 7): "Primary deposit account" in Employer Setup (2026-10-30)
+
+**What changed:** Settings → Profile → Employer Setup renames "Salary deposit account (optional)" to
+**Primary deposit account**, with helper text: optional, where most of the pay lands, used to rank deposit
+matches, split pay is read from the payslip. The info tooltip uses the same wording. USER_GUIDE moves
+Employer Setup from the Household tab to the Profile tab, where it actually is, and drops the stale
+household-level "Salary deposit account" bullet. Stored field unchanged
+(`employers_json[].salaryDepositFinancialAccountId`); no API change.
+
+**Why:** With split pay, one account per employer stays enough. The payslip's deposit lines carry the
+split (steps 3–5), and the chosen account is only a ranking and auto-link hint, so the label shouldn't
+suggest it is where *all* the pay goes.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## CR — #301 (step 5): Deposit auto-link with dismiss (2026-10-30)
 
 **What changed:** Migration 0097 adds `link_source` (`manual` | `auto`, default `manual`; existing rows
