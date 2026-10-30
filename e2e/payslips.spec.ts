@@ -12,7 +12,7 @@ test.describe('Payslip split deposits', () => {
     await page.getByRole('link', { name: 'Payslips' }).first().click();
     await page.getByRole('button').filter({ hasText: '3,717.50' }).first().click();
 
-    const card = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Bank deposit' }) }).last();
+    const card = page.getByTestId('bank-deposit-card');
     const lines = card.getByTestId('deposit-line');
     await expect(lines).toHaveCount(2, { timeout: 15000 });
     await expect(lines.filter({ hasText: 'Linked' })).toHaveCount(2);

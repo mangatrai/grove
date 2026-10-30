@@ -1413,7 +1413,7 @@ export function PayslipDetailPage() {
           </div>
 
           {/* Bank deposit card — one row per deposit printed on the payslip (#301); net-pay fallback otherwise */}
-          <Paper withBorder p="md">
+          <Paper withBorder p="md" data-testid="bank-deposit-card">
             <Group justify="space-between" mb="xs">
               <Title order={5} m={0}>Bank deposit</Title>
               {depositBadge ? <Badge color={depositBadge.color} variant="light" size="sm">{depositBadge.label}</Badge> : null}
