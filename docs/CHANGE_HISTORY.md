@@ -14,6 +14,25 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — #299: Deposit suggestions use the payslip employer's own salary account (2026-10-30)
+
+**What changed:** `findMatchedDeposits` now receives the payslip's `employer_id` and scopes
+suggestions to that employer's `employers_json[].salaryDepositFinancialAccountId` (explicit
+`null` = search all household accounts). The legacy `person_profile.salary_deposit_financial_account_id`
+column — which Settings mirrors from employer #1 — is only the fallback when the employer row is
+missing or predates per-employer accounts (key absent). Household-scoped payslips (no owner
+person profile) are unchanged.
+
+**Why:** FIX-059 (2026-04-09) made deposit accounts per-employer, but the matcher (added the next
+day) kept reading the person-level column. With two employers on different accounts, every
+payslip from employer #2 searched employer #1's account and got no suggestion. Surfaced while
+scoping split-deposit matching (#301) after an employer change.
+
+**Files:** `backend/src/modules/payslip/payslip.service.ts`, `payslip.routes.ts`,
+`backend/tests/payslip-upload.test.ts`.
+
+**GitHub:** https://github.com/mangatrai/grove/issues/299
+
 ## FIX — #298: Duplicate payslip check runs before the paid LLM extraction (2026-10-30)
 
 **What changed:** All four payslip PDF paths — `POST /payslips/upload`, `POST /imports/upload`,

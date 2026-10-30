@@ -522,7 +522,8 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
       snapshot.payDate,
       snapshot.netPayCurrent,
       snapshot.ownerPersonProfileId,
-      snapshot.payPeriodEnd
+      snapshot.payPeriodEnd,
+      snapshot.employerId
     );
   }
 

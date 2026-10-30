@@ -143,6 +143,7 @@ vi.mock("../src/modules/payslip/llm-extract/extract-payslip-llm.js", async (impo
 
 import { buildApp } from "../src/app.js";
 import { extractPayslipFromPdf } from "../src/modules/payslip/llm-extract/extract-payslip-llm.js";
+import { findMatchedDeposits } from "../src/modules/payslip/payslip.service.js";
 
 const llmCallCount = (): number => vi.mocked(extractPayslipFromPdf).mock.calls.length;
 
@@ -517,6 +518,108 @@ describe("GET /payslips/:id — deposit matching", () => {
       expect(ids).not.toContain(txnId);
     } finally {
       await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+    }
+  });
+});
+
+describe("findMatchedDeposits — salary account scope", () => {
+  const SEEDED_HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
+  const SEED_SAVINGS = "40000000-0000-0000-0000-000000000006";
+  const OLD_EMPLOYER_ID = "e1000000-0000-4000-8000-000000000001";
+  const NEW_EMPLOYER_ID = "e1000000-0000-4000-8000-000000000002";
+
+  async function loginToken(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  async function setEmployers(token: string, employers: unknown[]): Promise<void> {
+    const res = await request(app)
+      .patch("/household/profile")
+      .set("authorization", `Bearer ${token}`)
+      .send({ employers });
+    expect(res.status).toBe(200);
+  }
+
+  it("uses the payslip employer's own deposit account, not employer #1's", async () => {
+    const token = await loginToken();
+    const owner = await sqlStmt(
+      `SELECT pp.id FROM person_profile pp
+         JOIN app_user u ON u.id = pp.linked_user_id
+        WHERE u.email = 'owner@example.com'`
+    ).get<{ id: string }>();
+    expect(owner).toBeDefined();
+    const ownerProfileId = owner!.id;
+
+    // Employer #1 (old job) deposits to checking; employer #2 (new job) to savings.
+    await setEmployers(token, [
+      {
+        id: OLD_EMPLOYER_ID,
+        displayName: "Old Employer",
+        parserProfileId: "ibm_pay_contributions_pdf",
+        salaryDepositFinancialAccountId: SEED_BOA_CHECKING
+      },
+      {
+        id: NEW_EMPLOYER_ID,
+        displayName: "New Employer",
+        parserProfileId: "deloitte_payslip_pdf",
+        salaryDepositFinancialAccountId: SEED_SAVINGS
+      }
+    ]);
+
+    const txnId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-06-15', 3210.55, 'credit', 'New Employer Payroll', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_SAVINGS, `employer-scope-${txnId}`);
+
+    try {
+      const forNew = await findMatchedDeposits(
+        SEEDED_HOUSEHOLD_ID, "2026-06-15", 3210.55, ownerProfileId, null, NEW_EMPLOYER_ID
+      );
+      expect(forNew.map((d) => d.id)).toContain(txnId);
+
+      // Employer #1's account is checking, so the savings deposit is out of scope for its payslips.
+      const forOld = await findMatchedDeposits(
+        SEEDED_HOUSEHOLD_ID, "2026-06-15", 3210.55, ownerProfileId, null, OLD_EMPLOYER_ID
+      );
+      expect(forOld.map((d) => d.id)).not.toContain(txnId);
+
+      // No employer on the payslip → legacy person-level column (mirrors employer #1).
+      const legacy = await findMatchedDeposits(SEEDED_HOUSEHOLD_ID, "2026-06-15", 3210.55, ownerProfileId, null, null);
+      expect(legacy.map((d) => d.id)).not.toContain(txnId);
+
+      // Employer with an explicit null account → search all household accounts.
+      await setEmployers(token, [
+        {
+          id: OLD_EMPLOYER_ID,
+          displayName: "Old Employer",
+          parserProfileId: "ibm_pay_contributions_pdf",
+          salaryDepositFinancialAccountId: SEED_BOA_CHECKING
+        },
+        {
+          id: NEW_EMPLOYER_ID,
+          displayName: "New Employer",
+          parserProfileId: "deloitte_payslip_pdf",
+          salaryDepositFinancialAccountId: null
+        }
+      ]);
+      const unscoped = await findMatchedDeposits(
+        SEEDED_HOUSEHOLD_ID, "2026-06-15", 3210.55, ownerProfileId, null, NEW_EMPLOYER_ID
+      );
+      expect(unscoped.map((d) => d.id)).toContain(txnId);
+    } finally {
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+      await setEmployers(token, []);
+      await sqlStmt(`UPDATE person_profile SET salary_deposit_financial_account_id = NULL WHERE id = ?`).run(
+        ownerProfileId
+      );
     }
   });
 });

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
+import { findEmployerByPersonProfileId } from "./payslip-employer-resolve.service.js";
 import { deriveSummaryFromLineItems, validatePayslipBalance } from "./payslip-validation.js";
 import type { ValidationWarning } from "./payslip-validation.js";
 import type {
@@ -643,14 +644,42 @@ export type PayslipSnapshotPatchInput = {
 };
 
 /**
+ * Salary deposit account to scope deposit suggestions to. The payslip's own employer row wins
+ * (`employers_json[].salaryDepositFinancialAccountId`, explicit null = search all accounts); the
+ * legacy person-level column — which mirrors employer #1 — is only used when the employer row is
+ * missing or predates per-employer accounts (FIX-059).
+ */
+async function resolveSalaryDepositAccountId(
+  householdId: string,
+  ownerPersonProfileId: string,
+  employerId: string | null
+): Promise<string | null> {
+  if (employerId) {
+    const employer = await findEmployerByPersonProfileId(householdId, employerId, ownerPersonProfileId);
+    if (employer && employer.salaryDepositFinancialAccountId !== undefined) {
+      return employer.salaryDepositFinancialAccountId;
+    }
+  }
+  const profile = await qGet<{ salaryDepositFinancialAccountId: string | null }>(
+    `SELECT salary_deposit_financial_account_id AS "salaryDepositFinancialAccountId"
+       FROM person_profile
+      WHERE id = ? AND household_id = ?
+      LIMIT 1`,
+    ownerPersonProfileId,
+    householdId
+  );
+  return profile?.salaryDepositFinancialAccountId ?? null;
+}
+
+/**
  * Find bank transactions that likely represent the net pay deposit for a payslip.
  *
  * Uses `payDate` as the anchor when set, otherwise `payPeriodEnd`. Looks for posted
  * credit transactions within ±7 days of that anchor (±10 when anchored on period end
  * only) whose amount is within 1% (or $0.50, whichever is larger) of `netPayCurrent`.
- * If the payslip is person-scoped and that person has a salary deposit account
- * configured, the search is restricted to that account; otherwise all household
- * accounts are searched.
+ * If the payslip is person-scoped, the search is restricted to the salary deposit account
+ * from `resolveSalaryDepositAccountId` (the payslip employer's account); otherwise all
+ * household accounts are searched.
  *
  * Returns up to 5 candidates, closest amount match first.
  */
@@ -659,7 +688,8 @@ export async function findMatchedDeposits(
   payDate: string | null,
   netPayCurrent: number | null,
   ownerPersonProfileId: string | null,
-  payPeriodEnd?: string | null
+  payPeriodEnd?: string | null,
+  employerId?: string | null
 ): Promise<MatchedDeposit[]> {
   const effectiveDate = payDate ?? payPeriodEnd ?? null;
   if (!effectiveDate || netPayCurrent == null) {
@@ -667,18 +697,9 @@ export async function findMatchedDeposits(
   }
   const windowDays = payDate != null ? 7 : 10;
 
-  let salaryAccountId: string | null = null;
-  if (ownerPersonProfileId) {
-    const profile = await qGet<{ salaryDepositFinancialAccountId: string | null }>(
-      `SELECT salary_deposit_financial_account_id AS "salaryDepositFinancialAccountId"
-         FROM person_profile
-        WHERE id = ? AND household_id = ?
-        LIMIT 1`,
-      ownerPersonProfileId,
-      householdId
-    );
-    salaryAccountId = profile?.salaryDepositFinancialAccountId ?? null;
-  }
+  const salaryAccountId = ownerPersonProfileId
+    ? await resolveSalaryDepositAccountId(householdId, ownerPersonProfileId, employerId ?? null)
+    : null;
 
   const accountFilter = salaryAccountId ? ` AND tc.account_id = ?` : "";
   const accountParam: unknown[] = salaryAccountId ? [salaryAccountId] : [];
