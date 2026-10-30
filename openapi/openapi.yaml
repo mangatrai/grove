@@ -3818,8 +3818,15 @@ paths:
       description: |
         Returns the full payslip snapshot plus:
         - `confirmedDeposits`: transactions explicitly confirmed as the net pay deposit (F-5)
-        - `suggestedDeposits`: dynamic candidates (empty when confirmedDeposits is non-empty) (F-5)
+        - `suggestedDeposits`: dynamic candidates (F-5; see `matchMode`)
         - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
+        - Deposit matching v2 (#301): `matchMode`, `depositLines`, `linkedTotal`, `netPay`, `remainder`.
+          `lines` mode when the payslip's deposit lines (`paymentSummaryJson`) sum to net pay to the cent:
+          each line gets exact-amount candidates (posted credits, ±7 days of pay date / ±10 of period end,
+          not linked to any payslip) ranked account-mask match > employer primary account > other, then
+          date distance; `suggestedDeposits` = best candidate per unlinked line, also after a partial
+          confirm. Otherwise `net_pay` mode: single credit vs net pay (±1% / $0.50), only while nothing is
+          confirmed, and `depositLines` is empty. Read-only — nothing is written on GET.
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -3874,9 +3881,36 @@ paths:
                       $ref: '#/components/schemas/MatchedDeposit'
                   suggestedDeposits:
                     type: array
-                    description: Dynamic search candidates (only populated when confirmedDeposits is empty)
+                    description: Best candidate per unlinked deposit line (lines mode) or net-pay candidates while nothing is confirmed (net_pay mode)
                     items:
                       $ref: '#/components/schemas/MatchedDeposit'
+                  matchMode:
+                    type: string
+                    enum: [lines, net_pay]
+                  depositLines:
+                    type: array
+                    description: One entry per deposit line printed on the payslip (lines mode only)
+                    items:
+                      type: object
+                      properties:
+                        accountSuffix: { type: string, nullable: true, description: "Trailing digits of the printed account mask" }
+                        amount: { type: number }
+                        trace: { type: string, nullable: true, description: "ACH trace (Rippling)" }
+                        status: { type: string, enum: [linked, suggested, not_found] }
+                        linked:
+                          allOf: [{ $ref: '#/components/schemas/MatchedDeposit' }]
+                          nullable: true
+                        candidates:
+                          type: array
+                          items:
+                            allOf:
+                              - $ref: '#/components/schemas/MatchedDeposit'
+                              - type: object
+                                properties:
+                                  matchReason: { type: string, enum: [account_mask, primary_account, other] }
+                  linkedTotal: { type: number, description: "Sum of confirmed deposits" }
+                  netPay: { type: number, nullable: true }
+                  remainder: { type: number, nullable: true, description: "netPay − linkedTotal" }
                   lineItems:
                     type: object
                     description: Per-row line items grouped by section (CR-072)

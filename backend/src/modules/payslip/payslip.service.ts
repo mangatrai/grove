@@ -14,7 +14,8 @@ import type {
 } from "./payslip.types.js";
 import { PAYSLIP_LINE_ITEM_SECTIONS } from "./payslip.types.js";
 
-function daysBetween(a: string, b: string): number {
+/** Absolute whole days between two ISO dates. */
+export function daysBetween(a: string, b: string): number {
   return Math.abs(
     Math.round(
       (new Date(`${b}T00:00:00`).getTime() - new Date(`${a}T00:00:00`).getTime()) /
@@ -649,7 +650,7 @@ export type PayslipSnapshotPatchInput = {
  * legacy person-level column — which mirrors employer #1 — is only used when the employer row is
  * missing or predates per-employer accounts (FIX-059).
  */
-async function resolveSalaryDepositAccountId(
+export async function resolveSalaryDepositAccountId(
   householdId: string,
   ownerPersonProfileId: string,
   employerId: string | null

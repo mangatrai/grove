@@ -14,6 +14,33 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #301 (steps 3–4): Split-deposit matching — one suggestion per deposit line (2026-10-30)
+
+**What changed:** New reader `payslip-deposit-lines.ts` turns `payment_summary_json` into deposit lines
+for every profile (LLM `payment_information[]` and Rippling output). It keeps mask trailing digits,
+amount, and trace, and drops zero amounts and checks; a row with no printed account stays as an
+amount-only line. `GET /payslips/:id` now goes through `payslip-deposit-match.service.ts`:
+- **`lines` mode** (lines sum to net pay to the cent): each line gets exact-amount candidates among
+  posted household credits in the existing window (±7 days of pay date, ±10 of period end),
+  excluding transactions linked to any payslip, ranked account-mask match > employer primary account >
+  other, then date. Confirmed links are assigned to lines by amount. Suggestions keep coming for
+  unlinked lines after a partial confirm, and a linked row's `amountDelta` is measured against its line.
+- **`net_pay` mode** (no lines, or lines that don't sum to net): the previous single-deposit matcher,
+  unchanged.
+New response fields: `matchMode`, `depositLines`, `linkedTotal`, `netPay`, `remainder`. Still
+read-only; auto-link is step 5.
+
+**Why:** Both earners now split net pay across two accounts; the old matcher compared each credit to
+full net pay, so split pay got no suggestion. The lines-must-sum-to-net gate is the safeguard for LLM
+misreads (a missed second account, a wrong digit): it falls back silently rather than rejecting or
+warning, since deposit lines can't be edited in the UI. Prod data check (owner, 2026-10-30): existing
+IBM/Deloitte snapshots almost always carry a masked account and amount; masks vary
+(`*****NNNN`, `XXXXXXNNNN`), and routing numbers sometimes sit in `bank_name`/`bank_location`, which
+are ignored. The current detail page still hides suggestions once one deposit is confirmed — per-line
+display is step 6.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## CR — #301: LLM payslip prompt — one payment row per deposit account (2026-10-30)
 
 **What changed:** One rule added to the shared payslip extraction prompt: return one

@@ -421,7 +421,7 @@ Each row shows current and YTD amounts, plus hours or rate if applicable. You ca
 - **Delete** unnecessary rows (trash icon).
 - **Add** rows via the **Add line item** button (select section and fill in name, authority, amount).
 
-**Matched Deposits:** If the payslip deposit account is linked in Settings, the page shows matched transactions in the ±3-day window around the pay date. Click a matched deposit to view that transaction in the Transactions page.
+**Matched Deposits:** The page suggests the bank deposit(s) for this payslip. When the payslip lists where the pay went (one or more accounts with amounts — Rippling always, IBM/Deloitte when the AI reads it), each deposit is matched separately: same amount to the cent, within 7 days of the pay date, preferring the account whose last digits match, then the employer's primary deposit account. Split pay (e.g. part to checking, part to savings) gets one suggestion per account. If the listed deposits don't add up to net pay, or none are listed, the page falls back to looking for one deposit equal to net pay. A deposit already linked to another payslip isn't suggested again. Click a matched deposit to view that transaction in the Transactions page.
 
 **Validation Alerts:** Warnings appear for:
 

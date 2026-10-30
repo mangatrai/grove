@@ -14,12 +14,12 @@ import {
 } from "./payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
+import { matchPayslipDeposits } from "./payslip-deposit-match.service.js";
 import {
   addConfirmedDeposit,
   addPayslipLineItem,
   deletePayslipLineItem,
   deletePayslipSnapshotForHousehold,
-  findMatchedDeposits,
   findPayslipByHouseholdChecksum,
   getConfirmedDeposits,
   getPayslipLineItems,
@@ -32,7 +32,6 @@ import {
   removeConfirmedDeposit,
   sha256Hex
 } from "./payslip.service.js";
-import type { MatchedDeposit } from "./payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "./payslip.types.js";
 import { validatePayslipBalance } from "./payslip-validation.js";
 import type { PayslipLineItemSection } from "./payslip.types.js";
@@ -524,20 +523,10 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     getPayslipLineItems(snapshot.id, householdId)
   ]);
 
-  let suggestedDeposits: MatchedDeposit[] = [];
-  if (confirmedDeposits.length === 0) {
-    suggestedDeposits = await findMatchedDeposits(
-      householdId,
-      snapshot.payDate,
-      snapshot.netPayCurrent,
-      snapshot.ownerPersonProfileId,
-      snapshot.payPeriodEnd,
-      snapshot.employerId
-    );
-  }
+  const deposits = await matchPayslipDeposits(householdId, snapshot, confirmedDeposits);
 
   const validationWarnings = validatePayslipBalance(snapshot, lineItems);
-  res.json({ ...snapshot, confirmedDeposits, suggestedDeposits, lineItems, validationWarnings });
+  res.json({ ...snapshot, ...deposits, lineItems, validationWarnings });
 });
 
 payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
