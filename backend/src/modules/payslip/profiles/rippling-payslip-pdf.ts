@@ -3,30 +3,24 @@
  * Input is `pdf-parse` text: WeasyPrint one-pager with a clean text layer, but labels and amounts are
  * glued (`Federal Income Tax$1,059.24$1,059.24`) and the header block comes after the body.
  *
- * Fail-closed: any unrecognized section, unexpected line shape, or total that does not tie out to the
- * cent rejects the parse with a specific reason — a new layout must surface, never be misparsed.
+ * Plain parsing: whatever is read is persisted, right or wrong. Totals are NOT cross-checked here —
+ * `validatePayslipBalance` raises mismatches as warnings on the detail page, where the user edits line
+ * items (same flow as LLM payslips). Unknown sections are kept as line items under the closest section;
+ * lines that fit no shape are recorded in `rawExtractJson.unrecognizedLines` for parser follow-up.
+ * Rejects only when the text is not a readable Rippling stub (no header block, no pay date, no totals).
  * Privacy: SSN fragments and addresses in the header are never read into the result.
  */
-import type { LineItemForInsert, ParsedPayslipSummary, PayslipHybridColumns } from "../payslip.types.js";
+import type {
+  LineItemForInsert,
+  ParsedPayslipSummary,
+  PayslipHybridColumns,
+  PayslipLineItemSection
+} from "../payslip.types.js";
 import { normalizePdfExtractText } from "./ibm-payslip-pdf.js";
 
 export const RIPPLING_PARSER_SOURCE = "rippling_pdf_text" as const;
 
-export type RipplingParseFailureReason =
-  | "rippling_header_missing"
-  | "rippling_pay_period_unparseable"
-  | "rippling_pay_date_unparseable"
-  | "rippling_unrecognized_section"
-  | "rippling_unrecognized_line"
-  | "rippling_deposit_malformed"
-  | "rippling_summary_incomplete"
-  | "rippling_no_earnings"
-  | "rippling_earnings_mismatch"
-  | "rippling_taxes_mismatch"
-  | "rippling_net_mismatch"
-  | "rippling_deductions_without_detail"
-  | "rippling_header_totals_mismatch"
-  | "rippling_deposits_mismatch";
+export type RipplingParseFailureReason = "rippling_header_missing" | "rippling_no_pay_date" | "rippling_no_totals";
 
 /** Same keys as the LLM `payment_information[]` rows, plus the ACH trace. */
 export type RipplingDepositLine = {
@@ -44,7 +38,10 @@ export type RipplingParseResult =
   | { ok: true; summary: ParsedPayslipSummary; hybrid: PayslipHybridColumns; lineItems: LineItemForInsert[] }
   | { ok: false; reason: RipplingParseFailureReason; detail: string };
 
-type Section = "none" | "time_off" | "earnings" | "taxes" | "summary" | "deposits";
+type Section = "none" | "time_off" | "earnings" | "taxes" | "summary" | "deposits" | "extra";
+
+/** Rows from a section heading this parser has no dedicated handling for (e.g. the first deductions). */
+type ExtraRow = AmountRow & { section: Exclude<PayslipLineItemSection, "earnings" | "tax_deductions">; heading: string };
 
 type EarningRow = {
   name: string;
@@ -107,6 +104,15 @@ function usDateToIso(s: string): string | null {
   const day = Number(dd);
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Closest line-item section for an unknown heading; split column labels are stripped from the stored heading. */
+function sectionForHeading(line: string): { section: ExtraRow["section"]; heading: string } {
+  const heading = line.replace(/(CURRENT|PERIOD|YTD|AMOUNT|\s)+$/, "").trim() || line;
+  if (/PRE[- ]?TAX/.test(heading)) return { section: "pre_tax_deductions", heading };
+  if (/(POST|AFTER)[- ]?TAX/.test(heading)) return { section: "post_tax_deductions", heading };
+  if (/DEDUCTION/.test(heading)) return { section: "other_deductions", heading };
+  return { section: "other_information", heading };
 }
 
 /** All-caps line with no digits or amounts — how Rippling renders section headings. */
@@ -174,10 +180,6 @@ function sumHours(values: Array<number | null>): string | null {
   return String(Math.round(present.reduce((a, b) => a + b, 0) * 10000) / 10000);
 }
 
-function fmt(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
-
 export function parseRipplingPayslipText(text: string): RipplingParseResult {
   const lines = toLines(text);
 
@@ -194,19 +196,15 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
   const periodParts = periodRaw?.split(/\s+-\s+/) ?? [];
   const payPeriodStart = periodParts.length === 2 ? usDateToIso(periodParts[0]!) : null;
   const payPeriodEnd = periodParts.length === 2 ? usDateToIso(periodParts[1]!) : null;
-  if (!payPeriodStart || !payPeriodEnd) {
-    return fail("rippling_pay_period_unparseable", periodRaw ?? "missing");
-  }
   const payDateRaw = valueAfterLabel(header, "PAY DATE:");
-  const payDate = payDateRaw ? usDateToIso(payDateRaw) : null;
+  const payDate = (payDateRaw ? usDateToIso(payDateRaw) : null) ?? payPeriodEnd;
   if (!payDate) {
-    return fail("rippling_pay_date_unparseable", payDateRaw ?? "missing");
+    return fail("rippling_no_pay_date", `PAY DATE ${payDateRaw ?? "missing"}, PAY PERIOD ${periodRaw ?? "missing"}`);
   }
   const headerGrossRaw = valueAfterLabel(header, "GROSS PAY:");
   const headerNetRaw = valueAfterLabel(header, "NET PAY:");
-  if (!headerGrossRaw || !MONEY_TOKEN.test(headerGrossRaw) || !headerNetRaw || !MONEY_TOKEN.test(headerNetRaw)) {
-    return fail("rippling_header_missing", "GROSS PAY / NET PAY amounts not found");
-  }
+  const headerGrossCents = headerGrossRaw && MONEY_TOKEN.test(headerGrossRaw) ? moneyToCents(headerGrossRaw) : null;
+  const headerNetCents = headerNetRaw && MONEY_TOKEN.test(headerNetRaw) ? moneyToCents(headerNetRaw) : null;
   const employerName = valueAfterLabel(header, "EMPLOYER:");
   const employeeName = valueAfterLabel(header, "PAID TO:");
   const paystubId = /^PAYSTUB ID:\s*(\S+)/.exec(lines[headerEnd]!)?.[1] ?? null;
@@ -214,9 +212,13 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
   // ---- Body: section state machine ----
   const earnings: EarningRow[] = [];
   const taxes: AmountRow[] = [];
+  const extras: ExtraRow[] = [];
   const summary = new Map<SummaryLabel, AmountRow>();
   const deposits: RipplingDepositLine[] = [];
+  const unrecognizedLines: string[] = [];
+  const unrecognized = (where: string, line: string) => unrecognizedLines.push(`${where}: ${line.slice(0, 80)}`);
   let section: Section = "none";
+  let extraSection: { section: ExtraRow["section"]; heading: string } | null = null;
 
   for (let i = 0; i < body.length; i++) {
     const line = body[i]!;
@@ -242,7 +244,10 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
       section = "deposits";
       // `Acct# ...560 Trace:` / `<trace>` / `$amount` — trace may also sit on the Acct# line.
       const head = /^Acct#\s*(\S+)\s+Trace:\s*(\d*)$/.exec(line);
-      if (!head) return fail("rippling_deposit_malformed", line);
+      if (!head) {
+        unrecognized("DEPOSIT", line);
+        continue;
+      }
       let trace: string | null = head[2] || null;
       let next = body[i + 1];
       if (!trace && next && /^\d{6,}$/.test(next)) {
@@ -251,7 +256,8 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
         next = body[i + 1];
       }
       if (!next || !MONEY_TOKEN.test(next)) {
-        return fail("rippling_deposit_malformed", `no amount after ${head[1]}`);
+        unrecognized("DEPOSIT", `${line} (no amount)`);
+        continue;
       }
       i++;
       deposits.push({
@@ -268,83 +274,65 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
     }
 
     if (section === "earnings" && earnings.length === 0 && EARNINGS_HEADER_FRAGMENTS.has(line)) continue;
+    if (section === "extra" && EARNINGS_HEADER_FRAGMENTS.has(line)) continue;
     if (isHeadingLike(line)) {
-      return fail("rippling_unrecognized_section", line);
+      section = "extra";
+      extraSection = sectionForHeading(line);
+      continue;
     }
 
     if (section === "time_off") continue;
     if (section === "earnings") {
       const row = parseEarningRow(line);
-      if (!row) return fail("rippling_unrecognized_line", `EARNINGS: ${line.slice(0, 80)}`);
-      earnings.push(row);
+      if (row) earnings.push(row);
+      else unrecognized("EARNINGS", line);
       continue;
     }
     if (section === "taxes") {
       const row = parseGluedRow(line);
-      if (!row) return fail("rippling_unrecognized_line", `EMPLOYEE TAXES: ${line.slice(0, 80)}`);
-      taxes.push(row);
+      if (row) taxes.push(row);
+      else unrecognized("EMPLOYEE TAXES", line);
       continue;
     }
     if (section === "summary") {
       const row = parseGluedRow(line);
       const label = SUMMARY_LABELS.find((l) => l === row?.name);
-      if (!row || !label || summary.has(label)) {
-        return fail("rippling_unrecognized_line", `SUMMARY: ${line.slice(0, 80)}`);
-      }
-      summary.set(label, row);
+      if (row && label && !summary.has(label)) summary.set(label, row);
+      else unrecognized("SUMMARY", line);
       continue;
     }
-    return fail("rippling_unrecognized_line", line.slice(0, 80));
+    if (section === "extra" && extraSection) {
+      const row = parseGluedRow(line);
+      if (row) extras.push({ ...row, ...extraSection });
+      else unrecognized(extraSection.heading, line);
+      continue;
+    }
+    unrecognized("BODY", line);
   }
 
-  // ---- Tie-outs, to the cent ----
+  // ---- Totals: SUMMARY first, header block as fallback. No cross-checks (see file header). ----
   const gross = summary.get("Gross Pay");
   const deductions = summary.get("Deductions");
   const taxTotal = summary.get("Taxes");
   const net = summary.get("Net Pay");
-  if (!gross || !deductions || !taxTotal || !net) {
-    return fail("rippling_summary_incomplete", `found ${[...summary.keys()].join(", ") || "none"}`);
-  }
-  if (earnings.length === 0) {
-    return fail("rippling_no_earnings", "EARNINGS section has no rows");
+  const grossCurrentCents = gross?.currentCents ?? headerGrossCents;
+  const netCurrentCents = net?.currentCents ?? headerNetCents;
+  if (grossCurrentCents == null && netCurrentCents == null) {
+    return fail("rippling_no_totals", "neither SUMMARY nor header shows Gross Pay / Net Pay");
   }
 
-  const earningsCurrent = sumCents(earnings.map((e) => e.currentCents));
-  const earningsYtd = sumCents(earnings.map((e) => e.ytdCents));
-  if (earningsCurrent !== gross.currentCents || earningsYtd !== gross.ytdCents) {
-    return fail(
-      "rippling_earnings_mismatch",
-      `earnings ${fmt(earningsCurrent)}/${fmt(earningsYtd)} vs gross ${fmt(gross.currentCents)}/${fmt(gross.ytdCents)}`
-    );
-  }
-  const taxesCurrent = sumCents(taxes.map((t) => t.currentCents));
-  const taxesYtd = sumCents(taxes.map((t) => t.ytdCents));
-  if (taxesCurrent !== taxTotal.currentCents || taxesYtd !== taxTotal.ytdCents) {
-    return fail(
-      "rippling_taxes_mismatch",
-      `tax rows ${fmt(taxesCurrent)}/${fmt(taxesYtd)} vs Taxes ${fmt(taxTotal.currentCents)}/${fmt(taxTotal.ytdCents)}`
-    );
-  }
-  // No deduction section has been seen on a real Rippling stub yet — refuse to guess pre- vs post-tax.
-  if (deductions.currentCents !== 0 || deductions.ytdCents !== 0) {
-    return fail(
-      "rippling_deductions_without_detail",
-      `Deductions ${fmt(deductions.currentCents)}/${fmt(deductions.ytdCents)} with no deduction rows`
-    );
-  }
-  for (const col of ["currentCents", "ytdCents"] as const) {
-    const implied = gross[col] - taxTotal[col] - deductions[col];
-    if (implied !== net[col]) {
-      return fail("rippling_net_mismatch", `${col === "currentCents" ? "current" : "YTD"} ${fmt(implied)} vs Net Pay ${fmt(net[col])}`);
-    }
-  }
-  if (moneyToCents(headerGrossRaw) !== gross.currentCents || moneyToCents(headerNetRaw) !== net.currentCents) {
-    return fail("rippling_header_totals_mismatch", `header ${headerGrossRaw}/${headerNetRaw} vs summary`);
-  }
-  const depositCents = deposits.reduce((acc, d) => acc + Math.round(d.amount * 100), 0);
-  if (depositCents !== net.currentCents) {
-    return fail("rippling_deposits_mismatch", `deposits ${fmt(depositCents)} vs Net Pay ${fmt(net.currentCents)}`);
-  }
+  const sectionSum = (rows: ExtraRow[], col: "currentCents" | "ytdCents"): number | null =>
+    rows.length > 0 ? sumCents(rows.map((r) => r[col])) : null;
+  const preRows = extras.filter((r) => r.section === "pre_tax_deductions");
+  const postRows = extras.filter((r) => r.section === "post_tax_deductions" || r.section === "other_deductions");
+  const deductionRowsSeen = preRows.length + postRows.length > 0;
+  /** No deduction rows: a $0 Deductions total means 0/0; a non-zero total stays null (warning surfaces it). */
+  const bucket = (rows: ExtraRow[], col: "currentCents" | "ytdCents"): number | null => {
+    if (deductionRowsSeen) return sectionSum(rows, col) ?? 0;
+    return deductions && deductions[col] === 0 ? 0 : null;
+  };
+  const otherInfoRows = extras.filter((r) => r.section === "other_information");
+  const toAmount = (cents: number | null | undefined) => (cents == null ? null : centsToAmount(cents));
 
   // ---- Persist shape ----
   const parsedSummary: ParsedPayslipSummary = {
@@ -353,26 +341,29 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
     payDate,
     hoursOrDaysCurrent: sumHours(earnings.map((e) => e.hoursCurrent)),
     hoursOrDaysYtd: sumHours(earnings.map((e) => e.hoursYtd)),
-    grossPayCurrent: centsToAmount(gross.currentCents),
-    grossPayYtd: centsToAmount(gross.ytdCents),
-    employeeTaxesCurrent: centsToAmount(taxTotal.currentCents),
-    employeeTaxesYtd: centsToAmount(taxTotal.ytdCents),
-    preTaxDeductionsCurrent: 0,
-    preTaxDeductionsYtd: 0,
-    postTaxDeductionsCurrent: 0,
-    postTaxDeductionsYtd: 0,
-    netPayCurrent: centsToAmount(net.currentCents),
-    netPayYtd: centsToAmount(net.ytdCents),
+    grossPayCurrent: toAmount(grossCurrentCents),
+    grossPayYtd: toAmount(gross?.ytdCents),
+    employeeTaxesCurrent: toAmount(taxTotal?.currentCents ?? (taxes.length > 0 ? sumCents(taxes.map((t) => t.currentCents)) : null)),
+    employeeTaxesYtd: toAmount(taxTotal?.ytdCents ?? (taxes.length > 0 ? sumCents(taxes.map((t) => t.ytdCents)) : null)),
+    preTaxDeductionsCurrent: toAmount(bucket(preRows, "currentCents")),
+    preTaxDeductionsYtd: toAmount(bucket(preRows, "ytdCents")),
+    postTaxDeductionsCurrent: toAmount(bucket(postRows, "currentCents")),
+    postTaxDeductionsYtd: toAmount(bucket(postRows, "ytdCents")),
+    netPayCurrent: toAmount(netCurrentCents),
+    netPayYtd: toAmount(net?.ytdCents),
     taxableEarningsCurrent: null,
     taxableEarningsYtd: null,
-    otherInformationCurrent: null,
-    otherInformationYtd: null,
+    otherInformationCurrent: toAmount(sectionSum(otherInfoRows, "currentCents")),
+    otherInformationYtd: toAmount(sectionSum(otherInfoRows, "ytdCents")),
     rawExtractJson: {
       parser: RIPPLING_PARSER_SOURCE,
       paystubId,
       earningsRows: earnings.length,
       taxRows: taxes.length,
-      depositCount: deposits.length
+      depositCount: deposits.length,
+      ...(deductions ? { deductionsCurrent: toAmount(deductions.currentCents), deductionsYtd: toAmount(deductions.ytdCents) } : {}),
+      ...(extras.length > 0 ? { extraSections: [...new Set(extras.map((r) => `${r.heading} → ${r.section}`))] } : {}),
+      ...(unrecognizedLines.length > 0 ? { unrecognizedLines } : {})
     }
   };
 
@@ -423,6 +414,18 @@ export function parseRipplingPayslipText(text: string): RipplingParseResult {
       amountCurrent: centsToAmount(t.currentCents),
       amountYtd: centsToAmount(t.ytdCents),
       rawSection: "EMPLOYEE TAXES"
+    })),
+    ...extras.map((r) => ({
+      ...blankLine,
+      section: r.section,
+      sortOrder: extras.filter((x) => x.section === r.section).indexOf(r),
+      name: r.name,
+      hoursOrDaysCurrent: null,
+      hoursOrDaysYtd: null,
+      rate: null,
+      amountCurrent: centsToAmount(r.currentCents),
+      amountYtd: centsToAmount(r.ytdCents),
+      rawSection: r.heading
     }))
   ];
 

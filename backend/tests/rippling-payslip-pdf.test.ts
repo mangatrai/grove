@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseRipplingPayslipText } from "../src/modules/payslip/profiles/rippling-payslip-pdf.js";
-import { BASE_SUMMARY, BASE_TAXES, ripplingPayslipText as fixture } from "./fixtures/rippling-payslip-text.js";
+import { BASE_DEPOSITS, BASE_SUMMARY, BASE_TAXES, ripplingPayslipText as fixture } from "./fixtures/rippling-payslip-text.js";
 
 function expectFailure(text: string, reason: string) {
   const r = parseRipplingPayslipText(text);
@@ -143,95 +143,119 @@ describe("parseRipplingPayslipText — valid stubs", () => {
   });
 });
 
-describe("parseRipplingPayslipText — fail closed", () => {
-  it("unknown section heading (e.g. first stub with deductions)", () => {
-    const r = expectFailure(
-      fixture({ extraBody: ["PRE-TAX DEDUCTIONSCURRENT PERIODYTD AMOUNT", "401(k)$250.00$250.00"] }),
-      "rippling_unrecognized_section"
-    );
-    if (!r.ok) expect(r.detail).toContain("PRE-TAX DEDUCTIONS");
-  });
+describe("parseRipplingPayslipText — plain parsing keeps the data", () => {
+  const DEDUCTION_SUMMARY = ["Gross Pay$5,000.00$10,000.00", "Deductions$300.00$600.00", "Taxes$1,282.50$2,565.00", "Net Pay$3,417.50$6,835.00"];
 
-  it("unexpected line shape inside a known section", () => {
-    expectFailure(fixture({ taxes: [...BASE_TAXES, "State Tax 12.00"] }), "rippling_unrecognized_line");
-    expectFailure(fixture({ earnings: ["Salary $5,000.00"] }), "rippling_unrecognized_line");
-    expectFailure(
-      fixture({ summary: [...BASE_SUMMARY, "Employer Contributions$10.00$10.00"] }),
-      "rippling_unrecognized_line"
-    );
-  });
-
-  it("Σ earnings ≠ Gross Pay", () => {
-    expectFailure(fixture({ earnings: ["Salary - 40 $4,999.99 80 $9,999.99"] }), "rippling_earnings_mismatch");
-  });
-
-  it("Σ tax rows ≠ Taxes", () => {
-    expectFailure(fixture({ taxes: BASE_TAXES.slice(0, 2) }), "rippling_taxes_mismatch");
-  });
-
-  it("Gross − Taxes − Deductions ≠ Net Pay (current and YTD)", () => {
-    expectFailure(
+  it("maps unknown deduction sections to the closest line-item section", () => {
+    const r = parseRipplingPayslipText(
       fixture({
-        summary: ["Gross Pay$5,000.00$10,000.00", "Deductions$0.00$0.00", "Taxes$1,282.50$2,565.00", "Net Pay$3,717.51$7,435.00"],
-        headerNet: "$3,717.51",
-        deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,717.51"]
-      }),
-      "rippling_net_mismatch"
+        extraBody: [
+          "PRE-TAX DEDUCTIONSCURRENT PERIODYTD AMOUNT",
+          "401(k)$250.00$500.00",
+          "POST-TAX DEDUCTIONSCURRENT PERIODYTD AMOUNT",
+          "Roth 401(k)$50.00$100.00",
+          "EMPLOYER BENEFITSCURRENT PERIODYTD AMOUNT",
+          "Employer HSA$25.00$50.00"
+        ],
+        summary: DEDUCTION_SUMMARY,
+        headerNet: "$3,417.50",
+        deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,417.50"]
+      })
     );
-    expectFailure(
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary).toMatchObject({
+      preTaxDeductionsCurrent: 250,
+      preTaxDeductionsYtd: 500,
+      postTaxDeductionsCurrent: 50,
+      postTaxDeductionsYtd: 100,
+      otherInformationCurrent: 25,
+      netPayCurrent: 3417.5
+    });
+    const extra = r.lineItems.filter((l) => !["earnings", "tax_deductions"].includes(l.section));
+    expect(extra.map((l) => [l.section, l.name, l.amountCurrent, l.rawSection])).toEqual([
+      ["pre_tax_deductions", "401(k)", 250, "PRE-TAX DEDUCTIONS"],
+      ["post_tax_deductions", "Roth 401(k)", 50, "POST-TAX DEDUCTIONS"],
+      ["other_information", "Employer HSA", 25, "EMPLOYER BENEFITS"]
+    ]);
+    expect(r.summary.rawExtractJson.extraSections).toEqual([
+      "PRE-TAX DEDUCTIONS → pre_tax_deductions",
+      "POST-TAX DEDUCTIONS → post_tax_deductions",
+      "EMPLOYER BENEFITS → other_information"
+    ]);
+  });
+
+  it("non-zero Deductions with no rows: buckets stay null, the total is kept in rawExtractJson", () => {
+    const r = parseRipplingPayslipText(fixture({ summary: DEDUCTION_SUMMARY, headerNet: "$3,417.50" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary.preTaxDeductionsCurrent).toBeNull();
+    expect(r.summary.postTaxDeductionsCurrent).toBeNull();
+    expect(r.summary.rawExtractJson).toMatchObject({ deductionsCurrent: 300, deductionsYtd: 600 });
+  });
+
+  it("persists totals that do not tie out, as printed", () => {
+    const r = parseRipplingPayslipText(
       fixture({
-        summary: ["Gross Pay$5,000.00$10,000.00", "Deductions$0.00$0.00", "Taxes$1,282.50$2,565.00", "Net Pay$3,717.50$7,400.00"]
-      }),
-      "rippling_net_mismatch"
+        earnings: ["Salary - 40 $4,999.99 80 $9,999.99"],
+        taxes: BASE_TAXES.slice(0, 2),
+        deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,000.00"]
+      })
     );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary).toMatchObject({ grossPayCurrent: 5000, employeeTaxesCurrent: 1282.5, netPayCurrent: 3717.5 });
+    expect(r.lineItems.find((l) => l.section === "earnings")?.amountCurrent).toBe(4999.99);
+    expect(r.lineItems.filter((l) => l.section === "tax_deductions")).toHaveLength(2);
+    expect(JSON.parse(r.hybrid.paymentSummaryJson!)).toHaveLength(1);
   });
 
-  it("non-zero Deductions with no deduction rows", () => {
-    expectFailure(
+  it("records lines it cannot read and keeps parsing", () => {
+    const r = parseRipplingPayslipText(
       fixture({
-        summary: ["Gross Pay$5,000.00$10,000.00", "Deductions$100.00$100.00", "Taxes$1,282.50$2,565.00", "Net Pay$3,617.50$7,335.00"],
-        headerNet: "$3,617.50",
-        deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,617.50"]
-      }),
-      "rippling_deductions_without_detail"
+        earnings: ["Salary - 40 $5,000.00 80 $10,000.00", "Salary $5,000.00"],
+        taxes: [...BASE_TAXES, "State Tax 12.00"],
+        summary: [...BASE_SUMMARY, "Employer Contributions$10.00$10.00"],
+        deposits: [...BASE_DEPOSITS, "Acct# ...333 Trace:", "000000000000003"]
+      })
     );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary.rawExtractJson.unrecognizedLines).toEqual([
+      "EARNINGS: Salary $5,000.00",
+      "EMPLOYEE TAXES: State Tax 12.00",
+      "SUMMARY: Employer Contributions$10.00$10.00",
+      "DEPOSIT: Acct# ...333 Trace: (no amount)"
+    ]);
+    expect(r.lineItems.filter((l) => l.section === "tax_deductions")).toHaveLength(3);
+    expect(JSON.parse(r.hybrid.paymentSummaryJson!)).toHaveLength(2);
   });
 
-  it("Σ deposits ≠ Net Pay, including no deposits", () => {
-    expectFailure(fixture({ deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,217.50"] }), "rippling_deposits_mismatch");
-    expectFailure(fixture({ deposits: [] }), "rippling_deposits_mismatch");
+  it("falls back to the header block when SUMMARY rows are missing", () => {
+    const r = parseRipplingPayslipText(fixture({ summary: [] }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.summary).toMatchObject({ grossPayCurrent: 5000, netPayCurrent: 3717.5, grossPayYtd: null, netPayYtd: null });
+    expect(r.summary.employeeTaxesCurrent).toBe(1282.5);
   });
 
-  it("header GROSS/NET disagree with SUMMARY", () => {
-    expectFailure(fixture({ headerGross: "$5,000.01" }), "rippling_header_totals_mismatch");
+  it("uses the period end when PAY DATE is unreadable", () => {
+    const r = parseRipplingPayslipText(fixture({ payDate: "13/45/2026" }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.summary.payDate).toBe("2026-06-15");
   });
+});
 
-  it("deposit block without an amount", () => {
-    expectFailure(fixture({ deposits: ["Acct# ...111 Trace:", "000000000000001"] }), "rippling_deposit_malformed");
-  });
-
-  it("missing or unparseable pay period / pay date", () => {
-    expectFailure(fixture({ payPeriod: "June 1 - June 15" }), "rippling_pay_period_unparseable");
-    expectFailure(fixture({ payDate: "2026-06-15" }), "rippling_pay_date_unparseable");
-    expectFailure(fixture({ payDate: "13/45/2026" }), "rippling_pay_date_unparseable");
-  });
-
-  it("missing header block or summary rows", () => {
+describe("parseRipplingPayslipText — not a readable Rippling stub", () => {
+  it("no header block", () => {
     expectFailure(fixture().replace("EARNINGS STATEMENT", "STATEMENT"), "rippling_header_missing");
-    expectFailure(fixture({ summary: BASE_SUMMARY.slice(0, 3) }), "rippling_summary_incomplete");
   });
 
-  it("no earnings rows", () => {
-    expectFailure(
-      fixture({
-        earnings: [],
-        taxes: [],
-        summary: ["Gross Pay$0.00$0.00", "Deductions$0.00$0.00", "Taxes$0.00$0.00", "Net Pay$0.00$0.00"],
-        headerGross: "$0.00",
-        headerNet: "$0.00",
-        deposits: []
-      }),
-      "rippling_no_earnings"
-    );
+  it("no pay date and no pay period", () => {
+    expectFailure(fixture({ payDate: "soon", payPeriod: "June" }), "rippling_no_pay_date");
+  });
+
+  it("no gross or net anywhere", () => {
+    expectFailure(fixture({ summary: [], headerGross: "n/a", headerNet: "n/a" }), "rippling_no_totals");
   });
 });

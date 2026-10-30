@@ -14,6 +14,25 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #301: Rippling parser keeps every payslip; arithmetic checks stay in one place (2026-10-30)
+
+**What changed:** The Rippling parser no longer rejects a payslip whose totals don't tie out. It saves
+what it reads, as printed. Unknown sections become line items under the closest section (`PRE-TAX…` →
+pre-tax, `POST-/AFTER-TAX…` → post-tax, other `…DEDUCTION…` → other deductions, anything else →
+other information, with `raw_section` = heading). Unreadable lines are kept in
+`raw_extract_json.unrecognizedLines`. When SUMMARY rows are missing, gross/net come from the header
+block; when PAY DATE is unreadable, the pay date falls back to the period end. A non-zero Deductions
+total with no deduction rows leaves the pre/post buckets null and keeps the total in
+`raw_extract_json`. Rejection (`422 PAYSLIP_TEXT_PARSE_FAILED`) is now limited to text that isn't a
+readable Rippling stub: no header block, no pay date or period, or no gross and no net.
+
+**Why (owner):** Rejecting loses data. The existing flow is to save, show `validatePayslipBalance`
+warnings on the detail page, and let the user edit line items. That flow already handles messy
+Deloitte LLM output; the parser's own tie-out checks duplicated it. Supersedes the "fail-closed"
+section of the entry below.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## CR — #301 (steps 1–2): Rippling payslip parser — deterministic, no LLM (2026-10-30)
 
 **What changed:** New parser profile `rippling_payslip_pdf` ("Rippling (PDF)" in Employer Setup).

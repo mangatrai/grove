@@ -1493,7 +1493,7 @@ export function ImportWorkspacePage() {
               <strong>IBM Pay &amp; Contributions:</strong> choose <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if needed; <strong>0</strong> ledger lines after parse is normal. <strong>Run import</strong> runs parse and canonicalize together; split steps live under <em>Separate steps</em> in Run import.
             </Text>
             <Text size="sm" mt={6}>
-              <strong>Rippling:</strong> parsed instantly from the PDF text (no AI). If the layout has something new (e.g. a deduction section), the file fails with the reason instead of guessing.
+              <strong>Rippling:</strong> parsed instantly from the PDF text (no AI). Totals that don't add up are saved anyway and flagged on the payslip detail page for you to fix.
             </Text>
           </Paper>
         </Collapse>

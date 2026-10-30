@@ -122,10 +122,29 @@ describe("POST /payslips/upload — Rippling employer", () => {
     ]);
   });
 
-  it("rejects a layout it does not recognize with 422 and saves nothing", async () => {
+  it("saves a stub with a new section and leaves the arithmetic to validationWarnings", async () => {
+    // 401(k) row under a section the parser has never seen; SUMMARY still says Deductions $0 → net doesn't balance.
     vi.mocked(extractPdfText).mockResolvedValueOnce(
-      ripplingPayslipText({ extraBody: ["PRE-TAX DEDUCTIONSCURRENT PERIODYTD AMOUNT", "401(k)$250.00$250.00"] })
+      ripplingPayslipText({ extraBody: ["PRE-TAX DEDUCTIONSCURRENT PERIODYTD AMOUNT", "401(k)$250.00$250.00"], payDate: "07/15/2026" })
     );
+    const up = await request(app)
+      .post("/payslips/upload")
+      .set("authorization", `Bearer ${token}`)
+      .field("employerId", RIPPLING_EMPLOYER_ID)
+      .attach("file", uniquePdf("upload-new-section"), "stub.pdf");
+    expect(up.status).toBe(201);
+
+    const detail = await request(app)
+      .get(`/payslips/${up.body.snapshot.id as string}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.preTaxDeductionsCurrent).toBe(250);
+    expect(detail.body.lineItems.pre_tax_deductions.map((l: { name: string }) => l.name)).toEqual(["401(k)"]);
+    expect(detail.body.validationWarnings.map((w: { code: string }) => w.code)).toEqual(["ARITHMETIC_IMBALANCE"]);
+  });
+
+  it("rejects text that is not a Rippling stub with 422 and saves nothing", async () => {
+    vi.mocked(extractPdfText).mockResolvedValueOnce("Some other payroll provider\nNet Pay 100.00");
     const before = await sqlStmt(`SELECT COUNT(*)::int AS n FROM payslip_snapshot`).get<{ n: number }>();
 
     const up = await request(app)
@@ -136,7 +155,7 @@ describe("POST /payslips/upload — Rippling employer", () => {
 
     expect(up.status).toBe(422);
     expect(up.body.code).toBe("PAYSLIP_TEXT_PARSE_FAILED");
-    expect(up.body.detail).toMatch(/^rippling_unrecognized_section: PRE-TAX DEDUCTIONS/);
+    expect(up.body.detail).toMatch(/^rippling_header_missing: /);
     const after = await sqlStmt(`SELECT COUNT(*)::int AS n FROM payslip_snapshot`).get<{ n: number }>();
     expect(after!.n).toBe(before!.n);
     expect(extractPayslipFromPdf).not.toHaveBeenCalled();
@@ -196,10 +215,8 @@ describe("Import session with rippling_payslip_pdf", () => {
     expect(extractPayslipFromPdf).not.toHaveBeenCalled();
   });
 
-  it("marks the file failed with the parser's reason when the layout does not tie out", async () => {
-    vi.mocked(extractPdfText).mockResolvedValueOnce(
-      ripplingPayslipText({ deposits: ["Acct# ...111 Trace:", "000000000000001", "$3,000.00"] })
-    );
+  it("marks the file failed with the parser's reason when the PDF is not a Rippling stub", async () => {
+    vi.mocked(extractPdfText).mockResolvedValueOnce(ripplingPayslipText({ payDate: "soon", payPeriod: "June" }));
     const { sessionId, fileId, bind } = await bindAndParse(uniquePdf("session-bad"));
     expect(bind.status).toBe(200);
 
@@ -217,7 +234,7 @@ describe("Import session with rippling_payslip_pdf", () => {
     expect(file!.status).toBe("failed");
     expect(JSON.parse(file!.confidence_summary)).toMatchObject({
       reason: "payslip_text_parse_failed",
-      detail: expect.stringMatching(/^rippling_deposits_mismatch: /)
+      detail: expect.stringMatching(/^rippling_no_pay_date: /)
     });
   });
 

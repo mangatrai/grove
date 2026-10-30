@@ -3678,9 +3678,10 @@ paths:
       description: |
         Parser comes from the employer's `parserProfileId`. `ibm_pay_contributions_pdf` runs LLM vision inline;
         `rippling_payslip_pdf` is parsed deterministically from the PDF text layer (no LLM, #301) and stores
-        per-account deposits in `paymentSummaryJson`. A Rippling layout that does not tie out returns
-        `422 PAYSLIP_TEXT_PARSE_FAILED` with `detail` (`<reason>: <specifics>`, e.g.
-        `rippling_unrecognized_section: PRE-TAX DEDUCTIONS…`) and saves nothing. Duplicate checksum → `409 DUPLICATE_PAYSLIP`.
+        per-account deposits in `paymentSummaryJson`. Totals that don't balance are saved as printed and
+        surface in `validationWarnings`. Only text that isn't a readable Rippling stub returns
+        `422 PAYSLIP_TEXT_PARSE_FAILED` with `detail` (`rippling_header_missing` | `rippling_no_pay_date` |
+        `rippling_no_totals`, then specifics) and saves nothing. Duplicate checksum → `409 DUPLICATE_PAYSLIP`.
       security: [{ bearerAuth: [] }]
   /payslips/manual:
     post:
