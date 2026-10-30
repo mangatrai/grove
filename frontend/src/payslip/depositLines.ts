@@ -21,6 +21,14 @@ export function accountMaskMatches(accountMask: string | null, accountSuffix: st
   return digits.endsWith(accountSuffix) || accountSuffix.endsWith(digits);
 }
 
+/** Status badge for a deposit line; an auto link reads "Auto-linked" so a wrong one is easy to spot and remove. */
+export function depositStatusBadge(line: Pick<DepositLineMatch, "status" | "linked">): { label: string; color: string } {
+  if (line.status === "linked") {
+    return line.linked?.linkSource === "auto" ? { label: "Auto-linked", color: "teal" } : { label: "Linked", color: "green" };
+  }
+  return line.status === "suggested" ? { label: "Suggested", color: "blue" } : { label: "Not found", color: "gray" };
+}
+
 /** Confirmed links that don't fill any printed deposit line (e.g. a manual pick with another amount). */
 export function confirmedOutsideLines(confirmed: MatchedDeposit[], lines: DepositLineMatch[]): MatchedDeposit[] {
   const onLines = new Set(lines.map((l) => l.linked?.id).filter((id): id is string => !!id));

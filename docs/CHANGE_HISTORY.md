@@ -14,6 +14,35 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #301 (step 5): Deposit auto-link with dismiss (2026-10-30)
+
+**What changed:** Migration 0097 adds `link_source` (`manual` | `auto`, default `manual`; existing rows
+backfill as manual) and `dismissed_at` (tombstone) to `payslip_deposit_match`. New
+`autoLinkPayslipDeposits` in `payslip-deposit-match.service.ts` links a deposit line only when it has
+**exactly one** candidate — exact amount, inside the date window, on the line's own account (mask match)
+or the employer's primary account, not linked elsewhere, not dismissed. Ambiguous lines, other-account
+candidates and net-pay mode stay suggestions. It runs after commit in `insertPayslipSnapshot` (every
+create path: upload, import session, async reconcile, manual) and at the end of
+`canonicalizeImportSession` (`autoLinkDepositsForTxnDates`: payslips within 10 days of the new
+transactions). Both are fail-closed: catch, `log.warn` with the id + `String(err)`, return 0. Never on GET.
+- **Remove** on an auto link sets `dismissed_at`. Confirmed reads skip tombstones, the candidate query
+  skips the dismissed pair for that payslip only, and auto-link never re-adds it. Removing a manual link
+  still deletes the row.
+- **Manual link** (`PUT`) upserts a live manual link and clears a tombstone. Linking a transaction
+  already linked to another payslip is allowed and returns `warning: LINKED_TO_OTHER_PAYSLIP`; the issue's
+  open question was settled as warn, not block, because month-end dual payslips can share one deposit.
+- **UI:** the status badge reads **Auto-linked** for auto links. The remove dialog says an auto link won't
+  come back. A yellow alert shows the PUT warning. Dev seed `dev_0010` now seeds the savings link as
+  auto, and Playwright `payslips.spec.ts` covers remove auto → Not found → manual relink.
+- **Restore:** the table was already in `EXPORT_REGISTRY` (restoreOrder 16), and export/restore copies
+  all columns. The CR-125 round-trip test now asserts that a tombstone row survives with its columns.
+
+**Why:** Split pay doubles the confirm clicks per payslip. Auto-linking only the unambiguous case keeps
+wrong links rare, and the tombstone means "Remove" sticks, so a wrong auto link is corrected once
+(remove, then link the right one) and never comes back.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## UX — #301 (step 6): Bank deposit card shows one row per payslip deposit (2026-10-30)
 
 **What changed:** `PayslipDetailPage` renders `depositLines` (lines mode) as one row per printed deposit:

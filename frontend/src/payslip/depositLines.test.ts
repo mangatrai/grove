@@ -4,6 +4,7 @@ import {
   accountMaskMatches,
   confirmedOutsideLines,
   depositLineAccountLabel,
+  depositStatusBadge,
   remainderBadge,
   shiftIsoDate
 } from "./depositLines";
@@ -46,6 +47,17 @@ describe("depositLines helpers", () => {
     expect(accountMaskMatches("9111", "222")).toBe(false);
     expect(accountMaskMatches("9111", "11")).toBe(false);
     expect(accountMaskMatches(null, "111")).toBe(false);
+  });
+
+  it("status badge tells auto links from manual ones", () => {
+    expect(depositStatusBadge(line({ status: "linked", linked: { ...deposit("a", 100), linkSource: "auto" } }))).toEqual({
+      label: "Auto-linked",
+      color: "teal"
+    });
+    expect(depositStatusBadge(line({ status: "linked", linked: { ...deposit("a", 100), linkSource: "manual" } })).label).toBe("Linked");
+    expect(depositStatusBadge(line({ status: "linked", linked: deposit("a", 100) })).label).toBe("Linked");
+    expect(depositStatusBadge(line({ status: "suggested" })).label).toBe("Suggested");
+    expect(depositStatusBadge(line({ status: "not_found" })).label).toBe("Not found");
   });
 
   it("lists confirmed deposits that fill no printed line", () => {

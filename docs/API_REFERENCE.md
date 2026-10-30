@@ -2442,9 +2442,35 @@ Maps all `transaction_raw` rows for this session into `transaction_canonical`.
 
 After success, staged files for this session are removed from disk and `import_file.stored_path` is cleared.
 
+When new rows were inserted, payslip deposit auto-link (#301) re-runs for payslips whose pay date is within 10 days of the new transactions (see `PUT /payslips/:id/deposits/:canonicalId`). It is fail-closed: an auto-link error is logged and never fails canonicalize.
+
 **Errors:**
 - **404** — session not found.
 - **409** — no raw rows and not a completed payslip-only import (`NO_RAW_ROWS`).
+
+---
+
+### `PUT /payslips/:id/deposits/:canonicalId` · `DELETE /payslips/:id/deposits/:canonicalId`
+
+Manual link / unlink of a bank credit to a payslip (`payslip_deposit_match`). `GET /payslips/:id` returns `confirmedDeposits[]` (each with `linkSource`: `manual` | `auto`) and, when the payslip lists deposits, `depositLines[]` with per-line status.
+
+**Auto-link (#301 step 5):** after a payslip is created (any path) and after bank canonicalize inserts rows, a deposit line with **exactly one** exact-amount candidate in the date window on the line's own account (mask match) or the employer's primary deposit account is linked with `link_source = 'auto'`. Ambiguous lines, lines whose only candidate is on another account, and payslips without usable deposit lines are left as suggestions. Never runs on `GET`.
+
+**PUT** — idempotent; always writes a live `manual` link (turns an auto link or a dismissed tombstone for the pair into a manual link). A transaction already linked to another payslip is linked anyway:
+
+```json
+{
+  "snapshot": { "id": "…" },
+  "confirmedDeposits": [{ "id": "…", "amount": 500, "linkSource": "manual" }],
+  "warning": { "code": "LINKED_TO_OTHER_PAYSLIP", "message": "This transaction is also linked to another payslip.", "otherPayslipIds": ["…"] }
+}
+```
+
+`warning` is `null` otherwise.
+
+**DELETE** — a `manual` link is deleted; an `auto` link is kept as a tombstone (`dismissed_at` set): it no longer counts as linked, is no longer suggested for that payslip, and is never re-added by auto-link. Response `{ snapshot, confirmedDeposits }`.
+
+**Errors:** **400** invalid ids · **404** payslip (or, for PUT, transaction) not found in the household.
 
 ---
 

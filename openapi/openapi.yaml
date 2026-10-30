@@ -3975,6 +3975,9 @@ paths:
       description: |
         Links a transaction as a confirmed net-pay deposit. Idempotent — safe to call
         multiple times with the same canonicalId. Supports multiple links per payslip for split deposits.
+        Always writes a live manual link (#301 step 5): an auto link or a dismissed-auto tombstone for the
+        pair becomes manual. A transaction already linked to another payslip is linked anyway and
+        `warning` says so.
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -3997,6 +4000,16 @@ paths:
                   confirmedDeposits:
                     type: array
                     items: { $ref: '#/components/schemas/MatchedDeposit' }
+                  warning:
+                    type: object
+                    nullable: true
+                    description: Set when the transaction is also linked to another payslip (linked anyway)
+                    properties:
+                      code: { type: string, enum: [LINKED_TO_OTHER_PAYSLIP] }
+                      message: { type: string }
+                      otherPayslipIds:
+                        type: array
+                        items: { type: string }
         "400":
           description: Invalid UUID
         "404":
@@ -4004,6 +4017,9 @@ paths:
     delete:
       tags: [payslips]
       summary: Remove one confirmed deposit link from a payslip
+      description: |
+        A manual link is deleted. An auto link (#301 step 5) is kept as a tombstone (`dismissed_at`):
+        no longer confirmed or suggested for this payslip, and never re-added by auto-link.
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -6005,6 +6021,10 @@ components:
         amountDelta:
           type: number
           description: Absolute dollar difference from net pay
+        linkSource:
+          type: string
+          enum: [manual, auto]
+          description: Confirmed links only — linked by the user or by the deposit auto-linker (#301 step 5)
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)

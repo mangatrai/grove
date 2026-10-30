@@ -148,6 +148,16 @@ describe("exports/imports roundtrip (CR-125)", () => {
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, 0, '{}', 1.0)`
     ).run(transactionRawId, importFileId);
+    // #301 step 5: a dismissed auto deposit link (tombstone) must survive the round-trip with its columns.
+    const depositTxnId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint)
+       VALUES (?, ?, ?, '2030-01-15', 100.00, 'credit', 'CR-125 Payroll', 'posted', ?)`
+    ).run(depositTxnId, householdId, ephemeralAccountId, `cr125-${depositTxnId}`);
+    await sqlStmt(
+      `INSERT INTO payslip_deposit_match (payslip_snapshot_id, household_id, transaction_canonical_id, link_source, dismissed_at)
+       VALUES (?, ?, ?, 'auto', NOW())`
+    ).run(payslipId, householdId, depositTxnId);
 
     const startExport = await request(app)
       .post("/exports/household")
@@ -230,6 +240,11 @@ describe("exports/imports roundtrip (CR-125)", () => {
       ).get(householdId) as { c: number };
       expect(lineItemCount.c).toBeGreaterThan(0);
     }
+    const depositMatch = await sqlStmt(
+      `SELECT link_source, dismissed_at FROM payslip_deposit_match WHERE household_id = ? AND transaction_canonical_id = ?`
+    ).get(householdId, depositTxnId) as { link_source: string; dismissed_at: unknown } | undefined;
+    expect(depositMatch?.link_source).toBe("auto");
+    expect(depositMatch?.dismissed_at).toBeTruthy();
     const recurringOverrideCount = await sqlStmt(
       `SELECT COUNT(*)::int AS c FROM recurring_merchant_override WHERE household_id = ?`
     ).get(householdId) as { c: number };

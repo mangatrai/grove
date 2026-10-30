@@ -36,7 +36,8 @@ INSERT INTO transaction_canonical (
   ('5a000000-0000-4000-8000-000000000302', '10000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000002', NULL, '30000000-0000-0000-0000-000000000007', '2026-09-15', 500.00, 'credit', 'ACME CORP PAYROLL', NULL, 'dev-split-301-savings', 'manual:dev-split-301-b', 'posted', '{"source":"manual"}', 'household', NULL)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO payslip_deposit_match (payslip_snapshot_id, household_id, transaction_canonical_id) VALUES
-  ('a0000000-0000-0000-0000-000000000301', '10000000-0000-0000-0000-000000000001', '5a000000-0000-4000-8000-000000000301'),
-  ('a0000000-0000-0000-0000-000000000301', '10000000-0000-0000-0000-000000000001', '5a000000-0000-4000-8000-000000000302')
+-- Checking linked by hand; savings linked by the auto-linker (#301 step 5) so the correction flow can be exercised.
+INSERT INTO payslip_deposit_match (payslip_snapshot_id, household_id, transaction_canonical_id, link_source) VALUES
+  ('a0000000-0000-0000-0000-000000000301', '10000000-0000-0000-0000-000000000001', '5a000000-0000-4000-8000-000000000301', 'manual'),
+  ('a0000000-0000-0000-0000-000000000301', '10000000-0000-0000-0000-000000000001', '5a000000-0000-4000-8000-000000000302', 'auto')
 ON CONFLICT DO NOTHING;

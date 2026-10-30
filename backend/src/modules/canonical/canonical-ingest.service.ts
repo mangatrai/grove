@@ -7,6 +7,7 @@ import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
 import { checkBudgetThresholds, createNotification } from "../notifications/notification.service.js";
+import { autoLinkDepositsForTxnDates } from "../payslip/payslip-deposit-match.service.js";
 import {
   computeTransactionFingerprint,
   normalizeAmountForFingerprint,
@@ -1157,6 +1158,12 @@ export async function canonicalizeImportSession(
   }
 
   await deleteStagingFilesForSession(sessionId);
+
+  // #301 step 5 — new credits may complete payslip deposit lines. Fail-closed, never fails the import.
+  await autoLinkDepositsForTxnDates(
+    householdId,
+    insertedCanonicalRows.map((r) => r.txnDate)
+  );
 
   if (inserted > 0) {
     void checkBudgetThresholds(householdId);

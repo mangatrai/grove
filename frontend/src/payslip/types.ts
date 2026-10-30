@@ -33,6 +33,8 @@ export type MatchedDeposit = {
   accountMask: string | null;
   dateDelta: number;
   amountDelta: number;
+  /** Confirmed links only (#301 step 5): linked by the user or by the auto-linker. */
+  linkSource?: "manual" | "auto";
 };
 
 /** Why a deposit candidate ranks where it does (#301): printed account digits > employer primary account > other. */

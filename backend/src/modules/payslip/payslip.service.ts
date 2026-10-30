@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
+import { autoLinkPayslipDeposits } from "./payslip-deposit-match.service.js";
 import { findEmployerByPersonProfileId } from "./payslip-employer-resolve.service.js";
 import { deriveSummaryFromLineItems, validatePayslipBalance } from "./payslip-validation.js";
 import type { ValidationWarning } from "./payslip-validation.js";
@@ -37,7 +38,11 @@ export type MatchedDeposit = {
   accountMask: string | null;
   dateDelta: number;
   amountDelta: number;
+  /** Set on confirmed links only: who made the link (#301 step 5). */
+  linkSource?: DepositLinkSource;
 };
+
+export type DepositLinkSource = "manual" | "auto";
 
 export type PayslipSnapshotRow = {
   id: string;
@@ -382,7 +387,7 @@ export async function insertPayslipSnapshot(
     items
   );
 
-  return qBegin(async (tx) => {
+  const result = await qBegin(async (tx) => {
     const { text: insertText, values: insertValues } = sqlBind(
       `INSERT INTO payslip_snapshot (
         id, household_id, file_name, file_checksum, parser_profile_id, import_file_id, employer_id,
@@ -517,6 +522,11 @@ export async function insertPayslipSnapshot(
     }
     return { ok: true as const, snapshot: rowToSnapshot(row) };
   });
+
+  // #301 step 5 — every create path (upload, import session, async reconcile, manual) lands here.
+  // Runs after commit; fail-closed, never fails the insert.
+  await autoLinkPayslipDeposits(householdId, result.snapshot.id);
+  return result;
 }
 
 /** Group raw DB rows (already mapped) into the grouped shape. */
@@ -1136,6 +1146,7 @@ export async function addPayslipLineItem(
  * Fetch all confirmed deposit matches for a payslip from payslip_deposit_match.
  * Returns them as MatchedDeposit[] with dateDelta/amountDelta computed against payDate
  * (fallback: payPeriodEnd). Returns [] if no confirmed matches exist.
+ * Dismissed auto links (tombstones, `dismissed_at` set) are not confirmed links and are skipped.
  */
 export async function getConfirmedDeposits(
   householdId: string,
@@ -1165,17 +1176,19 @@ export async function getConfirmedDeposits(
     institution: string;
     account_type: string;
     account_mask: string | null;
+    link_source: string;
   };
 
   const rows = await qAll<DepositRow>(
     `SELECT tc.id, tc.txn_date, tc.amount, tc.direction, tc.merchant, tc.memo,
-            tc.account_id, fa.institution, fa.type AS account_type, fa.account_mask
+            tc.account_id, fa.institution, fa.type AS account_type, fa.account_mask, pdm.link_source
        FROM payslip_deposit_match pdm
        JOIN transaction_canonical tc ON tc.id = pdm.transaction_canonical_id
        JOIN financial_account fa ON fa.id = tc.account_id
                                  AND fa.household_id = tc.household_id
       WHERE pdm.payslip_snapshot_id = ?
         AND pdm.household_id = ?
+        AND pdm.dismissed_at IS NULL
       ORDER BY tc.txn_date ASC`,
     payslipId,
     householdId
@@ -1193,14 +1206,18 @@ export async function getConfirmedDeposits(
     accountType: String(r.account_type),
     accountMask: r.account_mask == null ? null : String(r.account_mask),
     dateDelta: dateDeltaForRow(String(r.txn_date)),
-    amountDelta: amountDeltaForRow(Number(r.amount))
+    amountDelta: amountDeltaForRow(Number(r.amount)),
+    linkSource: r.link_source === "auto" ? "auto" : "manual"
   }));
 }
 
 /**
- * Add a confirmed deposit link. Idempotent — if the link already exists, returns
- * the snapshot without error. Validates that the transaction belongs to this household
- * before inserting.
+ * Add a confirmed (manual) deposit link. Idempotent. Validates that the transaction belongs to
+ * this household before inserting. Linking a pair that has an auto link or a dismissed-auto
+ * tombstone turns it into a live manual link (#301 step 5).
+ *
+ * A transaction already linked to another payslip is linked anyway (ESPP month-end dual payslips
+ * can share one deposit); `otherPayslipIds` lets the caller warn.
  *
  * Returns null if payslipId not found, or if canonicalId not found in this household.
  */
@@ -1208,7 +1225,7 @@ export async function addConfirmedDeposit(
   householdId: string,
   payslipId: string,
   canonicalId: string
-): Promise<PayslipSnapshotRow | null> {
+): Promise<{ snapshot: PayslipSnapshotRow; otherPayslipIds: string[] } | null> {
   const payslip = await qGet<{ id: string }>(
     `SELECT id FROM payslip_snapshot WHERE id = ? AND household_id = ? LIMIT 1`,
     payslipId,
@@ -1229,20 +1246,32 @@ export async function addConfirmedDeposit(
 
   await qExec(
     `INSERT INTO payslip_deposit_match
-       (payslip_snapshot_id, household_id, transaction_canonical_id)
-     VALUES (?, ?, ?)
-     ON CONFLICT (payslip_snapshot_id, transaction_canonical_id) DO NOTHING`,
+       (payslip_snapshot_id, household_id, transaction_canonical_id, link_source)
+     VALUES (?, ?, ?, 'manual')
+     ON CONFLICT (payslip_snapshot_id, transaction_canonical_id)
+     DO UPDATE SET link_source = 'manual', dismissed_at = NULL, confirmed_at = NOW()`,
     payslipId,
     householdId,
     canonicalId
   );
 
-  return getPayslipSnapshotForHousehold(householdId, payslipId);
+  const others = await qAll<{ payslip_snapshot_id: string }>(
+    `SELECT payslip_snapshot_id FROM payslip_deposit_match
+      WHERE household_id = ? AND transaction_canonical_id = ? AND payslip_snapshot_id <> ? AND dismissed_at IS NULL
+      ORDER BY payslip_snapshot_id`,
+    householdId,
+    canonicalId,
+    payslipId
+  );
+
+  const snapshot = await getPayslipSnapshotForHousehold(householdId, payslipId);
+  return snapshot ? { snapshot, otherPayslipIds: others.map((r) => String(r.payslip_snapshot_id)) } : null;
 }
 
 /**
  * Remove one confirmed deposit link. If the link does not exist, this is a no-op
- * (returns the snapshot without error).
+ * (returns the snapshot without error). A manual link is deleted; an auto link becomes a
+ * tombstone (`dismissed_at`) so the auto-linker never re-adds that pair (#301 step 5).
  *
  * Returns null if payslipId not found.
  */
@@ -1261,10 +1290,22 @@ export async function removeConfirmedDeposit(
   }
 
   await qExec(
+    `UPDATE payslip_deposit_match SET dismissed_at = NOW()
+      WHERE payslip_snapshot_id = ?
+        AND household_id = ?
+        AND transaction_canonical_id = ?
+        AND link_source = 'auto'
+        AND dismissed_at IS NULL`,
+    payslipId,
+    householdId,
+    canonicalId
+  );
+  await qExec(
     `DELETE FROM payslip_deposit_match
       WHERE payslip_snapshot_id = ?
         AND household_id = ?
-        AND transaction_canonical_id = ?`,
+        AND transaction_canonical_id = ?
+        AND link_source = 'manual'`,
     payslipId,
     householdId,
     canonicalId

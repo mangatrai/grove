@@ -8,13 +8,17 @@
  * Net-pay mode — no lines, or lines that don't sum to net (LLM missed an account, misread a digit):
  *   today's single-deposit-vs-net-pay suggestion (`findMatchedDeposits`), unchanged. Nothing is rejected.
  *
- * Read-only: suggestions are computed on GET; nothing is written here.
+ * `matchPayslipDeposits` is read-only: suggestions are computed on GET. Writes happen only in the auto-linker
+ * (#301 step 5), which runs after a payslip is created and after a bank import adds transactions — never on GET.
  */
-import { qAll } from "../../db/query.js";
+import { qAll, qExec } from "../../db/query.js";
+import { log } from "../../logger.js";
 import { getPayslipDepositLines, type PayslipDepositLine } from "./payslip-deposit-lines.js";
 import {
   daysBetween,
   findMatchedDeposits,
+  getConfirmedDeposits,
+  getPayslipSnapshotForHousehold,
   resolveSalaryDepositAccountId,
   type MatchedDeposit,
   type PayslipSnapshotRow
@@ -86,9 +90,13 @@ type CreditRow = {
   account_mask: string | null;
 };
 
-/** Unlinked posted credits in the window whose amount equals one of `amountsCents`. */
+/**
+ * Posted credits in the window whose amount equals one of `amountsCents`, excluding transactions with a live
+ * link to any payslip and transactions whose auto link the user dismissed on this payslip.
+ */
 async function findUnlinkedCredits(
   householdId: string,
+  payslipId: string,
   fromDate: string,
   toDate: string,
   amountsCents: number[]
@@ -107,12 +115,14 @@ async function findUnlinkedCredits(
         AND NOT EXISTS (
           SELECT 1 FROM payslip_deposit_match pdm
            WHERE pdm.transaction_canonical_id = tc.id AND pdm.household_id = tc.household_id
+             AND (pdm.dismissed_at IS NULL OR pdm.payslip_snapshot_id = ?)
         )
       ORDER BY tc.txn_date ASC, tc.id ASC`,
     householdId,
     fromDate,
     toDate,
-    ...amountsCents.map((c) => fromCents(c).toFixed(2))
+    ...amountsCents.map((c) => fromCents(c).toFixed(2)),
+    payslipId
   );
 }
 
@@ -171,7 +181,13 @@ export async function matchPayslipDeposits(
   const openAmounts = [...new Set(lines.filter((_, i) => !linkedByLine[i]).map((l) => toCents(l.amount)))];
   const credits =
     openAmounts.length > 0
-      ? await findUnlinkedCredits(householdId, addDays(effectiveDate, -windowDays), addDays(effectiveDate, windowDays), openAmounts)
+      ? await findUnlinkedCredits(
+          householdId,
+          snapshot.id,
+          addDays(effectiveDate, -windowDays),
+          addDays(effectiveDate, windowDays),
+          openAmounts
+        )
       : [];
   const primaryAccountId = snapshot.ownerPersonProfileId
     ? await resolveSalaryDepositAccountId(householdId, snapshot.ownerPersonProfileId, snapshot.employerId)
@@ -226,4 +242,83 @@ export async function matchPayslipDeposits(
     suggestedDeposits: [...suggested.values()],
     ...linkedTotalsFor(confirmedDeposits, netPay)
   };
+}
+
+/**
+ * Auto-link (#301 step 5): link a deposit line's credit with `link_source = 'auto'` only when the line has
+ * exactly one candidate on its own account (mask match) or the employer's primary account. Ambiguous lines,
+ * lines whose only candidates sit on other accounts, and net-pay mode (no usable lines) stay suggestions.
+ * Dismissed pairs are never candidates, so a removed auto link is not re-added.
+ *
+ * Fail-closed: never throws — logs and returns 0 so a payslip or bank import is never failed by it.
+ * Returns the number of links written.
+ */
+export async function autoLinkPayslipDeposits(householdId: string, payslipId: string): Promise<number> {
+  try {
+    const snapshot = await getPayslipSnapshotForHousehold(householdId, payslipId);
+    if (!snapshot) return 0;
+    const confirmed = await getConfirmedDeposits(
+      householdId,
+      snapshot.id,
+      snapshot.payDate,
+      snapshot.netPayCurrent,
+      snapshot.payPeriodEnd
+    );
+    const match = await matchPayslipDeposits(householdId, snapshot, confirmed);
+    if (match.matchMode !== "lines") return 0;
+
+    const used = new Set<string>();
+    let linked = 0;
+    for (const line of match.depositLines) {
+      if (line.status !== "suggested") continue;
+      const strong = line.candidates.filter((c) => c.matchReason !== "other" && !used.has(c.id));
+      if (strong.length !== 1) continue;
+      const pick = strong[0]!;
+      used.add(pick.id);
+      await qExec(
+        `INSERT INTO payslip_deposit_match (payslip_snapshot_id, household_id, transaction_canonical_id, link_source)
+         VALUES (?, ?, ?, 'auto')
+         ON CONFLICT (payslip_snapshot_id, transaction_canonical_id) DO NOTHING`,
+        snapshot.id,
+        householdId,
+        pick.id
+      );
+      linked += 1;
+    }
+    if (linked > 0) log.info("payslip deposit auto-link: linked", { payslipId, linked });
+    return linked;
+  } catch (err) {
+    log.warn("payslip deposit auto-link failed", { payslipId, err: String(err) });
+    return 0;
+  }
+}
+
+/**
+ * After a bank import inserts transactions: re-run the auto-linker for payslips whose pay date (or period end)
+ * falls within the matching window of the new transactions' dates. Fail-closed; returns links written.
+ */
+export async function autoLinkDepositsForTxnDates(householdId: string, txnDates: string[]): Promise<number> {
+  if (txnDates.length === 0) return 0;
+  try {
+    const sorted = [...txnDates].map((d) => d.slice(0, 10)).sort();
+    // Widest window (10 days, period-end fallback) — matchPayslipDeposits applies the exact one per payslip.
+    const from = addDays(sorted[0]!, -10);
+    const to = addDays(sorted[sorted.length - 1]!, 10);
+    const payslips = await qAll<{ id: string }>(
+      `SELECT id FROM payslip_snapshot
+        WHERE household_id = ?
+          AND COALESCE(pay_date, pay_period_end) BETWEEN ? AND ?
+          AND payment_summary_json IS NOT NULL
+        ORDER BY COALESCE(pay_date, pay_period_end) ASC, id ASC`,
+      householdId,
+      from,
+      to
+    );
+    let linked = 0;
+    for (const p of payslips) linked += await autoLinkPayslipDeposits(householdId, String(p.id));
+    return linked;
+  } catch (err) {
+    log.warn("payslip deposit auto-link after bank import failed", { householdId, err: String(err) });
+    return 0;
+  }
 }

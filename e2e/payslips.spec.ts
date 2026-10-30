@@ -2,11 +2,12 @@ import { test, expect } from '@playwright/test';
 import { loginAsTestUser } from './helpers/auth';
 
 /**
- * #301 step 6 — per-line Bank deposit card. Relies on dev seed dev_0010 (split-deposit payslip, net $3,717.50 =
- * $3,217.50 to checking ···1001 + $500.00 to savings ···2002, both linked). Leaves the seed state as found.
+ * #301 — per-line Bank deposit card and the auto-link correction flow. Relies on dev seed dev_0010
+ * (split-deposit payslip, net $3,717.50 = $3,217.50 to checking ···1001, linked by hand, + $500.00 to
+ * savings ···2002, auto-linked). Needs a fresh `npm run db:reset:dev`: the run turns the auto link into a manual one.
  */
 test.describe('Payslip split deposits', () => {
-  test('shows both deposits linked; remove one, then link it manually', async ({ page }) => {
+  test('remove a wrong auto link, then link the deposit by hand', async ({ page }) => {
     await loginAsTestUser(page);
     // '/payslips' is proxied by Vite — navigate via sidebar so React Router handles it client-side.
     await page.getByRole('link', { name: 'Payslips' }).first().click();
@@ -15,15 +16,19 @@ test.describe('Payslip split deposits', () => {
     const card = page.getByTestId('bank-deposit-card');
     const lines = card.getByTestId('deposit-line');
     await expect(lines).toHaveCount(2, { timeout: 15000 });
-    await expect(lines.filter({ hasText: 'Linked' })).toHaveCount(2);
+    const checkingLine = lines.filter({ hasText: '$3,217.50' });
+    const savingsLine = lines.filter({ hasText: '$500.00' });
+    await expect(checkingLine.getByText('Linked', { exact: true })).toBeVisible();
+    await expect(savingsLine.getByText('Auto-linked', { exact: true })).toBeVisible();
     await expect(card.getByText('Fully linked')).toBeVisible();
 
-    const savingsLine = lines.filter({ hasText: '$500.00' });
     await savingsLine.getByRole('button', { name: 'Remove link' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/won't be linked automatically again/)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Remove' }).click();
 
-    // The unlinked credit is still the best match for that line → suggested again.
-    await expect(savingsLine.getByText('Suggested')).toBeVisible();
+    // A dismissed auto link is not offered again for this payslip.
+    await expect(savingsLine.getByText('Not found', { exact: true })).toBeVisible();
     await expect(card.getByText('$500.00 not linked')).toBeVisible();
 
     await savingsLine.getByRole('button', { name: 'Find deposit' }).click();
@@ -33,7 +38,7 @@ test.describe('Payslip split deposits', () => {
     await expect(exact).toHaveCount(1);
     await exact.getByRole('button', { name: 'Link' }).click();
 
-    await expect(savingsLine.getByText('Linked')).toBeVisible();
+    await expect(savingsLine.getByText('Linked', { exact: true })).toBeVisible();
     await expect(card.getByText('Fully linked')).toBeVisible();
   });
 });

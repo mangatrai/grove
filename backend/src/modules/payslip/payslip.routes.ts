@@ -456,7 +456,10 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
   res.status(201).json({ snapshot: result.snapshot });
 });
 
-/** PUT /payslips/:id/deposits/:canonicalId — add a confirmed deposit link (idempotent) */
+/**
+ * PUT /payslips/:id/deposits/:canonicalId — add a confirmed (manual) deposit link (idempotent).
+ * Linking a transaction that is already linked to another payslip is allowed, with a warning.
+ */
 payslipRouter.put("/:id/deposits/:canonicalId", async (req: AuthenticatedRequest, res) => {
   const params = depositCanonicalIdParamSchema.safeParse(req.params);
   if (!params.success) {
@@ -464,11 +467,12 @@ payslipRouter.put("/:id/deposits/:canonicalId", async (req: AuthenticatedRequest
     return;
   }
   const { householdId } = req.authUser!;
-  const updated = await addConfirmedDeposit(householdId, params.data.id, params.data.canonicalId);
-  if (!updated) {
+  const result = await addConfirmedDeposit(householdId, params.data.id, params.data.canonicalId);
+  if (!result) {
     res.status(404).json({ message: "Payslip or transaction not found", code: "NOT_FOUND" });
     return;
   }
+  const updated = result.snapshot;
   const confirmedDeposits = await getConfirmedDeposits(
     householdId,
     updated.id,
@@ -476,7 +480,15 @@ payslipRouter.put("/:id/deposits/:canonicalId", async (req: AuthenticatedRequest
     updated.netPayCurrent,
     updated.payPeriodEnd
   );
-  res.json({ snapshot: updated, confirmedDeposits });
+  const warning =
+    result.otherPayslipIds.length > 0
+      ? {
+          code: "LINKED_TO_OTHER_PAYSLIP",
+          message: "This transaction is also linked to another payslip.",
+          otherPayslipIds: result.otherPayslipIds
+        }
+      : null;
+  res.json({ snapshot: updated, confirmedDeposits, warning });
 });
 
 /** DELETE /payslips/:id/deposits/:canonicalId — remove one confirmed deposit link */

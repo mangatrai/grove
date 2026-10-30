@@ -29,6 +29,7 @@ import {
   accountMaskMatches,
   confirmedOutsideLines,
   depositLineAccountLabel,
+  depositStatusBadge,
   MATCH_REASON_LABEL,
   remainderBadge,
   shiftIsoDate
@@ -293,12 +294,6 @@ function LineItemRow({
 }
 
 
-const DEPOSIT_STATUS: Record<DepositLineMatch["status"], { label: string; color: string }> = {
-  linked: { label: "Linked", color: "green" },
-  suggested: { label: "Suggested", color: "blue" },
-  not_found: { label: "Not found", color: "gray" }
-};
-
 function ConfirmedDepositsTable({
   deposits,
   anchorDate,
@@ -530,6 +525,7 @@ export function PayslipDetailPage() {
   // Deposit confirm/unlink state
   const [depositSaving, setDepositSaving] = useState(false);
   const [depositError, setDepositError] = useState<string | null>(null);
+  const [depositWarning, setDepositWarning] = useState<string | null>(null);
 
   // Remove-link confirmation (canonical transaction id)
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
@@ -699,6 +695,7 @@ export function PayslipDetailPage() {
     if (!payslipId) return;
     setDepositSaving(true);
     setDepositError(null);
+    setDepositWarning(null);
     try {
       const res = await apiFetch(
         `/payslips/${encodeURIComponent(payslipId)}/deposits/${encodeURIComponent(canonicalId)}`,
@@ -709,6 +706,9 @@ export function PayslipDetailPage() {
         setDepositError(j.message ?? "Failed to link deposit");
         return;
       }
+      // Linked anyway (month-end dual payslips can share one deposit) — just say so.
+      const j = (await res.json().catch(() => ({}))) as { warning?: { message?: string } | null };
+      if (j.warning) setDepositWarning(j.warning.message ?? "This transaction is also linked to another payslip.");
       // Deposit lines, suggestions and remainder are computed server-side — refetch rather than patch locally.
       await load();
       setSearchOpen(false);
@@ -721,6 +721,7 @@ export function PayslipDetailPage() {
     if (!payslipId) return;
     setDepositSaving(true);
     setDepositError(null);
+    setDepositWarning(null);
     try {
       const res = await apiFetch(
         `/payslips/${encodeURIComponent(payslipId)}/deposits/${encodeURIComponent(canonicalId)}`,
@@ -891,6 +892,8 @@ export function PayslipDetailPage() {
   const validationWarnings = detail?.validationWarnings ?? [];
   const depositLines = detail?.matchMode === "lines" ? (detail.depositLines ?? []) : [];
   const otherLinked = confirmedOutsideLines(detail?.confirmedDeposits ?? [], depositLines);
+  const removeTargetIsAuto =
+    removeTarget != null && detail?.confirmedDeposits?.find((d) => d.id === removeTarget)?.linkSource === "auto";
   const depositBadge = depositLines.length > 0 ? remainderBadge(detail?.linkedTotal ?? 0, detail?.remainder) : null;
 
   // Prior values from the person payslips list (list endpoint has LAG results)
@@ -1424,6 +1427,11 @@ export function PayslipDetailPage() {
                 {depositError}
               </Alert>
             ) : null}
+            {depositWarning ? (
+              <Alert color="yellow" mb="sm" withCloseButton onClose={() => setDepositWarning(null)}>
+                {depositWarning}
+              </Alert>
+            ) : null}
 
             {depositLines.length > 0 ? (
               <Stack gap="xs">
@@ -1447,8 +1455,8 @@ export function PayslipDetailPage() {
                             <Text size="xs" c="dimmed">{depositLineAccountLabel(line)}</Text>
                           </Table.Td>
                           <Table.Td>
-                            <Badge size="sm" variant="light" color={DEPOSIT_STATUS[line.status].color}>
-                              {DEPOSIT_STATUS[line.status].label}
+                            <Badge size="sm" variant="light" color={depositStatusBadge(line).color}>
+                              {depositStatusBadge(line).label}
                             </Badge>
                           </Table.Td>
                           <Table.Td>
@@ -1590,7 +1598,11 @@ export function PayslipDetailPage() {
       <ConfirmDialog
         opened={removeTarget != null}
         title="Remove deposit link"
-        message="Unlink this bank transaction from the payslip? The transaction stays in your ledger and can be linked again."
+        message={
+          removeTargetIsAuto
+            ? "Unlink this automatically linked transaction? It won't be linked automatically again; you can still link it yourself."
+            : "Unlink this bank transaction from the payslip? The transaction stays in your ledger and can be linked again."
+        }
         confirmLabel="Remove"
         danger
         onClose={() => setRemoveTarget(null)}
