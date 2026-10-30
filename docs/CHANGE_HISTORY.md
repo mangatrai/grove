@@ -14,6 +14,19 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #301: LLM payslip prompt — one payment row per deposit account (2026-10-30)
+
+**What changed:** One rule added to the shared payslip extraction prompt: return one
+`payment_information` entry per deposit or check, and when net pay is split across accounts, one entry
+per account with its own masked number and amount (never merged).
+
+**Why:** Split-deposit matching (#301 steps 3–4) reads deposit lines from `payment_summary_json`.
+Existing prod snapshots all have a single row because no stub has split yet, so it's unverified that
+the model emits one row per account on its own. The rule is cheap insurance before the first split
+Deloitte stub arrives.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## CR — #301: Rippling parser keeps every payslip; arithmetic checks stay in one place (2026-10-30)
 
 **What changed:** The Rippling parser no longer rejects a payslip whose totals don't tie out. It saves

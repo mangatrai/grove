@@ -106,7 +106,9 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "Deloitte other deductions: 'Tax Advance' and 'Award Received' rows may show only a YTD value — set amount_current to null and amount_ytd to the visible value. 'Imp Inc Core Life' and 'Imp Inc Core LTD' appear here with both current and YTD amounts; capture both.",
     "Deloitte employment_context: set rate to the biweekly salary shown (e.g. 8057.69); set rate_type to 'biweekly'. Set hours_or_days_worked_current from the hours shown in the Earnings section.",
     // IBM pay date
-    "IBM: pay_period.pay_date must be populated from the pay date visible in the Payment Information section (the date shown alongside the direct-deposit account number and amount, e.g. '02/27/2026' → '2026-02-27'). Do not leave pay_period.pay_date null if a date is visible there."
+    "IBM: pay_period.pay_date must be populated from the pay date visible in the Payment Information section (the date shown alongside the direct-deposit account number and amount, e.g. '02/27/2026' → '2026-02-27'). Do not leave pay_period.pay_date null if a date is visible there.",
+    // Split deposits — deposit matching reads one row per account
+    "payment_information: return one entry per deposit or check shown. When net pay is split across several bank accounts, return one entry per account, each with that account's masked number exactly as printed and its own amount; never merge them into one entry."
   ].join(" ");
 
   const userText = `There are ${pageCount} page image(s) in order (page 1 first). Extract the full payslip per schema.`;
