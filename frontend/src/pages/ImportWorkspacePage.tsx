@@ -1671,7 +1671,7 @@ export function ImportWorkspacePage() {
                                   size="xs"
                                   value={newAcctMask}
                                   onChange={(e) => setNewAcctMask(e.target.value.replace(/\D/g, "").slice(-4))}
-                                  placeholder="4883"
+                                  placeholder="1234"
                                   maxLength={4}
                                   style={{ width: "5rem" }}
                                 />

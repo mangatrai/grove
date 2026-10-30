@@ -31,7 +31,7 @@ NEWFILEUID:NONE
 <CCSTMTRS>
 <CURDEF>USD</CURDEF>
 <CCACCTFROM>
-<ACCTID>1114758420-4883</ACCTID>
+<ACCTID>9876543210-1234</ACCTID>
 </CCACCTFROM>
 <BANKTRANLIST>
 <DTSTART>20250101</DTSTART>
@@ -260,7 +260,7 @@ describe("OFX 1.x credit card parser (Chase QFX style)", () => {
 
   it("extracts ACCTID correctly", () => {
     const { accountInfo } = parseOfxBuffer(buf);
-    expect(accountInfo.acctId).toBe("1114758420-4883");
+    expect(accountInfo.acctId).toBe("9876543210-1234");
   });
 
   it("suppresses short/numeric ORG codes (B1, 10898)", () => {
@@ -270,7 +270,7 @@ describe("OFX 1.x credit card parser (Chase QFX style)", () => {
 
   it("extractOfxAccountInfo returns same accountInfo without parsing rows", () => {
     const info = extractOfxAccountInfo(buf);
-    expect(info.acctId).toBe("1114758420-4883");
+    expect(info.acctId).toBe("9876543210-1234");
     expect(info.acctType).toBe("credit_card");
   });
 });

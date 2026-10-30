@@ -99,7 +99,7 @@ describe("inferParserProfile", () => {
   });
 
   it("returns ofx_transactions for .qfx extension (Chase / Quicken)", () => {
-    expect(inferParserProfile({ type: "credit_card", institution: "Chase" }, "Chase4883.qfx")).toBe("ofx_transactions");
+    expect(inferParserProfile({ type: "credit_card", institution: "Chase" }, "Chase1234.qfx")).toBe("ofx_transactions");
   });
 
   it("returns ofx_transactions for .qbo extension (QuickBooks)", () => {

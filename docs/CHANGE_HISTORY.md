@@ -14,6 +14,25 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DOC — #297: Fake account IDs in OFX fixtures; CLAUDE.md slimmed (2026-10-30)
+
+**What changed:** Replaced a realistic-looking account identifier in the OFX parser test fixture +
+assertions, an `ofx-account-match.service.ts` comment, a frontend test filename, and the "Last 4"
+placeholder on the Import Workspace new-account row with obviously fake values (`9876543210-1234`
+/ `1234`). `CLAUDE.md` trimmed: LLM note corrected (all LLM features route through
+`LLM_PROVIDER`), Chase/Citi CSV note corrected (wired but unused, not dead code), ESLint-enforced
+rules dropped, docs table collapsed, migrations path + shared dev/test DB warning added.
+`ship-change` skill now mentions `README.md` alongside the user/admin guides.
+
+**Why:** No-PII rule in `CLAUDE.md`; CLAUDE.md had drifted (stale/wrong statements, duplication
+with lint and the `ship-change` skill).
+
+**Files:** `CLAUDE.md`, `.claude/skills/ship-change/SKILL.md`,
+`backend/src/modules/imports/ofx-account-match.service.ts`, `backend/tests/ofx-parser.test.ts`,
+`frontend/src/import/inferParserProfile.test.ts`, `frontend/src/pages/ImportWorkspacePage.tsx`.
+
+**GitHub:** [#297](https://github.com/mangatrai/grove/issues/297)
+
 ## CR — #294: Cash withdrawal auto-links a Wallet deposit (2026-09-21)
 
 **What changed:** Categorizing a transaction as **Transfers > Cash withdrawal** now auto-creates

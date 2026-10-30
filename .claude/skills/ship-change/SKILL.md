@@ -12,4 +12,4 @@ description: Mandatory per-change checklist for this repo — use before committ
 5. One commit per logical concern, `feat(scope/ID):`/`fix(scope/ID):`. Doc changes ship in the **same commit** as code.
 6. Version bump (`package.json` × 3) in a separate commit right after: patch=fix, minor=feature, major=breaking. Never ship without one.
 7. GitHub issue per shipped item, on the matching milestone; `closes #N` in the commit message. Open issues for backlog items too, not just shipped work.
-8. Update `USER_GUIDE.md` / `ADMIN_GUIDE.md` if user-facing pages or ops/env/schema changed.
+8. Update `USER_GUIDE.md` / `ADMIN_GUIDE.md` if user-facing pages or ops/env/schema changed (`README.md` too for user-visible features).

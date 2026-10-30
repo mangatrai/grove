@@ -48,7 +48,7 @@ export async function suggestAccountForOfx(
   ledgerBalanceDate: string | null = null
 ): Promise<OfxAccountSuggestion> {
   // Extract last 4 digits from the ACCTID.
-  // Handles formats like "1114758420-4883" (Chase: take the part after the last dash)
+  // Handles formats like "9876543210-1234" (Chase: take the part after the last dash)
   // and plain account numbers like "000012345678" (take trailing 4 digits).
   function extractLast4(id: string): string | null {
     const clean = id.replace(/\s/g, "");
