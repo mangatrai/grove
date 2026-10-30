@@ -1433,6 +1433,7 @@ export function SettingsPage() {
                       data={[
                         { value: "ibm_pay_contributions_pdf", label: "IBM Pay & Contributions (PDF)" },
                         { value: "deloitte_payslip_pdf", label: "Deloitte Pay Statement (PDF)" },
+                        { value: "rippling_payslip_pdf", label: "Rippling (PDF)" },
                         { value: "adp_payslip_pdf", label: "ADP (PDF - not implemented)" }
                       ]}
                     />

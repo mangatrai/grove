@@ -14,6 +14,33 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR — #301 (steps 1–2): Rippling payslip parser — deterministic, no LLM (2026-10-30)
+
+**What changed:** New parser profile `rippling_payslip_pdf` ("Rippling (PDF)" in Employer Setup).
+`payslip/profiles/rippling-payslip-pdf.ts` parses the `pdf-parse` text layer (WeasyPrint one-pager,
+glued `Label$current$ytd` rows, header block rendered after the body) into the same
+summary + line items shape the LLM path persists. Per-account deposits (`Acct# ...NNN`, amount, ACH
+trace) go to `payment_summary_json` in the LLM `payment_information[]` shape plus `trace`, so
+split-deposit matching (#301 step 3+) reads one format for every employer. Wired through
+`parsePayslipPdfByProfile` — sync path for `POST /payslips/upload`, `POST /imports/upload`, and
+import-session parse — and deliberately **not** in `LLM_PAYSLIP_PROFILE_IDS`. Sniff gains
+`ripplingSignals`; filename inference recognizes Rippling's `<period> - PEO - <Company>.pdf`.
+
+**Fail-closed:** unrecognized section headings, unexpected line shapes, or any total that doesn't tie
+out to the cent (Σ earnings = gross, Σ tax rows = taxes, gross − taxes − deductions = net for current
+and YTD, header = summary, Σ deposits = net) reject the parse with `<rippling_reason>: <specifics>`
+(`422 PAYSLIP_TEXT_PARSE_FAILED` on upload; `payslip_text_parse_failed` on the import file). A non-zero
+Deductions total also fails — no Rippling deduction section has been seen yet, so the parser refuses
+to guess pre- vs post-tax. SSN fragments and addresses are never read into the result.
+
+**Why:** The owner's new employer runs payroll through the Rippling PEO. Its PDF has a clean
+text layer, unlike the IBM/Deloitte PDFs that forced CR-050/CR-052 onto LLM vision, so a
+deterministic parser avoids per-payslip API cost. The owner will run it for a few pay cycles; an LLM
+fallback is backlogged in #300. The parser lives in `payslip/profiles/` next to the IBM parser (the
+issue text said `imports/profiles/`).
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## FIX — #299: Deposit suggestions use the payslip employer's own salary account (2026-10-30)
 
 **What changed:** `findMatchedDeposits` now receives the payslip's `employer_id` and scopes

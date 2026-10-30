@@ -3675,6 +3675,12 @@ paths:
     post:
       tags: [payslips]
       summary: Upload payslip PDF
+      description: |
+        Parser comes from the employer's `parserProfileId`. `ibm_pay_contributions_pdf` runs LLM vision inline;
+        `rippling_payslip_pdf` is parsed deterministically from the PDF text layer (no LLM, #301) and stores
+        per-account deposits in `paymentSummaryJson`. A Rippling layout that does not tie out returns
+        `422 PAYSLIP_TEXT_PARSE_FAILED` with `detail` (`<reason>: <specifics>`, e.g.
+        `rippling_unrecognized_section: PRE-TAX DEDUCTIONS…`) and saves nothing. Duplicate checksum → `409 DUPLICATE_PAYSLIP`.
       security: [{ bearerAuth: [] }]
   /payslips/manual:
     post:
@@ -3799,6 +3805,10 @@ paths:
     post:
       tags: [payslips]
       summary: Sniff PDF for parser hints
+      description: |
+        Returns `suggestedParserProfileId`, `confidence`, `suggestedEmployerId`, `note`, and `hints`
+        (`ibmSignals`, `adpSignals`, `deloitteSignals`, `ripplingSignals`). Two or more Rippling signals
+        (`rippling_brand`, `paystub_id`, `advice_of_deposit`) suggest `rippling_payslip_pdf` with high confidence.
       security: [{ bearerAuth: [] }]
   /payslips/{id}:
     get:

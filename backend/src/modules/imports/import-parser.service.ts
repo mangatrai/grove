@@ -174,6 +174,7 @@ async function extractByProfile(
     case "ibm_pay_contributions_pdf":
     case "adp_payslip_pdf":
     case "deloitte_payslip_pdf":
+    case "rippling_payslip_pdf":
       throw new Error("payslip PDF profiles are handled in parseSessionImportFiles");
   }
 }
@@ -294,7 +295,12 @@ export async function parseSessionImportFiles(
     );
 
     try {
-      if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf" || profileId === "deloitte_payslip_pdf") {
+      if (
+        profileId === "ibm_pay_contributions_pdf" ||
+        profileId === "adp_payslip_pdf" ||
+        profileId === "deloitte_payslip_pdf" ||
+        profileId === "rippling_payslip_pdf"
+      ) {
         const ownerEmployers = file.owner_person_profile_id
           ? await getEmployersByPersonProfileId(householdId, file.owner_person_profile_id)
           : await listHouseholdEmployers(householdId, userId);
@@ -473,6 +479,23 @@ export async function parseSessionImportFiles(
               file.id
             );
             outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_llm_extraction_failed" });
+            continue;
+          }
+          if (parseResult.reason === "text_parse_failed") {
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+              "failed",
+              JSON.stringify({
+                stage: "failed",
+                reason: "payslip_text_parse_failed",
+                detail: parseResult.detail,
+                profile: profileId
+              }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_text_parse_failed" });
             continue;
           }
           await qExec(

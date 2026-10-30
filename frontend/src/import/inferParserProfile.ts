@@ -23,6 +23,7 @@ export type IncomeInferenceContext = {
 };
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
+export const RIPPLING_PAYSLIP_PDF_PROFILE_ID = "rippling_payslip_pdf";
 
 function extensionOf(fileName: string): string {
   const i = fileName.lastIndexOf(".");
@@ -77,6 +78,21 @@ export function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefine
   return patterns.some((re) => re.test(stemForMatch));
 }
 
+/** Rippling PEO download name: `<period> - PEO - <Company>.pdf`, or anything naming Rippling. */
+export function filenameSuggestsRipplingPayslipPdf(fileName: string | null | undefined): boolean {
+  if (!fileName?.trim()) {
+    return false;
+  }
+  const base = fileName.trim().split(/[/\\]/).pop() ?? "";
+  const lower = base.toLowerCase().replace(/\s+/g, " ");
+  if (!lower.endsWith(".pdf")) {
+    return false;
+  }
+  // `_` is a word char for `\b` — treat it as a space (keep `-` for the ` - PEO - ` separator).
+  const spaced = lower.replace(/_+/g, " ");
+  return /\brippling\b/.test(spaced) || / - peo - /.test(spaced);
+}
+
 /**
  * Returns a parser profile id, or `null` if the combination needs a manual / generic profile.
  */
@@ -106,6 +122,10 @@ export function inferParserProfile(
       return emps[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
     }
     return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+  }
+
+  if (ext === ".pdf" && filenameSuggestsRipplingPayslipPdf(fileName)) {
+    return RIPPLING_PAYSLIP_PDF_PROFILE_ID;
   }
 
   if (ext === ".pdf" && filenameSuggestsIbmPayslipPdf(fileName)) {

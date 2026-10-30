@@ -21,6 +21,7 @@ const FRIENDLY: Record<string, string> = {
   marcus_online_savings_pdf: "Marcus savings (PDF)",
   ibm_pay_contributions_pdf: "Employer payslip — IBM Pay & Contributions (PDF)",
   deloitte_payslip_pdf: "Employer payslip — Deloitte Pay Statement (PDF)",
+  rippling_payslip_pdf: "Employer payslip — Rippling (PDF)",
   adp_payslip_pdf: "Employer payslip — ADP (PDF, not parsed yet)",
   ofx_transactions: "OFX / QFX / QBO (auto-detected)",
   discover_card_csv: "Discover card (CSV)",

@@ -2331,7 +2331,7 @@ Lists supported parser profile IDs.
 { "profiles": [ { "id", "label" } ] }
 ```
 
-Known IDs: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `citi_credit_card_pdf`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`.
+Known IDs: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `citi_credit_card_pdf`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`, `rippling_payslip_pdf`.
 
 ---
 
@@ -2365,8 +2365,11 @@ Supported adapters:
 - PDF (`.pdf`) — profile-specific behavior:
   - `boa_estatement_pdf`, `marcus_online_savings_pdf`, `citi_credit_card_pdf` — local parse.
   - `ibm_pay_contributions_pdf`, `deloitte_payslip_pdf` — async LLM extraction (queued on `import_file`; provider per `LLM_PROVIDER`).
+  - `rippling_payslip_pdf` — local deterministic parse of the PDF text layer (no LLM).
 
 **Employer payslip (`ibm_pay_contributions_pdf`, `deloitte_payslip_pdf`):** queues for async LLM extraction. Returns `200` with `asyncPayslipPending`. Poll **`POST .../reconcile-payslip-async`**. On completion, creates a `payslip_snapshot` row; **no** `transaction_raw` rows.
+
+**Employer payslip (`rippling_payslip_pdf`):** parsed synchronously during parse (counts in `parsedFiles`, never `asyncPayslipPending`). Creates a `payslip_snapshot` with earnings/tax line items and `payment_summary_json` = per-account deposits in the LLM `payment_information[]` shape plus `trace` (ACH trace). Fail-closed: any unrecognized section/line or a total that does not tie out to the cent marks the file `failed` with `confidence_summary.reason = "payslip_text_parse_failed"` and `detail` (`<rippling_reason>: <specifics>`); `skippedFiles[].reason = "payslip_text_parse_failed"`. `POST /imports/upload` maps the same failure to `422 PAYSLIP_TEXT_PARSE_FAILED`.
 
 **Profile `generic_tabular`:** user supplies column mapping.
 

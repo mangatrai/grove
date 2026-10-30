@@ -388,7 +388,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       }
       res.status(422).json({
         message:
-          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF, LLM vision), Deloitte Pay Statement (PDF) via Import.",
+          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF, LLM vision), Rippling (PDF), Deloitte Pay Statement (PDF) via Import.",
         code: "UNSUPPORTED_PARSER",
         parserProfileId: parseResult.parserProfileId
       });
@@ -405,6 +405,15 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       res.status(422).json({
         message: "Extracted payslip did not pass validation.",
         code: "LLM_CANONICAL_VALIDATION_FAILED",
+        detail: parseResult.detail,
+        fileChecksum: checksum
+      });
+      return;
+    }
+    if (parseResult.reason === "text_parse_failed") {
+      res.status(422).json({
+        message: "Payslip did not match the expected layout. Nothing was saved.",
+        code: "PAYSLIP_TEXT_PARSE_FAILED",
         detail: parseResult.detail,
         fileChecksum: checksum
       });

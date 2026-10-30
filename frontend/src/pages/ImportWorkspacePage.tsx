@@ -38,8 +38,16 @@ import {
 import { friendlyParserLabel, DISABLED_PROFILES } from "../import/profileLabels";
 import { formatUsd } from "../utils/format";
 
-const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
-/** Payslip profiles that use async LLM extraction (queued, not inline) — must mirror backend LLM_PAYSLIP_PROFILE_IDS (payslip.types.ts). */
+const PAYSLIP_PARSER_IDS = new Set([
+  "ibm_pay_contributions_pdf",
+  "deloitte_payslip_pdf",
+  "rippling_payslip_pdf",
+  "adp_payslip_pdf"
+]);
+/**
+ * Payslip profiles that use async LLM extraction (queued, not inline) — must mirror backend LLM_PAYSLIP_PROFILE_IDS (payslip.types.ts).
+ * Rippling is parsed inline from the PDF text layer, so it is deliberately absent.
+ */
 const LLM_PAYSLIP_PROFILE_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf"]);
 const OFX_PARSER_ID = "ofx_transactions";
 
@@ -1484,6 +1492,9 @@ export function ImportWorkspacePage() {
             <Text size="sm">
               <strong>IBM Pay &amp; Contributions:</strong> choose <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if needed; <strong>0</strong> ledger lines after parse is normal. <strong>Run import</strong> runs parse and canonicalize together; split steps live under <em>Separate steps</em> in Run import.
             </Text>
+            <Text size="sm" mt={6}>
+              <strong>Rippling:</strong> parsed instantly from the PDF text (no AI). If the layout has something new (e.g. a deduction section), the file fails with the reason instead of guessing.
+            </Text>
           </Paper>
         </Collapse>
 
@@ -1952,7 +1963,7 @@ export function ImportWorkspacePage() {
       <Paper withBorder p="lg" id="import-run-import">
         <Group align="center" gap={6} mb="sm">
           <Title order={3} fz="1.1rem">Run import</Title>
-          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). Payslip PDFs (IBM and Deloitte) are extracted via AI in the background — wait until they show 'parsed', then run import again." />
+          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). IBM and Deloitte payslip PDFs are extracted via AI in the background — wait until they show 'parsed', then run import again. Rippling payslips parse immediately." />
         </Group>
         <Group gap="sm">
           <Button

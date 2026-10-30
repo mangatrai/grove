@@ -48,6 +48,7 @@ type UploadFailureCode =
   | "LLM_API_NOT_CONFIGURED"
   | "LLM_CANONICAL_VALIDATION_FAILED"
   | "LLM_EXTRACTION_FAILED"
+  | "PAYSLIP_TEXT_PARSE_FAILED"
   | "UNSUPPORTED_PARSER"
   | "DUPLICATE_PAYSLIP";
 
@@ -196,6 +197,9 @@ async function uploadPayslipAndImport(params: UploadPayslipParams): Promise<Uplo
     }
     if (parsed.reason === "llm_canonical_validation_failed") {
       return { ok: false, code: "LLM_CANONICAL_VALIDATION_FAILED", message: "Extracted payslip did not pass validation." };
+    }
+    if (parsed.reason === "text_parse_failed") {
+      return { ok: false, code: "PAYSLIP_TEXT_PARSE_FAILED", message: `Payslip did not match the expected layout (${parsed.detail}).` };
     }
     return { ok: false, code: "LLM_EXTRACTION_FAILED", message: parsed.message };
   }

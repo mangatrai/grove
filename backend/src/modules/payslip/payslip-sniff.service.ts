@@ -1,13 +1,18 @@
 import { log } from "../../logger.js";
 import { extractPdfText } from "../imports/profiles/pdf-text.js";
 import { normalizePdfExtractText } from "./profiles/ibm-payslip-pdf.js";
-import { DELOITTE_PAYSLIP_PDF_PROFILE_ID, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
+import {
+  DELOITTE_PAYSLIP_PDF_PROFILE_ID,
+  IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID,
+  RIPPLING_PAYSLIP_PDF_PROFILE_ID
+} from "./payslip.types.js";
 import { listHouseholdEmployers } from "./payslip-employer-resolve.service.js";
 
 export type SniffHints = {
   ibmSignals: string[];
   adpSignals: string[];
   deloitteSignals: string[];
+  ripplingSignals: string[];
 };
 
 /** Light keyword signals in extracted PDF text (first pages). */
@@ -16,7 +21,17 @@ function detectPayslipSignals(normalizedText: string): SniffHints {
   const ibmSignals: string[] = [];
   const adpSignals: string[] = [];
   const deloitteSignals: string[] = [];
+  const ripplingSignals: string[] = [];
 
+  if (/rippling\.com/i.test(t)) {
+    ripplingSignals.push("rippling_brand");
+  }
+  if (/PAYSTUB ID:/.test(t)) {
+    ripplingSignals.push("paystub_id");
+  }
+  if (/ADVICE OF DEPOSIT/.test(t)) {
+    ripplingSignals.push("advice_of_deposit");
+  }
   if (/\bdeloitte\b/i.test(t)) {
     deloitteSignals.push("deloitte_brand");
   }
@@ -43,7 +58,7 @@ function detectPayslipSignals(normalizedText: string): SniffHints {
     adpSignals.push("adp_portal");
   }
 
-  return { ibmSignals, adpSignals, deloitteSignals };
+  return { ibmSignals, adpSignals, deloitteSignals, ripplingSignals };
 }
 
 export type SniffSuggestion = {
@@ -73,8 +88,12 @@ async function suggestPayslipFromText(
   const adpScore = hints.adpSignals.length;
   const ibmScore = hints.ibmSignals.length;
   const deloitteScore = hints.deloitteSignals.length;
+  const ripplingScore = hints.ripplingSignals.length;
 
-  if (adpScore > 0 && adpScore >= ibmScore && adpScore >= deloitteScore) {
+  if (ripplingScore >= 2) {
+    suggestedParserProfileId = RIPPLING_PAYSLIP_PDF_PROFILE_ID;
+    confidence = "high";
+  } else if (adpScore > 0 && adpScore >= ibmScore && adpScore >= deloitteScore) {
     suggestedParserProfileId = "adp_payslip_pdf";
     if (adpScore >= 1) {
       confidence = "high";

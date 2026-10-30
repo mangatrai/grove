@@ -300,7 +300,7 @@ Exact matches are inserted as `duplicate` status and surfaced in **Needs Review*
 - **Citi CSV/PDF** — credit card.
 - **Marcus PDF** — savings accounts.
 - **Wealthfront PDF** — investment accounts.
-- **IBM, Deloitte, ADP payslip PDFs** — if configured (see [Payslips](#payslips)).
+- **IBM, Deloitte, Rippling, ADP payslip PDFs** — if configured (see [Payslips](#payslips)).
 - **Custom CSV** — if parser profiles have been set up by the operator.
 
 Not all formats are enabled on every deployment. Disabled formats will not appear in the file picker.
@@ -382,6 +382,8 @@ Payslips are income records separate from bank transactions. They capture earnin
    - Net pay.
 5. You can edit extracted values if the PDF parser misread anything.
 6. Click **Save** to store the payslip.
+
+**Rippling payslips:** set the employer's payslip format to **Rippling (PDF)** under **Settings → Profile → Employer Setup**. Rippling PDFs are read directly from the PDF text — no AI, no API cost, and the payslip appears immediately (no background wait). The app also records where the net pay went (each bank account's last digits, amount, and ACH trace number). The parser is strict: if a payslip contains something it hasn't seen before (for example the first payslip with 401(k) or medical deductions) or the totals don't add up to the cent, the upload is rejected with the reason and nothing is saved. Report the reason so the parser can be extended; meanwhile you can enter that payslip manually.
 
 ### Payslips List
 

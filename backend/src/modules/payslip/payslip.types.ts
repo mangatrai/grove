@@ -28,6 +28,8 @@ export type ParsedPayslipSummary = {
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf" as const;
 export const DELOITTE_PAYSLIP_PDF_PROFILE_ID = "deloitte_payslip_pdf" as const;
+/** Deterministic text parser, parsed inline — deliberately NOT in LLM_PAYSLIP_PROFILE_IDS (#300 tracks an LLM fallback). */
+export const RIPPLING_PAYSLIP_PDF_PROFILE_ID = "rippling_payslip_pdf" as const;
 
 /** All payslip profiles that use async LLM extraction (queued, not inline). */
 export const LLM_PAYSLIP_PROFILE_IDS = [

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   filenameSuggestsIbmPayslipPdf,
+  filenameSuggestsRipplingPayslipPdf,
   IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID,
-  inferParserProfile
+  inferParserProfile,
+  RIPPLING_PAYSLIP_PDF_PROFILE_ID
 } from "./inferParserProfile";
 
 const boaChecking = { type: "checking", institution: "Bank of America" };
@@ -31,6 +33,31 @@ describe("filenameSuggestsIbmPayslipPdf", () => {
     expect(filenameSuggestsIbmPayslipPdf("boa_checking.pdf")).toBe(false);
     expect(filenameSuggestsIbmPayslipPdf("")).toBe(false);
     expect(filenameSuggestsIbmPayslipPdf(null)).toBe(false);
+  });
+});
+
+describe("filenameSuggestsRipplingPayslipPdf", () => {
+  it("matches the Rippling PEO download name and explicit Rippling names", () => {
+    expect(filenameSuggestsRipplingPayslipPdf("Jun 1, 2026 – Jun 15, 2026 - PEO - Acme Corp_.pdf")).toBe(true);
+    expect(filenameSuggestsRipplingPayslipPdf("rippling-paystub-june.pdf")).toBe(true);
+  });
+
+  it("rejects look-alikes and non-pdf", () => {
+    expect(filenameSuggestsRipplingPayslipPdf("people_report.pdf")).toBe(false);
+    expect(filenameSuggestsRipplingPayslipPdf("Jun 2026 - PEO - Acme Corp.csv")).toBe(false);
+    expect(filenameSuggestsRipplingPayslipPdf(null)).toBe(false);
+  });
+
+  it("wins over the generic payslip filename heuristic", () => {
+    expect(inferParserProfile(boaChecking, "rippling_payslip.pdf")).toBe(RIPPLING_PAYSLIP_PDF_PROFILE_ID);
+  });
+
+  it("follows a single Rippling employer on the payslip bucket", () => {
+    expect(
+      inferParserProfile(payslipPlaceholder, "download.pdf", {
+        employers: [{ id: "emp-1", parserProfileId: RIPPLING_PAYSLIP_PDF_PROFILE_ID }]
+      })
+    ).toBe(RIPPLING_PAYSLIP_PDF_PROFILE_ID);
   });
 });
 
