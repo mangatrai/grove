@@ -423,6 +423,11 @@ Each row shows current and YTD amounts, plus hours or rate if applicable. You ca
 
 **Matched Deposits:** The page suggests the bank deposit(s) for this payslip. When the payslip lists where the pay went (one or more accounts with amounts — Rippling always, IBM/Deloitte when the AI reads it), each deposit is matched separately: same amount to the cent, within 7 days of the pay date, preferring the account whose last digits match, then the employer's primary deposit account. Split pay (e.g. part to checking, part to savings) gets one suggestion per account. If the listed deposits don't add up to net pay, or none are listed, the page falls back to looking for one deposit equal to net pay. A deposit already linked to another payslip isn't suggested again. Click a matched deposit to view that transaction in the Transactions page.
 
+When the payslip lists its deposits, the **Bank deposit** card shows one row per deposit: the amount and account digits from the payslip, a status (**Linked**, **Suggested**, **Not found**), and the bank transaction. A badge shows **Fully linked**, or how much of net pay is still unlinked. Per row:
+- ✓ **Confirm suggestion** links the suggested transaction.
+- 🔍 **Find deposit** opens **Link bank deposit** with credits from 7 days around the pay date, limited to that row's account (tick **Show all accounts** to widen, or type to search everything). The exact-amount match is flagged.
+- 🗑 **Remove link** unlinks after a confirmation. The transaction stays in your ledger and is suggested again, so a wrong link is fixed by removing it and linking the right one.
+
 **Validation Alerts:** Warnings appear for:
 
 - Missing gross or net pay.

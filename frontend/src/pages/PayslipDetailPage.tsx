@@ -5,6 +5,7 @@ import {
   Anchor,
   Badge,
   Button,
+  Checkbox,
   Group,
   Loader,
   Modal,
@@ -17,13 +18,21 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { IconCheck, IconPencil, IconTrash, IconX } from "@tabler/icons-react";
+import { IconCheck, IconPencil, IconSearch, IconTrash, IconX } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GroveCardLoader } from "../components/GroveLoader";
 import { isContributionItem } from "../payslip/contributions";
+import {
+  accountMaskMatches,
+  confirmedOutsideLines,
+  depositLineAccountLabel,
+  MATCH_REASON_LABEL,
+  remainderBadge,
+  shiftIsoDate
+} from "../payslip/depositLines";
 import { KpiStrip } from "../payslip/KpiStrip";
 import { SavingsRateBanner } from "../payslip/SavingsRateBanner";
 import { SparklineMini } from "../payslip/SparklineMini";
@@ -38,6 +47,7 @@ import {
   computeTotalTaxRateYtd,
 } from "../payslip/savingsUtils";
 import type {
+  DepositLineMatch,
   MatchedDeposit,
   PayslipLineItemRow,
   PayslipLineItemSection,
@@ -51,16 +61,6 @@ import { formatUsd } from "../utils/format";
 export type { PayslipSnapshotDetail };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const EMPTY_LINE_ITEMS: PayslipLineItemsGrouped = {
-  earnings: [],
-  pre_tax_deductions: [],
-  post_tax_deductions: [],
-  tax_deductions: [],
-  other_deductions: [],
-  other_information: [],
-  taxable_earnings: []
-};
 
 const ADD_SECTION_OPTIONS: { value: PayslipLineItemSection; label: string }[] = [
   { value: "earnings",           label: "Earnings" },
@@ -293,6 +293,57 @@ function LineItemRow({
 }
 
 
+const DEPOSIT_STATUS: Record<DepositLineMatch["status"], { label: string; color: string }> = {
+  linked: { label: "Linked", color: "green" },
+  suggested: { label: "Suggested", color: "blue" },
+  not_found: { label: "Not found", color: "gray" }
+};
+
+function ConfirmedDepositsTable({
+  deposits,
+  anchorDate,
+  saving,
+  onRemove
+}: {
+  deposits: MatchedDeposit[];
+  anchorDate: string | null;
+  saving: boolean;
+  onRemove: (canonicalId: string) => void;
+}) {
+  return (
+    <Table withTableBorder striped highlightOnHover>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>Date</Table.Th>
+          <Table.Th>Description</Table.Th>
+          <Table.Th>Amount</Table.Th>
+          <Table.Th>Account</Table.Th>
+          <Table.Th w={50} />
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {deposits.map((d) => (
+          <Table.Tr key={d.id}>
+            <Table.Td>
+              <Anchor component={Link} to={depositWindowLink(d.accountId, anchorDate ?? d.txnDate)}>
+                {d.txnDate}
+              </Anchor>
+            </Table.Td>
+            <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
+            <Table.Td>${formatUsd(d.amount)}</Table.Td>
+            <Table.Td>{accountLabel(d)}</Table.Td>
+            <Table.Td>
+              <ActionIcon type="button" variant="subtle" color="red" size="sm" disabled={saving} onClick={() => onRemove(d.id)} title="Remove link" aria-label="Remove link">
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Table.Td>
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
+  );
+}
+
 type TxnSearchRow = {
   id: string;
   txnDate: string;
@@ -480,8 +531,13 @@ export function PayslipDetailPage() {
   const [depositSaving, setDepositSaving] = useState(false);
   const [depositError, setDepositError] = useState<string | null>(null);
 
-  // Manual search modal
+  // Remove-link confirmation (canonical transaction id)
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+
+  // Manual search modal — opened from a deposit line pre-filters to that line's account
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLine, setSearchLine] = useState<DepositLineMatch | null>(null);
+  const [searchAllAccounts, setSearchAllAccounts] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TxnSearchRow[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -505,24 +561,43 @@ export function PayslipDetailPage() {
       .catch(() => setEmployers([]));
   }, [token]);
 
-  // Debounced transaction search
+  // Debounced transaction search. Empty query → credits within ±7 days of the pay date (period end as fallback).
+  const searchAnchorDate = detail?.payDate ?? detail?.payPeriodEnd ?? null;
   useEffect(() => {
-    if (!searchQuery.trim()) { setSearchResults([]); return; }
+    const q = searchQuery.trim();
+    // Closed: keep results so the closing animation doesn't flash the empty state (opening resets them).
+    if (!searchOpen) return;
+    if (!q && !searchAnchorDate) { setSearchResults([]); return; }
+    const url = q
+      ? `/transactions?search=${encodeURIComponent(q)}&limit=20&amountMin=0.01`
+      : `/transactions?dateFrom=${shiftIsoDate(searchAnchorDate!, -7)}&dateTo=${shiftIsoDate(searchAnchorDate!, 7)}&limit=100&amountMin=0.01`;
     const timer = setTimeout(() => {
       if (!token) { setSearchLoading(false); return; }
       setSearchLoading(true);
-      void apiJson<{ transactions: TxnSearchRow[] }>(
-        `/transactions?search=${encodeURIComponent(searchQuery.trim())}&limit=20&amountMin=0.01`
-      )
+      void apiJson<{ transactions: TxnSearchRow[] }>(url)
         .then((r) => {
           const rows = r.transactions ?? [];
           setSearchResults(rows.filter((t) => t.direction === "credit"));
         })
         .catch(() => setSearchResults([]))
         .finally(() => setSearchLoading(false));
-    }, 300);
+    }, q ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [searchQuery, token]);
+  }, [searchQuery, searchOpen, searchAnchorDate, token]);
+
+  const openDepositSearch = useCallback((line: DepositLineMatch | null) => {
+    setSearchLine(line);
+    setSearchAllAccounts(!line?.accountSuffix);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchOpen(true);
+  }, []);
+
+  /** Pre-filter to the clicked line's account unless the user widens the search or types a query. */
+  const visibleSearchResults = useMemo(() => {
+    if (searchAllAccounts || searchQuery.trim() || !searchLine?.accountSuffix) return searchResults;
+    return searchResults.filter((t) => accountMaskMatches(t.accountMask, searchLine.accountSuffix));
+  }, [searchResults, searchAllAccounts, searchQuery, searchLine]);
 
   useEffect(() => {
     if (!token || !payslipId) return;
@@ -634,17 +709,13 @@ export function PayslipDetailPage() {
         setDepositError(j.message ?? "Failed to link deposit");
         return;
       }
-      const data = (await res.json()) as { snapshot: PayslipSnapshotDetail; confirmedDeposits: MatchedDeposit[] };
-      setDetail((prev) => {
-        const next: PayslipSnapshotDetail = { ...data.snapshot, confirmedDeposits: data.confirmedDeposits, suggestedDeposits: [] };
-        if (!prev) return next;
-        return { ...next, lineItems: prev.lineItems, validationWarnings: prev.validationWarnings };
-      });
+      // Deposit lines, suggestions and remainder are computed server-side — refetch rather than patch locally.
+      await load();
       setSearchOpen(false);
     } finally {
       setDepositSaving(false);
     }
-  }, [payslipId]);
+  }, [payslipId, load]);
 
   const removeDeposit = useCallback(async (canonicalId: string) => {
     if (!payslipId) return;
@@ -660,12 +731,7 @@ export function PayslipDetailPage() {
         setDepositError(j.message ?? "Failed to unlink deposit");
         return;
       }
-      const data = (await res.json()) as { snapshot: PayslipSnapshotDetail; confirmedDeposits: MatchedDeposit[] };
-      setDetail((prev) => {
-        if (!prev) return { ...data.snapshot, lineItems: EMPTY_LINE_ITEMS, validationWarnings: [], confirmedDeposits: data.confirmedDeposits, suggestedDeposits: [] };
-        return { ...data.snapshot, lineItems: prev.lineItems, validationWarnings: prev.validationWarnings, confirmedDeposits: data.confirmedDeposits, suggestedDeposits: [] };
-      });
-      if (data.confirmedDeposits.length === 0) void load();
+      await load();
     } finally {
       setDepositSaving(false);
     }
@@ -823,6 +889,9 @@ export function PayslipDetailPage() {
     : detail?.lineItems;
 
   const validationWarnings = detail?.validationWarnings ?? [];
+  const depositLines = detail?.matchMode === "lines" ? (detail.depositLines ?? []) : [];
+  const otherLinked = confirmedOutsideLines(detail?.confirmedDeposits ?? [], depositLines);
+  const depositBadge = depositLines.length > 0 ? remainderBadge(detail?.linkedTotal ?? 0, detail?.remainder) : null;
 
   // Prior values from the person payslips list (list endpoint has LAG results)
   const priorValues = useMemo(
@@ -898,7 +967,7 @@ export function PayslipDetailPage() {
             type="button"
             size="xs"
             variant="default"
-            onClick={() => { setSearchQuery(""); setSearchResults([]); setSearchOpen(true); }}
+            onClick={() => openDepositSearch(null)}
             disabled={loading || !detail}
           >
             Match Deposit
@@ -1343,9 +1412,12 @@ export function PayslipDetailPage() {
             </Stack>
           </div>
 
-          {/* Bank deposit card */}
+          {/* Bank deposit card — one row per deposit printed on the payslip (#301); net-pay fallback otherwise */}
           <Paper withBorder p="md">
-            <Title order={5} m={0} mb="xs">Bank deposit</Title>
+            <Group justify="space-between" mb="xs">
+              <Title order={5} m={0}>Bank deposit</Title>
+              {depositBadge ? <Badge color={depositBadge.color} variant="light" size="sm">{depositBadge.label}</Badge> : null}
+            </Group>
 
             {depositError ? (
               <Alert color="red" mb="sm" withCloseButton onClose={() => setDepositError(null)}>
@@ -1353,108 +1425,181 @@ export function PayslipDetailPage() {
               </Alert>
             ) : null}
 
-            {(detail.confirmedDeposits?.length ?? 0) > 0 ? (
+            {depositLines.length > 0 ? (
               <Stack gap="xs">
-                <Group gap="xs" mb={4}>
-                  <Badge color="green" variant="light" size="sm">Confirmed</Badge>
-                  {(detail.confirmedDeposits?.length ?? 0) > 1 ? (
-                    <Text size="xs" c="dimmed">
-                      Total: ${formatUsd((detail.confirmedDeposits ?? []).reduce((s, d) => s + d.amount, 0))}
-                      {detail.netPayCurrent != null ? ` of $${formatUsd(detail.netPayCurrent)} net pay` : ""}
-                    </Text>
-                  ) : null}
-                </Group>
-                <Table withTableBorder striped highlightOnHover>
+                <Table withTableBorder striped>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th>Date</Table.Th>
-                      <Table.Th>Description</Table.Th>
-                      <Table.Th>Amount</Table.Th>
-                      <Table.Th>Account</Table.Th>
+                      <Table.Th>Payslip deposit</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      <Table.Th>Bank transaction</Table.Th>
                       <Table.Th w={80} />
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {(detail.confirmedDeposits ?? []).map((d) => (
-                      <Table.Tr key={d.id}>
-                        <Table.Td>
-                          <Anchor component={Link} to={depositWindowLink(d.accountId, detail.payDate ?? detail.payPeriodEnd ?? d.txnDate)}>
-                            {d.txnDate}
-                          </Anchor>
-                        </Table.Td>
-                        <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
-                        <Table.Td>${formatUsd(d.amount)}</Table.Td>
-                        <Table.Td>{accountLabel(d)}</Table.Td>
-                        <Table.Td>
-                          <Button type="button" size="xs" color="gray" variant="subtle" disabled={depositSaving} onClick={() => void removeDeposit(d.id)}>
-                            Remove
-                          </Button>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
+                    {depositLines.map((line, idx) => {
+                      const top = line.candidates[0] ?? null;
+                      const txn = line.linked ?? top;
+                      return (
+                        <Table.Tr key={`${idx}-${line.accountSuffix ?? "none"}-${line.amount}`} data-testid="deposit-line">
+                          <Table.Td>
+                            <Text size="sm" fw={500}>${formatUsd(line.amount)}</Text>
+                            <Text size="xs" c="dimmed">{depositLineAccountLabel(line)}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge size="sm" variant="light" color={DEPOSIT_STATUS[line.status].color}>
+                              {DEPOSIT_STATUS[line.status].label}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            {txn ? (
+                              <>
+                                <Text size="sm">
+                                  <Anchor component={Link} to={depositWindowLink(txn.accountId, detail.payDate ?? detail.payPeriodEnd ?? txn.txnDate)}>
+                                    {txn.txnDate}
+                                  </Anchor>
+                                  {" · "}{accountLabel(txn)}
+                                </Text>
+                                {!line.linked && top ? (
+                                  <Text size="xs" c="dimmed">
+                                    {MATCH_REASON_LABEL[top.matchReason]}
+                                    {" · "}{top.dateDelta === 0 ? "same day" : `${top.dateDelta}d off`}
+                                    {line.candidates.length > 1 ? ` · ${line.candidates.length - 1} more candidate${line.candidates.length > 2 ? "s" : ""}` : ""}
+                                  </Text>
+                                ) : null}
+                              </>
+                            ) : (
+                              <Text size="sm" c="dimmed">—</Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4} wrap="nowrap">
+                              {line.linked ? (
+                                <ActionIcon type="button" variant="subtle" color="red" size="sm" disabled={depositSaving} onClick={() => setRemoveTarget(line.linked!.id)} title="Remove link" aria-label="Remove link">
+                                  <IconTrash size={14} />
+                                </ActionIcon>
+                              ) : null}
+                              {!line.linked && top ? (
+                                <ActionIcon type="button" variant="subtle" color="green" size="sm" disabled={depositSaving} onClick={() => void confirmDeposit(top.id)} title="Confirm suggestion" aria-label="Confirm suggestion">
+                                  <IconCheck size={14} />
+                                </ActionIcon>
+                              ) : null}
+                              {!line.linked ? (
+                                <ActionIcon type="button" variant="subtle" size="sm" disabled={depositSaving} onClick={() => openDepositSearch(line)} title="Find deposit" aria-label="Find deposit">
+                                  <IconSearch size={14} />
+                                </ActionIcon>
+                              ) : null}
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
                   </Table.Tbody>
                 </Table>
-              </Stack>
-            ) : null}
 
-            {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) > 0 ? (
-              <Stack gap="xs">
-                <Text size="xs" c="dimmed">Suggestions — not confirmed yet</Text>
-                <Table withTableBorder striped highlightOnHover>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Date</Table.Th>
-                      <Table.Th>Description</Table.Th>
-                      <Table.Th>Amount</Table.Th>
-                      <Table.Th>Account</Table.Th>
-                      <Table.Th>Match</Table.Th>
-                      <Table.Th w={90} />
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {(detail.suggestedDeposits ?? []).map((d) => (
-                      <Table.Tr key={d.id}>
-                        <Table.Td>
-                          <Anchor component={Link} to={depositWindowLink(d.accountId, detail.payDate ?? detail.payPeriodEnd ?? d.txnDate)}>
-                            {d.txnDate}
-                          </Anchor>
-                        </Table.Td>
-                        <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
-                        <Table.Td>${formatUsd(d.amount)}</Table.Td>
-                        <Table.Td>{accountLabel(d)}</Table.Td>
-                        <Table.Td>
-                          <Text size="xs" c="dimmed">
-                            {d.dateDelta === 0 ? "Same day" : `${d.dateDelta}d off`}
-                            {d.amountDelta > 0 ? `, $${formatUsd(d.amountDelta)} diff` : ""}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Button type="button" size="xs" disabled={depositSaving} onClick={() => void confirmDeposit(d.id)}>
-                            Confirm
-                          </Button>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </Stack>
-            ) : null}
+                {otherLinked.length > 0 ? (
+                  <>
+                    <Text size="xs" c="dimmed">Also linked (not on a payslip deposit line)</Text>
+                    <ConfirmedDepositsTable deposits={otherLinked} anchorDate={detail.payDate ?? detail.payPeriodEnd} saving={depositSaving} onRemove={setRemoveTarget} />
+                  </>
+                ) : null}
 
-            {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) === 0 ? (
-              <Text c="dimmed" size="sm" mt="xs">
-                No matching deposit found.{" "}
-                {detail.payDate
-                  ? `Searched near ${detail.payDate}.`
-                  : detail.payPeriodEnd
-                    ? `Searched near period end ${detail.payPeriodEnd}.`
-                    : "Add a pay date to enable automatic suggestions."}{" "}
-                Use "Match Deposit" above to link manually.
-              </Text>
-            ) : null}
+                <Text size="xs" c="dimmed">
+                  Linked ${formatUsd(detail.linkedTotal ?? 0)}
+                  {detail.netPayCurrent != null ? ` of $${formatUsd(detail.netPayCurrent)} net pay` : ""}
+                </Text>
+              </Stack>
+            ) : (
+              <>
+                {(detail.confirmedDeposits?.length ?? 0) > 0 ? (
+                  <Stack gap="xs">
+                    <Group gap="xs" mb={4}>
+                      <Badge color="green" variant="light" size="sm">Confirmed</Badge>
+                      {(detail.confirmedDeposits?.length ?? 0) > 1 ? (
+                        <Text size="xs" c="dimmed">
+                          Total: ${formatUsd((detail.confirmedDeposits ?? []).reduce((s, d) => s + d.amount, 0))}
+                          {detail.netPayCurrent != null ? ` of $${formatUsd(detail.netPayCurrent)} net pay` : ""}
+                        </Text>
+                      ) : null}
+                    </Group>
+                    <ConfirmedDepositsTable deposits={detail.confirmedDeposits ?? []} anchorDate={detail.payDate ?? detail.payPeriodEnd} saving={depositSaving} onRemove={setRemoveTarget} />
+                  </Stack>
+                ) : null}
+
+                {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) > 0 ? (
+                  <Stack gap="xs">
+                    <Text size="xs" c="dimmed">Suggestions — not confirmed yet</Text>
+                    <Table withTableBorder striped highlightOnHover>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Date</Table.Th>
+                          <Table.Th>Description</Table.Th>
+                          <Table.Th>Amount</Table.Th>
+                          <Table.Th>Account</Table.Th>
+                          <Table.Th>Match</Table.Th>
+                          <Table.Th w={50} />
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {(detail.suggestedDeposits ?? []).map((d) => (
+                          <Table.Tr key={d.id}>
+                            <Table.Td>
+                              <Anchor component={Link} to={depositWindowLink(d.accountId, detail.payDate ?? detail.payPeriodEnd ?? d.txnDate)}>
+                                {d.txnDate}
+                              </Anchor>
+                            </Table.Td>
+                            <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
+                            <Table.Td>${formatUsd(d.amount)}</Table.Td>
+                            <Table.Td>{accountLabel(d)}</Table.Td>
+                            <Table.Td>
+                              <Text size="xs" c="dimmed">
+                                {d.dateDelta === 0 ? "Same day" : `${d.dateDelta}d off`}
+                                {d.amountDelta > 0 ? `, $${formatUsd(d.amountDelta)} diff` : ""}
+                              </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <ActionIcon type="button" variant="subtle" color="green" size="sm" disabled={depositSaving} onClick={() => void confirmDeposit(d.id)} title="Confirm suggestion" aria-label="Confirm suggestion">
+                                <IconCheck size={14} />
+                              </ActionIcon>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </Stack>
+                ) : null}
+
+                {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) === 0 ? (
+                  <Text c="dimmed" size="sm" mt="xs">
+                    No matching deposit found.{" "}
+                    {detail.payDate
+                      ? `Searched near ${detail.payDate}.`
+                      : detail.payPeriodEnd
+                        ? `Searched near period end ${detail.payPeriodEnd}.`
+                        : "Add a pay date to enable automatic suggestions."}{" "}
+                    Use "Match Deposit" above to link manually.
+                  </Text>
+                ) : null}
+              </>
+            )}
           </Paper>
 
         </>
       ) : null}
+
+      <ConfirmDialog
+        opened={removeTarget != null}
+        title="Remove deposit link"
+        message="Unlink this bank transaction from the payslip? The transaction stays in your ledger and can be linked again."
+        confirmLabel="Remove"
+        danger
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          const id = removeTarget;
+          setRemoveTarget(null);
+          if (id) void removeDeposit(id);
+        }}
+      />
 
       <ConfirmDialog
         opened={deleteConfirm}
@@ -1467,6 +1612,21 @@ export function PayslipDetailPage() {
       />
 
       <Modal opened={searchOpen} onClose={() => setSearchOpen(false)} title="Link bank deposit" size="xl">
+        {searchLine ? (
+          <Group justify="space-between" mb="xs">
+            <Text size="sm">
+              For the <strong>${formatUsd(searchLine.amount)}</strong> deposit · {depositLineAccountLabel(searchLine)}
+            </Text>
+            {searchLine.accountSuffix ? (
+              <Checkbox
+                size="xs"
+                label="Show all accounts"
+                checked={searchAllAccounts}
+                onChange={(e) => setSearchAllAccounts(e.currentTarget.checked)}
+              />
+            ) : null}
+          </Group>
+        ) : null}
         <TextInput
           placeholder="Search by description, merchant, or amount…"
           value={searchQuery}
@@ -1476,7 +1636,7 @@ export function PayslipDetailPage() {
         />
         {searchLoading ? (
           <Group justify="center" py="md"><Loader size="sm" /></Group>
-        ) : searchResults.length > 0 ? (
+        ) : visibleSearchResults.length > 0 ? (
           <Table withTableBorder striped highlightOnHover>
             <Table.Thead>
               <Table.Tr>
@@ -1488,11 +1648,16 @@ export function PayslipDetailPage() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {searchResults.map((t) => (
+              {visibleSearchResults.map((t) => (
                 <Table.Tr key={t.id}>
                   <Table.Td>{t.txnDate}</Table.Td>
                   <Table.Td>{t.merchant ?? t.memo ?? "—"}</Table.Td>
-                  <Table.Td>${formatUsd(t.amount)}</Table.Td>
+                  <Table.Td>
+                    ${formatUsd(Number(t.amount))}
+                    {searchLine && Math.abs(Number(t.amount) - searchLine.amount) < 0.005 ? (
+                      <Badge ml={6} size="xs" variant="light" color="green">Exact amount</Badge>
+                    ) : null}
+                  </Table.Td>
                   <Table.Td>{t.accountMask ? `${t.institution} ···${t.accountMask}` : t.institution}</Table.Td>
                   <Table.Td>
                     <Button type="button" size="xs" disabled={depositSaving} onClick={() => void confirmDeposit(t.id)}>
@@ -1505,6 +1670,10 @@ export function PayslipDetailPage() {
           </Table>
         ) : searchQuery.trim() ? (
           <Text c="dimmed" size="sm">{`No results for "${searchQuery}"`}</Text>
+        ) : searchAnchorDate ? (
+          <Text c="dimmed" size="sm">
+            {`No credits within 7 days of ${searchAnchorDate}${searchLine?.accountSuffix && !searchAllAccounts ? " in this account" : ""}. Type to search all transactions.`}
+          </Text>
         ) : (
           <Text c="dimmed" size="sm">Type to search transactions. Only credit transactions are shown.</Text>
         )}

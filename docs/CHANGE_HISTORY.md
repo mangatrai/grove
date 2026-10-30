@@ -14,6 +14,26 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## UX — #301 (step 6): Bank deposit card shows one row per payslip deposit (2026-10-30)
+
+**What changed:** `PayslipDetailPage` renders `depositLines` (lines mode) as one row per printed deposit:
+amount + account digits, status badge (Linked / Suggested / Not found), the linked or best-candidate
+transaction with its match reason, and icon actions — confirm suggestion, find deposit, remove link
+(through `ConfirmDialog`; it previously removed without confirming). A header badge shows
+"Fully linked" or the unlinked/over amount. Confirmed links that fill no line are listed separately.
+"Link bank deposit" now lists credits within ±7 days of the pay date before any typing; opened from a
+row it pre-filters to accounts whose mask matches that row's digits ("Show all accounts" widens) and
+flags the exact-amount match. Net-pay-mode payslips keep the previous card, with icon buttons.
+After confirm/remove the page refetches, because per-line state is computed server-side. Helpers in
+`payslip/depositLines.ts` (Vitest). New dev seed `dev_0010` (household-scoped split-deposit payslip +
+two linked credits) backs Playwright `e2e/payslips.spec.ts`.
+
+**Why:** With split pay, the old card hid every suggestion once one deposit was confirmed, so the second
+deposit could only be linked by manual search. The per-row view also makes a wrong match visible and
+fixable (remove → relink), which step 5's auto-link relies on. Done before step 5 at the owner's request.
+
+GitHub: https://github.com/mangatrai/grove/issues/301
+
 ## CR — #301 (steps 3–4): Split-deposit matching — one suggestion per deposit line (2026-10-30)
 
 **What changed:** New reader `payslip-deposit-lines.ts` turns `payment_summary_json` into deposit lines

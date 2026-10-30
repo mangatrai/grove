@@ -35,6 +35,21 @@ export type MatchedDeposit = {
   amountDelta: number;
 };
 
+/** Why a deposit candidate ranks where it does (#301): printed account digits > employer primary account > other. */
+export type DepositMatchReason = "account_mask" | "primary_account" | "other";
+
+export type DepositCandidate = MatchedDeposit & { matchReason: DepositMatchReason };
+
+/** One deposit printed on the payslip, with its match state — GET /payslips/:id `depositLines` (lines mode). */
+export type DepositLineMatch = {
+  accountSuffix: string | null;
+  amount: number;
+  trace: string | null;
+  status: "linked" | "suggested" | "not_found";
+  linked: MatchedDeposit | null;
+  candidates: DepositCandidate[];
+};
+
 export type PayslipLineItemSection =
   | "earnings"
   | "pre_tax_deductions"
@@ -103,8 +118,13 @@ export type PayslipSnapshotDetail = {
   createdAt: string;
   /** Explicitly confirmed deposit transactions from payslip_deposit_match join table (F-5). */
   confirmedDeposits: MatchedDeposit[];
-  /** Dynamic search candidates — only populated when confirmedDeposits is empty (F-5). */
+  /** Best candidate per unlinked deposit line (lines mode), or net-pay candidates while nothing is confirmed. */
   suggestedDeposits: MatchedDeposit[];
+  /** `lines` = matched per printed deposit line; `net_pay` = one deposit vs net pay (fallback). Detail only. */
+  matchMode?: "lines" | "net_pay";
+  depositLines?: DepositLineMatch[];
+  linkedTotal?: number;
+  remainder?: number | null;
   /** Individual line items grouped by section — only present on GET /payslips/:id */
   lineItems?: PayslipLineItemsGrouped;
   /** Cross-validation warnings between line item sums and summary columns (CR-117) */
